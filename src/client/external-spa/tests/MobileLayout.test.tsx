@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { FluentProvider, makeStyles, tokens, webLightTheme, buttonClassNames } from '@fluentui/react-components';
 import { DocumentRegular } from '@fluentui/react-icons';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const h = vi.hoisted(() => ({ getExternalUserContext: vi.fn() }));
 
@@ -32,6 +34,8 @@ import {
   TOUCH_TARGET,
   useIsPhoneWidth,
 } from '../src/components/phoneLayout';
+import { createDOMRenderer, makeStaticStyles as coreMakeStaticStyles } from '@griffel/core';
+import { AppHeader, PARTNER_PORTAL_TITLE } from '../src/components/AppHeader';
 import { PHONE_OVERFLOW_ACTIONS, RECORD_TEMPLATES } from '../src/components/record/recordTemplates';
 import { RECORD_SECTION_LABELS, type RecordSectionId } from '../src/components/record/recordTemplate.types';
 import { RecordTemplateModal } from '../src/components/record/RecordTemplateModal';
@@ -159,6 +163,33 @@ describe('phone breakpoint (FR-32)', () => {
     expect(PHONE_TOUCH_TARGET_CSS).toContain('min-width: 44px');
   });
 
+  // Griffel's `makeStaticStyles` hook is a no-op when NODE_ENV is 'test', so the rule cannot be observed by rendering the
+  // hook. These two tests cover it instead: the CSS compiles through Griffel into a real stylesheet, and the source pins
+  // prove the hook is built from that CSS and mounted by the app shell.
+  it('the touch-target CSS compiles through Griffel into a stylesheet rule inside the phone query', () => {
+    const renderer = createDOMRenderer(document);
+    const stylesBefore = document.querySelectorAll('style').length;
+    coreMakeStaticStyles(PHONE_TOUCH_TARGET_CSS)({ renderer });
+    const inserted = [...document.querySelectorAll('style')].slice(stylesBefore);
+    const cssText = inserted
+      .flatMap(el => [...((el as HTMLStyleElement).sheet?.cssRules ?? [])].map(rule => rule.cssText))
+      .join('\n');
+    expect(cssText).toMatch(/@media \(max-width: 480px\)/);
+    expect(cssText).toContain(`.${buttonClassNames.root}.${buttonClassNames.root}`);
+    expect(cssText).toMatch(/min-height:\s*44px/);
+    inserted.forEach(el => el.remove());
+  });
+
+  it('the hook is built from that CSS and the app shell mounts it (source pins)', () => {
+    const layout = readFileSync(resolve(__dirname, '..', 'src/components/phoneLayout.ts'), 'utf8');
+    expect(layout).toMatch(/export const usePhoneTouchTargetStyles = makeStaticStyles\(TOUCH_TARGET_CSS\);/);
+    expect(layout).toMatch(/export const PHONE_TOUCH_TARGET_CSS = TOUCH_TARGET_CSS;/);
+    const app = readFileSync(resolve(__dirname, '..', 'src/App.tsx'), 'utf8');
+    expect(app).toMatch(/import\s*\{\s*usePhoneTouchTargetStyles\s*\}\s*from\s*'\.\/components\/phoneLayout'/);
+    const shell = app.slice(app.indexOf('const AppShell'));
+    expect(shell).toMatch(/^\s*usePhoneTouchTargetStyles\(\);/m);
+  });
+
   it('useIsPhoneWidth follows the viewport', () => {
     const viewport = stubViewport(false);
     let seen: boolean[] = [];
@@ -260,6 +291,26 @@ describe('workspace shell at phone width (FR-32)', () => {
     const main = container.querySelector('main')!;
     const hide = atomicClassesOf({ [PHONE_MEDIA]: { display: 'none' } });
     expect(hide.some(c => main.classList.contains(c))).toBe(false);
+  });
+
+  it('app header: at phone width the account button is icon-only and keeps the name in its aria-label', () => {
+    const longName = 'a.very.long.partner.address@outside-counsel.example.test';
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <AppHeader
+          isDark={false}
+          title={PARTNER_PORTAL_TITLE}
+          portalUser={{ userName: longName, firstName: '', lastName: '', displayName: longName }}
+        />
+      </FluentProvider>
+    );
+    const account = screen.getByRole('button', { name: `${longName} — account menu` });
+    const name = within(account).getByTestId('account-name');
+    expect(name.textContent).toBe(longName);
+    expectPhoneRule(name, { display: 'none' });
+    // Negative: the name is hidden only inside the phone query, never unconditionally.
+    const always = atomicClassesOf({ display: 'none' });
+    expect(always.some(c => name.classList.contains(c))).toBe(false);
   });
 
   it('tab strip: tabs are 44px high and the close control is an inline 44px target', () => {

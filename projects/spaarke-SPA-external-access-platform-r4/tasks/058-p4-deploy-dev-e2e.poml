@@ -122,7 +122,7 @@
     <criterion testable="true">No evidence in the record carries a token, email, UPN, tenant or object id.</criterion>
   </acceptance-criteria>
 
-  <notes>NFR-06; spec Success Criteria 9. Phase-deploy convention: 080 and 090 follow; the next phase's deploy is wrap-up only.</notes>
+  <notes>NFR-06; spec Success Criteria 9. Phase-deploy convention: 080 and 090 follow; the next phase's deploy is wrap-up only. From task 048 (2026-11-28): the 375px check must also measure the real record sections (Documents, Messages, Invoices, Events, Information: long unbreakable values) and the widget tab bodies, run high-contrast and the Teams dark theme, and open Delete, Change status and History from More actions (focus stays in the dialog). See notes/task-048-notes.md, Known limits.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

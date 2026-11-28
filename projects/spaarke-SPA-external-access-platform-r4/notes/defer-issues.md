@@ -545,3 +545,11 @@ The fix would change principal precedence, which is escalation trigger 3 for tas
 **Why it matters.** NFR-04: external-plane logs carry no tenant, oid, UPN, email or token.
 
 **Fix.** Log the contact id, decision/deny code and correlation id only (or a hash); check no alert depends on the field. uac-r2 owns the binder. Effort: two to three hours plus a log-assertion test. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3315 (board Type=Bug).
+
+## D-48 — External SPA: local mock mode still redirects to CIAM sign-in when a grid widget loads (https://github.com/spaarke-dev/spaarke/issues/3331)
+
+**What.** With `VITE_DEV_MOCK=true`, a workspace tab with a shared grid widget sends the browser to the real CIAM sign-in. `src/services/gridDataverseClient.ts` (:54, :61) takes its token from `acquireActiveBffToken()`, which ignores `isDevMockEnabled()`; `me-client.ts` (:216) and `bff-client.ts` (:63) honour it. Found by task 048, whose 375px check had to use a throwaway harness.
+
+**Why it matters.** A workspace with a grid widget cannot be used locally in mock mode, so layout and UI checks need a live sign-in or a harness.
+
+**Fix.** In dev-mock mode serve grid reads from mock rows (as `me-client.ts` serves mock personas) or skip the token call. Dev-only; a built bundle has the switch off. Effort: two to three hours plus a test. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3331 (board Type=Bug).

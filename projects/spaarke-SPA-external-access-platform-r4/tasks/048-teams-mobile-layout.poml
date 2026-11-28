@@ -4,7 +4,7 @@
     <title>Teams mobile layout at phone width (≤ 480px) (FR-32, #2466)</title>
     <phase>4 Access, sign-in, carry-overs, Teams</phase>
     <gate>after 040</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx/.ts across the shell and the record template (tags frontend, fluent-ui)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -127,7 +127,7 @@
     <criterion testable="true">Test scope: cover the breakpoint behaviour and the overflow named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-32; issue #2466; NFR-01, NFR-03. Verification evidence (screenshots or the Teams mobile check) goes in the task notes; task 058 repeats it on dev.</notes>
+  <notes>Spec FR-32; issue #2466; NFR-01, NFR-03. Verification evidence (screenshots or the Teams mobile check) goes in the task notes; task 058 repeats it on dev. Done 2026-11-28: notes/task-048-notes.md; found in passing D-48 #3331. rework: 2 review fixes task 048</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
