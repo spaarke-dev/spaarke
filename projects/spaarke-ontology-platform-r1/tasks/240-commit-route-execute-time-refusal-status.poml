@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="240" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Decision commit route: a step refused cleanly at execute time answers the preflight status and frees the review id; a preflight fault at execute time is a clean 503</title>
+    <phase>Decision commit route hardening (found in the intake-pipeline-r1 task 017 review)</phase>
+    <gate>blocked until intake-pipeline-r1 task 017 is merged to master (same file, DecisionCommitService.cs)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF .cs change to the single decision commit route (D-17) and the executor base used by every action.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two scoped changes with file:line maps and stated outcomes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches DecisionCommitService.cs, DecisionActionExecutors.cs (base class only) and their tests.</parallel-reason>
+    <deps>intake-pipeline-r1 017 merged to master</deps>
+    <tags>bff-api, api, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+  <prompt>D-238 (2026-11-28). The intake 017 review found two pre-existing, executor-wide defects in the commit route. Fix them for every action.</prompt>
+  <role>Implementer agent, worktree off origin/master after intake 017 merged, PR to master.</role>
+  <goal>(1) When an action's preflight passes but its execute-time re-check refuses (for example NotAuthorized, InvalidState, Disabled) with nothing possibly written and no earlier step landed, the route answers what the preflight would have answered (403 Forbidden, 422 Refused, 503 Unavailable) and the review id is free for a fresh attempt, instead of a resumable Failed with 500. (2) When an action's preflight throws during execute (before any write), the outcome is a clean 503 with nothing claimed as possibly written, and the review id is not used up; today it ends "may have been applied", not resumable, and a retry gets 409.</goal>
+  <context><background>
+Paths at the intake 017 review head (re-verify line numbers on master): DecisionCommitService ExecuteAsync returns a non-Done result (~1506); Failure() (~2610-2645) makes Status Failed and Resumable true when nothing landed; DecisionResultMapper maps Failed to 500 (~316-319); IsUnfinished needs a landed write (~446-447); the review ledger keeps the Failed entry for OutcomeTtl (~868). DecisionExecutorBase.ExecuteAsync (~376-381) re-runs PreflightAsync outside its try, so a throwing preflight escapes to DecisionCommitService ~1508-1511. Executors that reach this: every executor (the base re-runs preflight); intake's ApproveIntakeExecutor/RejectIntakeExecutor throw IntakeApprovalUnavailableException from preflight on a read fault.
+  </background></context>
+  <constraints>
+    <constraint source="D-17">One commit route, record last; no Decision Record and no Signal close on any refused or failed path.</constraint>
+    <constraint source="CLAUDE.md 11">Modify existing surface only; no new service, endpoint or reason code unless an existing one cannot carry the answer (state why in the PR).</constraint>
+    <constraint source="project gotcha 2026-11-24">Run dotnet test with --filter "FullyQualifiedName~Signals" (includes the contract baselines) and update baselines in the same PR if any change; run tests/Spaarke.ArchTests in full.</constraint>
+    <constraint source="process">Do not edit current-task.md, TASK-INDEX.md, POMLs or defer-issues.md. No git stash. No sub-agents. Never run the unfiltered Sprk.Bff.Api.Tests.</constraint>
+    <constraint source="public repo">No environment ids in code, tests, commits or PR.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step order="1">Write failing route-level tests (DecisionCommitService through the mapper): execute-time NotAuthorized after a passing preflight → 403 and the same review id then succeeds when the condition allows; execute-time Disabled → 503; execute-time InvalidState → 422; a preflight throw at execute → 503, not possibly written, review id reusable.</step>
+    <step order="2">Fix the base (preflight inside the try; a fault before any write is a clean failure) and the commit route (clean refusal with nothing landed and nothing possibly written → preflight-shaped status, ledger entry released).</step>
+    <step order="3">Must-not-fire: a refusal after an earlier step landed, or with a possibly-written step, keeps today's resumable Failed / 500 behaviour (existing tests stay green).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">The new route-level tests fail before and pass after; existing DecisionCommitService and executor tests pass; the Signals filter and ArchTests pass.</criterion>
+    <criterion testable="true">Negative: no Decision Record written and no Signal state change on any of the new paths; a partially landed review still resumes exactly as before.</criterion>
+  </acceptance-criteria>
+  <outputs><output type="code">PR to master; dev BFF deploy goes through uac-r2</output></outputs>
+</task>
