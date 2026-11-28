@@ -68,7 +68,7 @@ Can a Cowork skill plus an attorney's profile draft a usable patent section, and
 
 1. **R4 row first.** Before the owner uploads the package, this row goes to COPILOT-PLATFORM-COORDINATION (Issue #3006) and to `../README.md` section 2 (the "Cowork patent-drafting spike assets" row):
 
-   > **R4 row (task 025):** Artifact: Cowork plugin `spaarke-legal-pat-cowork-test` (app id `55352aad-2e90-41b5-a571-1d0e783ed9fc`, manifest 1.30, version 1.0.0), one skill `spaarke-test-patent-claims`, no action and no connector of its own (uses the tenant connector "Spaarke MCP"). Owner project: specialist-legal-agents-r1. Route: Microsoft 365 admin center, Agents, Tools, Registry (first upload of a fresh id; never Cowork, Customize, Plugins first). Scope: the owner and `demo@` only (R7). Removal plan: the owner removes it from the Registry after task 025 records its results; task 031 confirms and coordination closes the row. Removal date: at task 031 (no later than the end of Phase 0). Sent to coordination: **2026-11-28** (awaiting its PLANNED record).
+   > **R4 row (task 025):** Artifact: Cowork plugin `spaarke-legal-pat-cowork-test` (app id `55352aad-2e90-41b5-a571-1d0e783ed9fc`, manifest 1.30, version 1.0.0), one skill `spaarke-test-patent-claims`, no action and no connector of its own (uses the tenant connector "Spaarke MCP"). Owner project: specialist-legal-agents-r1. Route: Microsoft 365 admin center, Agents, Tools, Registry (first upload of a fresh id; never Cowork, Customize, Plugins first). Scope: the owner and `demo@` only (R7). Removal plan: the owner removes it from the Registry after task 025 records its results; task 031 confirms and coordination closes the row. Removal date: at task 031 (no later than the end of Phase 0). Sent to coordination: **2026-11-28**; recorded PLANNED as row PAT-cw (coordination commit `3314d3c510`), so the owner may upload. Tell coordination when it is installed and when it is removed.
 
 2. **Upload and install** (owner's clicks): the steps in "Spike package" below. Never upload a changed zip over it; a fix goes on a fresh app id with a new R4 row.
 3. **Profile source.** The dev BFF serves `spike_get_profile` with both patent profiles keyed (tasks 011 and 015; live since 2026-11-26, now in `b84fa5f061`), so the route is `tool`. "Spaarke MCP" must be switched on for the account (Copilot, Settings, Sources, Spaarke MCP, Connected): on 2026-11-28 Cowork reached no Spaarke tool until it was. The attached-file route stays only as a fallback if the tool cannot be called; record the route per run.
@@ -83,7 +83,7 @@ Can a Cowork skill plus an attorney's profile draft a usable patent section, and
 
 **Owner steps** (each one is yours; a Claude session clicks none of them):
 
-1. Wait until the session says the R4 row has been sent.
+1. R4 row: recorded PLANNED 2026-11-28 (PAT-cw). Done.
 2. Microsoft 365 admin center, **Agents**, **Tools**, **Registry**: upload `phase0patentsspaarke-legal-pat-cowork-test-1.0.0.zip` as a new item. **Never upload it through Cowork, Customize, Plugins first**: the admin center then refuses that app id for good.
 3. Install it for **Specific users**: the owner and `demo@` only, never All users. If only All users is offered, stop and tell the session.
 4. Wait for it to appear (10 to 30 minutes last time), then each of the two users switches it on once in **Cowork, Customize**, and checks "Spaarke MCP" is switched on and connected.
