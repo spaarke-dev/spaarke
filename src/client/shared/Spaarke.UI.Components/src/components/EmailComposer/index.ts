@@ -48,9 +48,10 @@ export type { ISendFailureDescription } from './describeSendFailure';
 export {
   createXrmEmailComposeHandlers,
   resolveCurrentUserEmail,
+  resolveRecipientPicks,
   EMAIL_RECORD_LOOKUP_CATALOG,
 } from './createXrmEmailComposeHandlers';
-export type { XrmEmailComposeHandlers } from './createXrmEmailComposeHandlers';
+export type { XrmEmailComposeHandlers, IRecipientPick, RetrieveRecipientRecord } from './createXrmEmailComposeHandlers';
 // The whole Xrm-backed host wiring for an Email surface mount (adapters + compose handlers + From + org URL), so
 // the widget, the LegalWorkspace section and the code page cannot drift (#2973).
 export { useXrmEmailHostProps } from './useXrmEmailHostProps';
@@ -149,6 +150,8 @@ export type {
   IEmailAiDraftResult,
   IWizardContext,
   IRecipient,
+  IRecipientLookupResult,
+  IRecipientLookupSkip,
   ValidationErrorCode,
   IValidationError,
   IValidationResult,

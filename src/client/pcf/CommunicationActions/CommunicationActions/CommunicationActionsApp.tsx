@@ -46,11 +46,12 @@ import {
   type IAttachmentItem,
   type IRecordLookupTarget,
   type IPickedRecord,
-  type IRecipient,
+  type IRecipientLookupResult,
   type ICommunicationAssociation,
   searchUsersAndContacts,
   createXrmDataService,
   createXrmEmailComposeHandlers,
+  resolveRecipientPicks,
   resolveInitialInvoiceRecord,
   cleanGuid,
   getXrm,
@@ -464,7 +465,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // OOB people picker over contact + systemuser; the picked record's primary email is resolved
   // (contact → emailaddress1, user → internalemailaddress) into a chip. Multi-select supported.
   const handleLookupRecipients = React.useCallback(
-    async (_field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
+    async (_field: 'to' | 'cc' | 'bcc'): Promise<IRecipientLookupResult | null> => {
       // Shared cross-frame walker (task 081 / C-8).
       const xrm = getXrm('lookupObjects');
       if (!xrm?.Utility?.lookupObjects) return null;
@@ -472,30 +473,13 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         entityTypes: ['contact', 'systemuser'],
         allowMultiSelect: true,
       });
-      if (!results || results.length === 0) return null;
-      const EMAIL_FIELD: Record<string, string> = { contact: 'emailaddress1', systemuser: 'internalemailaddress' };
-      const recipients: IRecipient[] = [];
-      for (const p of results) {
-        const field = EMAIL_FIELD[p.entityType];
-        if (!field) continue;
-        const id = cleanGuid(String(p.id));
-        try {
-          const rec = await context.webAPI.retrieveRecord(p.entityType, id, `?$select=${field}`);
-          const email = rec?.[field];
-          if (typeof email === 'string' && email.includes('@')) {
-            recipients.push({
-              email,
-              displayName: p.name,
-              resolved: true,
-              sourceId: id,
-              entityType: p.entityType as 'contact' | 'systemuser',
-            });
-          }
-        } catch (err) {
-          console.warn('[CommunicationActions] recipient email resolve failed:', err);
-        }
-      }
-      return recipients.length > 0 ? recipients : null;
+      // The shared resolver (also behind `createXrmEmailComposeHandlers`): picks that cannot become an address are
+      // reported on the result's `skipped` list, which the composer shows, instead of being dropped silently.
+      return resolveRecipientPicks(
+        results,
+        (entityType, id, options) => context.webAPI.retrieveRecord(entityType, id, options),
+        '[CommunicationActions]'
+      );
     },
     [context.webAPI]
   );

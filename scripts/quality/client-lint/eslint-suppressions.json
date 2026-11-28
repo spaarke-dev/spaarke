@@ -812,10 +812,10 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createXrmEmailComposeHandlers.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 18
+      "count": 16
     },
     "no-restricted-syntax": {
-      "count": 2
+      "count": 1
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/openEmailCompose.ts": {
