@@ -13,10 +13,13 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// <remarks>
 /// <para>Lifted only for rows filed under the source: on create, when the mapping source is the new row's filing parent (table
 /// and id); on push, for rows filed under the source by a listed Filing edge (family mode, or an ordinary push whose parent
-/// lookup is that edge's column). Other related rows keep the rule. A lifted value is still read as the caller, so it copies only
-/// when the caller can read it, and a copied value is then readable by whoever can read the target column.</para>
-/// <para>A system-principal mapping (the Repair pass) never copies a field-secured source column, even from the filing parent:
-/// it has no caller to mask the read against.</para>
+/// lookup is that edge's column). Other related rows keep the rule. Task 067 (owner 2026-11-27): a lifted value is read past the
+/// caller's column view too (<see cref="MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync"/>; the push's app-only read of
+/// the one source row), after the caller's Read on the source record, so it copies whether or not the caller can read the
+/// column; a copied value is then readable by whoever can read the target column.</para>
+/// <para>The Repair pass (system principal) copies a field-secured column of the row's filing parent too (task 067).</para>
+/// <para>On every surface the <see cref="AccessModelSourceColumns"/> keep the caller's view (create, send, push) or the
+/// not-copied rule (Repair).</para>
 /// <para>The ONE definition, asked by both writers that apply mapping rules: the unified create (<c>RecordCreationService</c>,
 /// step 3) and the field-mapping push (<c>FieldMappingEndpoints.PushFieldMappingsAsync</c>, step 2a).
 /// <c>FieldSecuredSourceRuleGuardTests</c> keeps both on it and keeps a second copy of the predicate out of the field-mapping

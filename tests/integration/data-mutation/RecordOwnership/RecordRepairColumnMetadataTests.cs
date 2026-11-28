@@ -35,8 +35,13 @@ public sealed class RecordRepairColumnMetadataTests
     // The source: field security (UAC-r2 condition 4, must-fire and must-not-fire)
     // =====================================================================================
 
+    /// <summary>
+    /// Task 067 (owner 2026-11-27), must fire: Repair's source is the row's filing parent, so a field-secured mapped column of it
+    /// is read and copied like the others, and one Information line names the rule, source and target columns, never the value.
+    /// MUTATION: dropping the field-secured columns from what Repair copies leaves the client name unwritten.
+    /// </summary>
     [Fact]
-    public async Task ASecuredSourceColumn_IsNeitherReadNorCopied_TheOtherColumnsAre()
+    public async Task ASecuredSourceColumnOfTheFilingParent_IsReadAndCopied_AndLoggedWithoutItsValue()
     {
         _world.ColumnOverrides[("sprk_matter", "sprk_clientname")] = Secured("sprk_clientname");
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
@@ -44,12 +49,16 @@ public sealed class RecordRepairColumnMetadataTests
         var outcome = await _world.RepairAsync("sprk_event", id);
 
         var write = _world.Writes.Should().ContainSingle().Subject;
-        write.Fields.Should().NotContainKey("sprk_clientname");
-        write.Fields.Values.OfType<string>().Should().NotContain(RepairWorld.MatterClient);
+        write.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient);
         write.Fields["sprk_practicearea"].Should().Be(RepairWorld.MatterPracticeArea);
         write.Fields["sprk_priorityname"].Should().Be(RepairWorld.DefaultPriority);
-        _world.SourceReads.Should().ContainSingle().Which.Columns.Should().NotContain("sprk_clientname");
-        Field(outcome, "sprk_clientname").ReasonCode.Should().Be(RecordRepairReason.MappingNoValue);
+        _world.SourceReads.Should().ContainSingle().Which.Columns.Should().Contain("sprk_clientname");
+        Field(outcome, "sprk_clientname").State.Should().Be(RecordRepairFieldState.Repaired);
+        outcome.Warnings.Should().BeEmpty("a business column copied from the filing parent is not a warning");
+        _world.Log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Information
+                                                 && e.Message.Contains("copied the field-secured column(s) sprk_matter.sprk_clientname")
+                                                 && e.Message.Contains("into sprk_clientname"));
+        _world.Log.Entries.Select(e => e.Message).Should().NotContain(m => m.Contains(RepairWorld.MatterClient), "a log line never carries the value");
     }
 
     [Fact]
@@ -69,6 +78,8 @@ public sealed class RecordRepairColumnMetadataTests
         write.Fields.Should().NotContainKey(FlagTarget);
         write.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient, "an unsecured column of the same source is still copied");
         Field(outcome, FlagTarget).ReasonCode.Should().Be(RecordRepairReason.MappingNoValue);
+        // Task 067 (C3, must fire): the access-model column keeps the field-secured rule, and the rule reading it is named.
+        outcome.Warnings.Should().ContainSingle().Which.Should().Be(AccessModelSourceColumns.NotCopiedByRepairWarning(FlagTarget));
     }
 
     [Fact]

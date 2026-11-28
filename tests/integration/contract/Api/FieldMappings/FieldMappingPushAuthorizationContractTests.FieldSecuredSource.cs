@@ -15,8 +15,9 @@ namespace Sprk.Bff.Api.Tests.Api.FieldMappings;
 /// <list type="bullet">
 /// <item>Filing edge (an ordinary push whose parent lookup is the edge's column; family mode, in
 /// <c>FieldMappingPushFamilyContractTests.FieldSecuredSource.cs</c>): a rule that reads a field-secured source column pushes
-/// like any other. The source is still read as the caller, filtered to that one record, so a column the caller cannot read
-/// copies nothing (<c>Push_ASourceColumnTheCallerCannotReadUnderFieldSecurity_IsNeverCopiedIntoAChild</c> in the main file).</item>
+/// like any other. Task 067 (owner 2026-11-27): after the caller's Read and the caller's own read of that one record, it is read
+/// again app-only for exactly its mapped columns, so a column the caller cannot read copies too; an access-model column
+/// (<see cref="AccessModelSourceColumns"/>) keeps the caller's value and its rule is named.</item>
 /// <item>Any other lookup to the source: the rule is not pushed and the target column it would have filled is named in a warning;
 /// a column whose security the catalog does not state counts as secured; an unsecured source column pushes as before.</item>
 /// </list>
@@ -64,8 +65,10 @@ public partial class FieldMappingPushAuthorizationContractTests
         body["updatedCount"]!.GetValue<int>().Should().Be(2);
     }
 
+    /// <summary>Task 067 C4: on a Filing edge the one source record is read as the caller, then app-only with <c>$select</c> of
+    /// exactly its mapped columns and filtered to its id; no column security is asked.</summary>
     [Fact]
-    public async Task Push_ACopyReadsOnlyTheOneSourceRecord_AsTheCaller_AndAsksNoColumnSecurity()
+    public async Task Push_ACopyReadsOnlyTheOneSourceRecord_AsTheCallerThenAppOnly_ForExactlyItsMappedColumns()
     {
         await using var host = await PushHost.StartAsync();
         host.Probe.Rights = AccessRights.Read;
@@ -75,14 +78,105 @@ public partial class FieldMappingPushAuthorizationContractTests
         var response = await host.SendAsync(Authenticated(PushBody()));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        host.SourceReads.Should().ContainSingle("the values come from one read of the one source record").Which.Should().Be(
-            ("sprk_matters", (string?)$"$select=sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
-             CallerSystemUserId));
+        var query = $"$select=sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1";
+        host.SourceReads.Should().ContainSingle("the caller reads the one source record once").Which.Should().Be(
+            ("sprk_matters", (string?)query, CallerSystemUserId));
+        host.AppOnly.Reads.Should().ContainSingle("the app-only read is of the same one record").Which.Should().Be(("sprk_matters", (string?)query));
         host.MetadataQueries.Should().NotContain(q => q.Query != null && q.Query.Contains(FieldSecuredSourceRule.IsSecuredProperty),
             "on a Filing edge the push does not read the source columns' field security");
         host.FieldMappings.Verify(f => f.RetrieveRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
-            "no app-only source read");
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Task 067 (owner 2026-11-27), must fire: on a Filing edge a source column the caller cannot read (the caller's read returns
+    /// it null) is copied from the app-only read of the one source record, and one Information line names the rule's source and
+    /// target columns, never the value (C7). MUTATION: skipping the app-only read leaves the children unwritten.
+    /// </summary>
+    [Fact]
+    public async Task Push_OnAFilingEdge_ASourceColumnTheCallerCannotRead_IsCopied_AndLoggedWithoutItsValue()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(sourceValue: null, lookupsToSource: [FilingLookup]);
+        host.AppOnly.ExtraColumns["sprk_clientreference"] = System.Text.Json.JsonSerializer.SerializeToElement("REF-SECURED");
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+        var text = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, text);
+        host.Writes.Should().HaveCount(2).And.OnlyContain(w => (string?)w.Payload["sprk_clientreference"] == "REF-SECURED");
+        JsonNode.Parse(text)!["warnings"]!.AsArray().Should().BeEmpty();
+        host.Logs.Should().Contain(l => l.Level == Microsoft.Extensions.Logging.LogLevel.Information
+                                        && l.Message.Contains("push: rule")
+                                        && l.Message.Contains("sprk_matter.sprk_clientreference into sprk_clientreference"));
+        host.Logs.Should().NotContain(l => l.Message.Contains("REF-SECURED"), "a log line never carries the value");
+    }
+
+    /// <summary>Task 067 C1: when the caller's own read of the source returns no row, the push is the one 404 and nothing is read
+    /// app-only, even on a Filing edge.</summary>
+    [Fact]
+    public async Task Push_OnAFilingEdge_WhenTheCallersReadReturnsNoRow_IsTheUniform404_AndNothingIsReadAppOnly()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(sourceRowVisible: false, lookupsToSource: [FilingLookup]);
+        host.AppOnly.ExtraColumns["sprk_clientreference"] = System.Text.Json.JsonSerializer.SerializeToElement("REF-SECURED");
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("REF-SECURED");
+        host.AppOnly.Reads.Should().BeEmpty();
+        host.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>Task 067 C1: a Filing-edge source whose app-only read returns no row is the same 404, and nothing is written.</summary>
+    [Fact]
+    public async Task Push_OnAFilingEdge_WhenTheAppOnlyReadReturnsNoRow_IsTheUniform404_AndNothingIsWritten()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(lookupsToSource: [FilingLookup]);
+        host.AppOnly.ReturnsNoRow = true;
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        host.Writes.Should().BeEmpty();
+        host.ChildQueries.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Task 067 C3, must fire: on a Filing edge a rule that reads an access-model column is not read app-only (it keeps the
+    /// caller's value, here none) and a warning names its target; the business column beside it is copied.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_externalobjectid")]
+    [InlineData("adx_identity_passwordhash")]
+    public async Task Push_OnAFilingEdge_ARuleReadingAnAccessModelColumn_IsNotReadAppOnly_AndIsNamed(string accessColumn)
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ExtraSourceAttributes.Add(accessColumn);
+        host.ArrangeHappyPathData(
+            sourceValue: null,
+            lookupsToSource: [FilingLookup],
+            rules: [PushHost.Rule("sprk_clientreference", 0, "sprk_clientreference", 0), PushHost.Rule(accessColumn, 0, "sprk_description", 0)],
+            extraSourceColumns: new() { [accessColumn] = System.Text.Json.JsonSerializer.SerializeToElement((string?)null) });
+        host.AppOnly.ExtraColumns["sprk_clientreference"] = System.Text.Json.JsonSerializer.SerializeToElement("REF-SECURED");
+        host.AppOnly.ExtraColumns[accessColumn] = System.Text.Json.JsonSerializer.SerializeToElement("not-to-be-copied");
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+        var text = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, text);
+        host.AppOnly.Reads.Should().ContainSingle().Which.Query.Should().NotContain(accessColumn);
+        host.Writes.Should().HaveCount(2).And.OnlyContain(w => (string?)w.Payload["sprk_clientreference"] == "REF-SECURED"
+                                                                 && !w.Payload.ContainsKey("sprk_description"));
+        text.Should().NotContain("not-to-be-copied");
+        JsonNode.Parse(text)!["warnings"]!.AsArray().Select(w => w!.GetValue<string>())
+            .Should().Contain(AccessModelSourceColumns.ReadAsTheCallerWarning("sprk_description"));
     }
 
     [Fact]

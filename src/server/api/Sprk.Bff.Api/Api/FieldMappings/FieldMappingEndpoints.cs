@@ -477,7 +477,9 @@ public static class FieldMappingEndpoints
         [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
         [FromServices] Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Services.Ai.Membership.MembershipOptions> membership,
         // Task 022 fix round 4: the Secure Record owner team's configuration, for the mapping-source rule.
-        [FromServices] IConfiguration configuration)
+        [FromServices] IConfiguration configuration,
+        // Task 067: the app-only read of the one source row a Filing-edge push copies from (the existing app-only seam).
+        [FromServices] IAppOnlyCommunicationQuery appOnlyQuery)
     {
         logger.LogInformation(
             "Pushing field mappings. SourceEntity={SourceEntity}, SourceRecordId={SourceRecordId}, TargetEntity={TargetEntity}, "
@@ -628,7 +630,7 @@ public static class FieldMappingEndpoints
             var filedUnderTheSource = familyMode || IsListedFilingEdgeColumn(request.SourceEntity, request.TargetEntity, parentLookup);
 
             var skippedRuleCount = selection.SkippedCount;
-            string[] securedSourceWarnings = [];
+            string[] sourceRuleWarnings = [];
             IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>? sourceAttributeRows = null;
             if (!filedUnderTheSource)
             {
@@ -646,7 +648,7 @@ public static class FieldMappingEndpoints
                 var (pushable, securedSourced) = FieldSecuredSourceRule.Split(
                     selection.Rules, FieldMappingPushLookups.SecuredColumns(sourceAttributeRows));
                 skippedRuleCount += securedSourced.Count;
-                securedSourceWarnings = SecuredSourceWarnings(securedSourced);
+                sourceRuleWarnings = SecuredSourceWarnings(securedSourced);
                 if (securedSourced.Count > 0)
                 {
                     logger.LogInformation(
@@ -665,7 +667,7 @@ public static class FieldMappingEndpoints
                         UpdatedCount = 0,
                         FailedCount = 0,
                         SkippedCount = 0,
-                        Warnings = securedSourceWarnings,
+                        Warnings = sourceRuleWarnings,
                         SkippedRuleCount = skippedRuleCount,
                         Preview = request.Preview ? true : null,
                         Changes = request.Preview ? [] : null,
@@ -682,7 +684,7 @@ public static class FieldMappingEndpoints
             // Lookup-aware (2026-10-06): which rule fields are lookups — and which exist at all — is read from the
             // source's metadata, so a lookup is selected as `_x_value` and an unknown field never poisons the read.
             var sourceFields = rules.Select(r => r.SourceField).Distinct().ToArray();
-            var sourceValues = await RetrieveSourceRecordValuesAsCallerAsync(
+            var callerRead = await RetrieveSourceRecordValuesAsCallerAsync(
                 impersonatedQuery,
                 entityService,
                 request.SourceEntity,
@@ -691,6 +693,7 @@ public static class FieldMappingEndpoints
                 sourceAttributeRows,
                 callerSystemUserId.Value,
                 ct);
+            var sourceValues = callerRead.Values;
 
             if (sourceValues is null)
             {
@@ -699,6 +702,45 @@ public static class FieldMappingEndpoints
                     request.SourceEntity, request.SourceRecordId);
 
                 return SourceRecordNotFound();
+            }
+
+            // Task 067 (owner 2026-11-27; UAC-r2 C1–C4): for rows filed under the source by a listed Filing edge, the mapped
+            // columns are copied whatever the caller can read on them. Only after the caller's Read on the source (the probe
+            // above) and the caller's own read of it (a row came back): the same one row is read again app-only, $select of
+            // exactly its mapped columns except the access-model columns, which keep the caller's value. Every other push reads
+            // only as the caller.
+            if (filedUnderTheSource)
+            {
+                var accessModelTargets = AccessModelSourceColumns.TargetsOfRulesReadingOne(selection.Rules);
+                if (accessModelTargets.Count > 0)
+                    sourceRuleWarnings = [.. sourceRuleWarnings, .. accessModelTargets.Select(AccessModelSourceColumns.ReadAsTheCallerWarning)];
+
+                var lifted = await RetrieveFilingParentValuesAppOnlyAsync(
+                    appOnlyQuery, callerRead, request.SourceEntity, request.SourceRecordId, sourceFields, ct);
+                if (lifted is null)
+                {
+                    logger.LogWarning(
+                        "Source record not found app-only after the caller read it. SourceEntity={SourceEntity}, SourceRecordId={SourceRecordId}",
+                        request.SourceEntity, request.SourceRecordId);
+                    return SourceRecordNotFound();
+                }
+
+                foreach (var (field, value) in lifted)
+                {
+                    if (value is not null && sourceValues.GetValueOrDefault(field) is null)
+                    {
+                        // C7: a value the caller's own read did not return, copied from the filing parent. Never the value.
+                        foreach (var rule in rules.Where(r => string.Equals(r.SourceField, field, StringComparison.Ordinal)))
+                        {
+                            logger.LogInformation(
+                                "[FIELD-MAPPING-SOURCE] push: rule {RuleId} copies {SourceTable}.{SourceColumn} into {TargetColumn} from " +
+                                "the filing parent without the caller's column read",
+                                rule.Id, request.SourceEntity, field, rule.TargetField);
+                        }
+                    }
+
+                    sourceValues[field] = value;
+                }
             }
 
             // Family mode reads the target's many-to-one relationships here, once, for the lookup writes.
@@ -804,9 +846,9 @@ public static class FieldMappingEndpoints
                     participations.GetEffectiveRootRecordFlagsAsync,
                     ct,
                     logger);
-                return TypedResults.Ok(securedSourceWarnings.Length == 0
+                return TypedResults.Ok(sourceRuleWarnings.Length == 0
                     ? preview
-                    : preview with { Warnings = [.. preview.Warnings, .. securedSourceWarnings] });
+                    : preview with { Warnings = [.. preview.Warnings, .. sourceRuleWarnings] });
             }
 
             var refusals = refusedChildIds
@@ -826,7 +868,7 @@ public static class FieldMappingEndpoints
                     FailedCount = refusals.Length,
                     SkippedCount = 0,
                     Errors = refusals,
-                    Warnings = securedSourceWarnings,
+                    Warnings = sourceRuleWarnings,
                     SkippedRuleCount = skippedRuleCount,
                 });
             }
@@ -868,7 +910,7 @@ public static class FieldMappingEndpoints
                 SkippedCount = skippedCount,
                 Errors = [.. errors, .. refusals],
                 FieldResults = fieldResults,
-                Warnings = securedSourceWarnings,
+                Warnings = sourceRuleWarnings,
                 SkippedRuleCount = skippedRuleCount,
             });
         }
@@ -1055,7 +1097,7 @@ public static class FieldMappingEndpoints
     /// field is a lookup are the source's relationships read, to learn which table each single-table lookup
     /// references.</para>
     /// </remarks>
-    private static async Task<Dictionary<string, object?>?> RetrieveSourceRecordValuesAsCallerAsync(
+    private static async Task<SourceRecordRead> RetrieveSourceRecordValuesAsCallerAsync(
         IImpersonatedCommunicationQuery impersonatedQuery,
         IGenericEntityService entityService,
         string sourceEntity,
@@ -1088,10 +1130,53 @@ public static class FieldMappingEndpoints
 
         if (rows.Count == 0)
         {
-            return null;
+            return new SourceRecordRead(null, entitySet, attributes, referents);
         }
 
-        return FieldMappingPushLookups.MapSourceRow(rows[0], fields, attributes, referents, ToClrValue);
+        return new SourceRecordRead(
+            FieldMappingPushLookups.MapSourceRow(rows[0], fields, attributes, referents, ToClrValue), entitySet, attributes, referents);
+    }
+
+    /// <summary>
+    /// The caller's read of the push source (<see cref="RetrieveSourceRecordValuesAsCallerAsync"/>): the mapped values, or
+    /// <see langword="null"/> when no row came back; and what the read was built from (the entity set, the source's readable
+    /// attributes and its single-table lookup referents, all read as the caller), so a Filing-edge push's app-only read of the
+    /// same row (<see cref="RetrieveFilingParentValuesAppOnlyAsync"/>) selects and converts the same way.
+    /// </summary>
+    private sealed record SourceRecordRead(
+        Dictionary<string, object?>? Values,
+        string EntitySet,
+        IReadOnlyDictionary<string, string> Attributes,
+        IReadOnlyDictionary<string, string> Referents);
+
+    /// <summary>
+    /// Task 067 (owner 2026-11-27; UAC-r2 C1, C3, C4): a Filing-edge push's app-only read of the ONE source row it already read as
+    /// the caller — <c>$select</c> of exactly the mapped fields that are not access-model columns
+    /// (<see cref="AccessModelSourceColumns"/>), selected and converted as the caller's read was. Returns the lifted values, an
+    /// empty map when no lifted field is a readable attribute (nothing is read), or <see langword="null"/> when no row came back
+    /// (the route's one 404). Asked only after the caller's Read probe allowed the source and the caller's own read returned it.
+    /// A fault propagates to the route's 500.
+    /// </summary>
+    private static async Task<Dictionary<string, object?>?> RetrieveFilingParentValuesAppOnlyAsync(
+        IAppOnlyCommunicationQuery appOnlyQuery,
+        SourceRecordRead callerRead,
+        string sourceEntity,
+        Guid sourceRecordId,
+        string[] fields,
+        CancellationToken ct)
+    {
+        var lifted = fields.Where(f => !AccessModelSourceColumns.Contains(f)).ToArray();
+        var select = FieldMappingPushLookups.SourceSelectColumns(lifted, callerRead.Attributes);
+        if (select.Length == 0)
+        {
+            return new Dictionary<string, object?>();
+        }
+
+        var rows = await appOnlyQuery.QueryAsync(
+            callerRead.EntitySet, BuildSourceRecordQuery(sourceEntity, sourceRecordId, select), ct);
+        return rows.Count == 0
+            ? null
+            : FieldMappingPushLookups.MapSourceRow(rows[0], lifted, callerRead.Attributes, callerRead.Referents, ToClrValue);
     }
 
     /// <summary>The JSON → CLR conversion the app-only field read applied (kept identical for the rule engine).</summary>

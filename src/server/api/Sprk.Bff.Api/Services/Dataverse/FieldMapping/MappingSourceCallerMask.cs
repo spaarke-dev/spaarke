@@ -67,7 +67,10 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// helper deliberately does not re-read to close it.</para>
 ///
 /// <para><b>Every source handed to the rule engine passes through here</b> (UAC-r2 condition 4) — enforced by
-/// <c>tests/Spaarke.ArchTests/MappingSourceCallerMaskGuardTests.cs</c>.</para>
+/// <c>tests/Spaarke.ArchTests/MappingSourceCallerMaskGuardTests.cs</c>. Task 067 (owner 2026-11-27): the one named exception is
+/// <see cref="ApplyOrLiftForFilingParentAsync"/>, which keeps the mapped columns of the row's own filing parent whatever the
+/// caller can read on them (except the <see cref="AccessModelSourceColumns"/>), and which the guard admits only with a filing-parent
+/// decision.</para>
 ///
 /// <para>ADR-010: static, no DI registration, no interface (the <see cref="MappingSourceReadProbe"/> pattern).</para>
 /// </remarks>
@@ -201,6 +204,115 @@ internal static partial class MappingSourceCallerMask
         }
 
         return masked;
+    }
+
+    /// <summary>
+    /// Task 067 (owner 2026-11-27; UAC-r2 C1–C4): the ONE named exception to <see cref="ApplyAsync"/>. When
+    /// <paramref name="sourceIsFilingParent"/> is the caller's own decision that the source is the record the new row is filed
+    /// under (create: <c>RecordCreationService.SourceIsCallersFilingRecordAsync</c>, table and id; send:
+    /// <c>SendTimeFieldMapping.SourceIsTheCommunicationsFilingParent</c>), the app read's mapped columns are kept whatever the
+    /// caller can read on them, except the <see cref="AccessModelSourceColumns"/>, which still pass through
+    /// <see cref="ApplyAsync"/>. Otherwise this is <see cref="ApplyAsync"/>, unchanged.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Field security only.</b> The record-level Read probe as the caller (FR-04) has already answered Read before
+    /// <paramref name="appRead"/> was read (<see cref="MappingSourceReadProbe.ReadAsync"/>); a caller who cannot read the
+    /// record never reaches here. The kind table (<see cref="WebApiPropertyFor"/>) is unchanged: a column of a kind the mask
+    /// never copies (a file, an image, a party list) is not copied here either.</para>
+    /// <para><b>Only the one row's mapped columns</b> (C4): the result holds only <paramref name="mappedColumns"/> of
+    /// <paramref name="appRead"/>, never a gate column the read also holds, and nothing is read here except the masked read of
+    /// any access-model column.</para>
+    /// <para><b>Access-model columns</b> (C3): judged by <see cref="ApplyAsync"/> on their own. When that caller read cannot be
+    /// made, they copy nothing and the rest still copy.</para>
+    /// <para>Its callers log each value copied this way (<see cref="LogCopiesPastTheMask"/>, C7) and name each rule that reads an
+    /// access-model column in a warning (<see cref="AccessModelSourceColumns.ReadAsTheCallerWarning"/>).
+    /// <c>MappingSourceCallerMaskGuardTests</c> admits this call only with a decision local initialised from one of the two
+    /// filing-parent decisions.</para>
+    /// </remarks>
+    internal static async Task<Entity?> ApplyOrLiftForFilingParentAsync(
+        bool sourceIsFilingParent,
+        IDataverseUserClient? caller,
+        string sourceEntityLogicalName,
+        Guid sourceRecordId,
+        Entity appRead,
+        IReadOnlyCollection<string> mappedColumns,
+        ILogger? logger,
+        CancellationToken ct,
+        TimeSpan? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(appRead);
+        ArgumentNullException.ThrowIfNull(mappedColumns);
+
+        if (!sourceIsFilingParent)
+        {
+            return await ApplyAsync(caller, sourceEntityLogicalName, sourceRecordId, appRead, mappedColumns, logger, ct, timeout)
+                .ConfigureAwait(false);
+        }
+
+        var accessModel = mappedColumns.Where(AccessModelSourceColumns.Contains).ToArray();
+        Entity? accessModelView = null;
+        if (accessModel.Length > 0)
+        {
+            accessModelView = await ApplyAsync(caller, sourceEntityLogicalName, sourceRecordId, appRead, accessModel, logger, ct, timeout)
+                .ConfigureAwait(false);
+        }
+
+        var mapped = new HashSet<string>(mappedColumns, StringComparer.OrdinalIgnoreCase);
+        var primaryKey = sourceEntityLogicalName.Trim().ToLowerInvariant() + "id";
+        var lifted = new Entity(appRead.LogicalName, appRead.Id);
+        foreach (var attribute in appRead.Attributes)
+        {
+            if (!mapped.Contains(attribute.Key) || attribute.Value is null || AccessModelSourceColumns.Contains(attribute.Key)
+                || WebApiPropertyFor(attribute.Key, attribute.Value, primaryKey) is null)
+            {
+                continue; // not mapped, empty, access-model (judged above), or a kind the mask never copies
+            }
+
+            CopyColumn(appRead, lifted, attribute.Key);
+        }
+
+        if (accessModelView is not null)
+        {
+            foreach (var attribute in accessModelView.Attributes)
+                CopyColumn(accessModelView, lifted, attribute.Key);
+        }
+
+        return lifted;
+    }
+
+    /// <summary>
+    /// C7: one Information line per rule that wrote <paramref name="writtenTargets"/> from a source column read past the caller's
+    /// column view (any of its source columns that is not an access-model column): the surface, the rule id and the source and
+    /// target column names. Never a value.
+    /// </summary>
+    internal static void LogCopiesPastTheMask(
+        ILogger logger, string surface, string sourceTable, IEnumerable<Spaarke.Dataverse.FieldMappingRuleEntity> rules,
+        IReadOnlySet<string> writtenTargets)
+    {
+        foreach (var rule in rules)
+        {
+            var target = rule.TargetField?.Trim();
+            if (string.IsNullOrEmpty(target) || !writtenTargets.Contains(target))
+                continue;
+
+            var lifted = CreateTimeFieldMapping.CollectSourceColumns([rule])
+                .Where(c => !AccessModelSourceColumns.Contains(c))
+                .ToArray();
+            if (lifted.Length == 0)
+                continue;
+
+            logger.LogInformation(
+                "[FIELD-MAPPING-SOURCE] {Surface}: rule {RuleId} copied {SourceTable}.{SourceColumns} into {TargetColumn} from the " +
+                "filing parent without the caller's column read",
+                surface, rule.Id, sourceTable, string.Join(",", lifted), target);
+        }
+    }
+
+    private static void CopyColumn(Entity from, Entity to, string key)
+    {
+        to[key] = from[key];
+        if (from.FormattedValues.TryGetValue(key, out var label))
+            to.FormattedValues[key] = label;
     }
 
     /// <summary>
