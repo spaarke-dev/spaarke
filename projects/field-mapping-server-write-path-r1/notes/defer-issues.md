@@ -512,3 +512,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Wording only. A rule whose source column does not exist maps nothing (fail closed), but the warning names it as field-secured. |
 | **Need** | A separate "source column not found" reason from `SecuredColumnsAsync` to the step-3 warning; one test per reason. |
 | **Status** | Filed. Not needed for 064. |
+
+## DI-053 — Push applies the typed-writer target refusal that create and Repair apply
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-27, task 067 review (writing the target must-fire tests). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3326 |
+| **Class** | Pre-existing; not changed by 067. Create and Repair refuse a typed-writer column (`ParentLineage` registry) as a mapping target; the push writes as the caller and leaves the column to the caller's Dataverse privileges. |
+| **Need** | The push uses the same predicate (`IsCopyInvariantColumn` → `RefuseAppOnlyWrite`), skips and names a refused rule, and keeps writing ordinary columns. Must-fire on `sprk_firmhold`, `sprk_vendororg`, `sprk_totalamount` for a caller with Update and field-security update. Optional: refuse saving such a rule. |
+| **Status** | Filed. Own task and PR after 067 (access-control review 2026-11-27, option a). |
