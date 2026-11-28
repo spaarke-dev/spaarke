@@ -585,12 +585,25 @@ public static class DocumentUrlIdentityResolution
             return (null, true);
         }
 
-        return row is null
-            ? (null, true)
-            : (CommunicationRegardingAttributes
-                .Select(row.GetAttributeValue<EntityReference>)
-                .FirstOrDefault(r => r is not null && r.Id != Guid.Empty), false);
+        return row is null ? (null, true) : (CommunicationRecordOf(row), false);
     }
+
+    /// <summary>
+    /// Task 132's communication read, shared (spaarkeai-word-add-in-r1 task 143, fix B): the columns
+    /// <see cref="ResolveDerivedRelatedRecordAsync"/> reads from a <c>sprk_communication</c>. The attachments add's filing rule
+    /// (<c>EmailAttachmentAddPlanner.IsPlacedHereAsync</c>) reads the same columns and picks the record with
+    /// <see cref="CommunicationRecordOf"/>, so the pane and the server cannot disagree on which record a communication names.
+    /// </summary>
+    internal static IReadOnlyList<string> CommunicationRecordColumns => CommunicationRegardingAttributes;
+
+    /// <summary>
+    /// The record a <c>sprk_communication</c> row is filed to: its first populated regarding lookup, in
+    /// <see cref="CommunicationRegardingAttributes"/> order, or <see langword="null"/> when none is.
+    /// </summary>
+    internal static EntityReference? CommunicationRecordOf(Entity communication)
+        => CommunicationRegardingAttributes
+            .Select(communication.GetAttributeValue<EntityReference>)
+            .FirstOrDefault(r => r is not null && r.Id != Guid.Empty);
 
     /// <summary>
     /// Whether a BY-ID retrieve failed because the row does not exist: <c>0x80040217 ObjectDoesNotExist</c> anywhere

@@ -557,21 +557,33 @@ public class EmailAttachmentAddPlanner
             return namesNoRecord;
         }
 
-        var (record, undetermined) = await DocumentUrlIdentityResolution.ResolveDerivedRelatedRecordAsync(
-            new DocumentUrlIdentityResolution.Resolution(
-                emlDocumentId,
-                DocumentName: null,
-                FileName: null,
-                RelatedRecord: null,
-                RelatedCommunication: new Microsoft.Xrm.Sdk.EntityReference(CommunicationEntityName, communicationId)),
-            _entities,
-            _logger,
-            cancellationToken);
-        if (undetermined)
+        // The identity route's columns and its record selector (DocumentUrlIdentityResolution, task 132): one reader. A read
+        // that faults, or no row, is "not known", as the route answers it (RelatedRecordWithheld): never "unfiled".
+        Microsoft.Xrm.Sdk.Entity? communication;
+        try
+        {
+            communication = await _entities.RetrieveAsync(
+                CommunicationEntityName,
+                communicationId,
+                DocumentUrlIdentityResolution.CommunicationRecordColumns.ToArray(),
+                cancellationToken);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                ex,
+                "Email re-save: could not read the communication {CommunicationId} of .eml document {DocumentId}",
+                communicationId,
+                emlDocumentId);
+            return null;
+        }
+
+        if (communication is null)
         {
             return null;
         }
 
+        var record = DocumentUrlIdentityResolution.CommunicationRecordOf(communication);
         if (record is null)
         {
             return namesNoRecord;
