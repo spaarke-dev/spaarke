@@ -1210,3 +1210,9 @@ Design: `notes/task-056-private-message-design.md`. UAC-r2 approved its access p
   - The FR-04 probe is kept by default; the owner's answer did not name it. Lifting it too is open to the owner.
 - **No live test:** "No test required just implement it." No temporary dev rule is set up for a positive copy check.
 - Access logic changes, so UAC-r2 reviews the diff before merge.
+
+## 2026-11-27 (later) — Owner: send copies the full mapped content; invoice columns copy too; "a mapping rule maps regardless of user privileges" (task 067 review)
+
+- **Email send:** "The email need to be complete with all information." Send keeps the filing-parent copy: the analysis's mapped columns fill the email's subject and body whatever the caller can read on them. Consequence (owner-accepted): the value goes to the email's recipients.
+- **Invoices:** "All information on invoice need to be written regardless of user privileges." The invoice columns that the review fix had added to the access-model list (the totals, firm hold, vendor, review detail) copy from an invoice that is the filing parent like any other business column. The access-column registry (`ParentLineage.AccessColumns`) is no longer read for the field-mapping list; the list is the closed set of identity, invitation, secure-flag and file-pointer columns.
+- **Principle stated:** "when there is a data mapping rule the data will be mapped regardless of user privileges." Applied in task 067 to the filing parent's columns on create, send, push and Repair. Whether it also covers the record-level Read on the source, the identity and access columns, and sources other than the filing parent is put to the owner separately (each widens what a caller can read without access to the source record).
