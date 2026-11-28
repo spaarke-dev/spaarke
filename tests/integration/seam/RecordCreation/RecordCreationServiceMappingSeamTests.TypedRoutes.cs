@@ -196,10 +196,11 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     /// anchored to (FR-19, FR-03). The caller's own Read on the document is asked on the Document access path's set
     /// (<c>sprk_documents</c>) BEFORE the document is read app-only (FR-04); the route filter's decision on the body document
     /// stands for the external document narrowing. The profile's value fills the untouched column, the request's own name wins
-    /// (fill-only, FR-02), the read is masked to the caller, and the 201 body has no warnings member.
+    /// (fill-only, FR-02), and the 201 body has no warnings member. Task 067: the document is the analysis' filing parent, so its
+    /// mapped columns are copied without a caller column read (the caller's Read on it was asked first).
     /// </summary>
     [Fact]
-    public async Task TypedAnalysisRoute_ADocumentTheCallerCanRead_MapsItsProfile_FillOnly_ReadAsTheCaller_WithNoWarnings()
+    public async Task TypedAnalysisRoute_ADocumentTheCallerCanRead_MapsItsProfile_FillOnly_ProbedAsTheCaller_WithNoWarnings()
     {
         TheDocumentOfAnAnalysis();
 
@@ -212,8 +213,8 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         StringOf(fields, "sprk_name").Should().Be("Analysis - NDA.pdf", "FR-02: the request's own value wins");
         StringOf(fields, "sprk_DocumentId@odata.bind").Should().Be($"/sprk_documents({TypedRouteDocument:D})");
         _probe.Asked.Should().ContainSingle().Which.Should().Be((CallerToken, "sprk_documents", TypedRouteDocument));
-        _journal.Should().ContainInOrder("profile", "probe", "source-read", "user:source-read");
-        _callerRead.Paths.Should().Equal($"sprk_documents({TypedRouteDocument:D})");
+        _journal.Should().ContainInOrder("profile", "probe", "source-read");
+        _callerRead.Paths.Should().BeEmpty("task 067: the filing parent's mapped columns need no caller column read");
         ((Created<CreateAnalysisResponse>)result).Value!.Warnings.Should().BeNull();
         AnalysisBodyOf(result).Should().NotContain("warnings", "AC6: no warnings, no member");
     }

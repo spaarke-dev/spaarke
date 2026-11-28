@@ -23,7 +23,8 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// <para><b>The same machinery as the create.</b> The profile's rules are read and normalised as the create reads them
 /// (<see cref="RecordCreationService.NormalizedRule"/>); the analysis is read AS THE CALLER first
 /// (<see cref="MappingSourceReadProbe.ReadAsync"/>: Read probe, then the app-only read), masked to the columns the caller can
-/// read (<see cref="MappingSourceCallerMask"/>, #2188), and put to the mapping-source rule
+/// read (<see cref="MappingSourceCallerMask"/>, #2188; task 067: not masked when the analysis is the email's filing parent, its
+/// primary association, except the access-model columns), and put to the mapping-source rule
 /// (<see cref="MappingSourceCopyGate.DecideAsync"/>); the values are computed by <see cref="CreateTimeFieldMapping.ApplyFillOnly"/>
 /// into a scratch row (never created) and only <c>sprk_subject</c> and <c>sprk_body</c> are taken from it. Only the rules that
 /// aim at a column the request left empty are read, so a typed subject reads nothing for the subject.</para>
@@ -147,11 +148,15 @@ internal static class SendTimeFieldMapping
             }
 
             // #2188: the app-only read ignores field-level security, so it is masked to what the caller can read (one caller read).
+            // Task 067 (owner 2026-11-27): when the analysis is the record the email is filed under (its primary association,
+            // table and id), the mapped columns are copied whatever the caller can read on them, except the access-model columns,
+            // which keep the mask. The caller's Read on the analysis was answered before the app read above.
+            var sourceIsFilingParent = SourceIsTheCommunicationsFilingParent(request, analysisId);
             Entity? masked = null;
             if (sourceColumns.Count > 0)
             {
                 masked = await MappingSourceCallerMask
-                    .ApplyAsync(user, AnalysisTable, analysisId, appRead, sourceColumns, logger, ct)
+                    .ApplyOrLiftForFilingParentAsync(sourceIsFilingParent, user, AnalysisTable, analysisId, appRead, sourceColumns, logger, ct)
                     .ConfigureAwait(false);
                 if (masked is null)
                 {
@@ -166,7 +171,23 @@ internal static class SendTimeFieldMapping
             // read its table name). Not named for the communication table: that would read as a create of one to the census scan.
             var scratch = new Entity(ScratchRowName);
             var engineWarnings = new List<string>();
-            CreateTimeFieldMapping.ApplyFillOnly(rules, scratch, masked, NothingProtected, engineWarnings, logger);
+            var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CreateTimeFieldMapping.ApplyFillOnly(rules, scratch, masked, NothingProtected, engineWarnings, logger, mappedColumns: written);
+
+            // Task 067 (C3, C7): from the filing parent, each rule that reads an access-model column is named (it copies only what
+            // the caller can read), and each value copied past the caller's column view is logged by rule, source and target.
+            if (sourceIsFilingParent && masked is not null)
+            {
+                foreach (var accessModelTarget in AccessModelSourceColumns.TargetsOfRulesReadingOne(rules))
+                {
+                    logger.LogWarning(
+                        "[FIELD-MAPPING-SEND] {Warning} | CorrelationId: {CorrelationId}",
+                        AccessModelSourceColumns.ReadAsTheCallerWarning(accessModelTarget), correlationId);
+                }
+
+                MappingSourceCallerMask.LogCopiesPastTheMask(logger, "send", AnalysisTable, rules, written);
+            }
+
             if (engineWarnings.Count > 0)
             {
                 logger.LogInformation(
@@ -204,6 +225,18 @@ internal static class SendTimeFieldMapping
     /// <summary>A caller's email send: not a message, not system mail, not a server-only send.</summary>
     private static bool IsCallerEmail(SendCommunicationRequest request) =>
         request.CommunicationType == CommunicationType.Email && request.SystemMail is null && request.ServerSend is null;
+
+    /// <summary>
+    /// Task 067: whether the analysis <paramref name="analysisId"/> is the record the email is filed under — its PRIMARY association
+    /// (<c>associations[0]</c>, which the send writes to the communication's regarding lookup) names that table and that id. The
+    /// table is matched as the send's regarding map matches it (ordinal, ignoring case, not trimmed), so a spelling the send would
+    /// not file under is no match. Any other analysis association is not the filing parent (the mask stays). Pure.
+    /// </summary>
+    internal static bool SourceIsTheCommunicationsFilingParent(SendCommunicationRequest request, Guid analysisId) =>
+        request.Associations is { Length: > 0 } associations
+        && associations[0].EntityId == analysisId
+        && analysisId != Guid.Empty
+        && string.Equals(associations[0].EntityType, AnalysisTable, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The analysis' id when exactly ONE association is an analysis (and it names a record); otherwise <see langword="null"/>.</summary>
     private static Guid? OnlyAnalysisAssociation(SendCommunicationRequest request)

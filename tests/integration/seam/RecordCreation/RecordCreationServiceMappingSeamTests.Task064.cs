@@ -101,22 +101,120 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         outcome.MappingWarnings.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Task 067 (owner 2026-11-27), must fire: from the filing parent a field-secured mapped column the caller cannot read is
+    /// copied, no caller column read is made, nothing is refused, and one Information line names the rule's source and target
+    /// columns, never the value (C7). MUTATION: masking the filing parent leaves sprk_description unwritten.
+    /// </summary>
     [Fact]
-    public async Task CreateAsync_AFieldSecuredSourceColumnOfTheFilingParent_TheCallerCannotRead_CopiesNothing_LeaksNothing_AndDoesNotRefuse()
+    public async Task CreateAsync_AFieldSecuredSourceColumnOfTheFilingParent_TheCallerCannotRead_IsCopied_AndLoggedWithoutItsValue()
     {
-        // Must fire (MappingSourceCallerMask, #2188): the app read returns the value; the caller's read hides it.
         MatterEventTypeToEventProfile();
         _scripted.SecuredColumns.Add("sprk_matterdescription");
         _callerRead.Secured.Add("sprk_matterdescription");
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<RecordCreationService>();
+        _logger = log;
 
         var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var fields = _creates.Should().ContainSingle().Subject.Fields;
-        fields.Should().NotContainKey("sprk_description", "a value is copied only when the caller can read it");
+        StringOf(fields, "sprk_description").Should().Be("From the matter", "the filing parent's value is copied whatever the caller can read");
+        StringOf(fields, "sprk_EventType_Ref@odata.bind").Should().NotBeNull();
+        outcome.MappingWarnings.Should().BeEmpty();
+        _callerRead.Paths.Should().BeEmpty("no caller column read is made for the filing parent (no access-model column is mapped)");
+        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Information
+                                          && e.Message.Contains("create: rule")
+                                          && e.Message.Contains("sprk_matter.sprk_matterdescription into sprk_description"));
+        log.Messages.Should().NotContain(m => m.Contains("From the matter"), "a log line never carries the value");
+    }
+
+    /// <summary>Task 067 C2, must not fire: from a source that is not the filing parent, a column the caller cannot read (not
+    /// field-secured in metadata) is still masked (#2188), with one caller column read.</summary>
+    [Fact]
+    public async Task CreateAsync_AColumnTheCallerCannotRead_OfASourceThatIsNotTheFilingParent_IsStillMasked()
+    {
+        MatterEventTypeToEventProfile();
+        _callerRead.Secured.Add("sprk_matterdescription");
+
+        var outcome = await Service().CreateAsync(EventFromASourceThatIsNotTheFilingParent(), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_description");
         fields.Values.Select(v => v?.ToString()).Should().NotContain(v => v != null && v.Contains("From the matter"));
-        StringOf(fields, "sprk_EventType_Ref@odata.bind").Should().NotBeNull("the readable values are still copied");
-        outcome.MappingWarnings.Should().BeEmpty("a hidden column looks exactly like an empty one");
+        _callerRead.Paths.Should().Equal($"sprk_matters({OrdinaryMatter:D})");
+    }
+
+    /// <summary>
+    /// Task 067 C3, must fire: from the filing parent a rule that reads an access-model column keeps the caller's view, so a value
+    /// the caller cannot read there is not copied; the other mapped columns are, and a warning names the rule's target column.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_externalobjectid")]
+    [InlineData("sprk_identitycollisionnote")]
+    [InlineData("sprk_vendororg")]      // an invoice's firm
+    [InlineData("sprk_primarycontact")] // a user's own contact
+    public async Task CreateAsync_FromTheFilingParent_ARuleReadingAnAccessModelColumn_KeepsTheCallersView_AndIsNamed(string accessColumn)
+    {
+        _sources[("sprk_matter", OrdinaryMatter)][accessColumn] = "not-to-be-copied";
+        MatterEventTypeToEventProfile(Rule(accessColumn, "sprk_location", Text));
+        _callerRead.Secured.Add(accessColumn);
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_location");
+        fields.Values.Select(v => v?.ToString()).Should().NotContain(v => v != null && v.Contains("not-to-be-copied"));
+        StringOf(fields, "sprk_description").Should().Be("From the matter", "the business columns of the filing parent are copied");
+        _callerRead.Paths.Should().Equal($"sprk_matters({OrdinaryMatter:D})");
+        outcome.MappingWarnings.Should().ContainSingle().Which.Should().Be(new RecordCreationWarning(
+            RecordCreationWarning.MappingRuleSkippedCode, "sprk_location",
+            Sprk.Bff.Api.Services.Dataverse.FieldMapping.AccessModelSourceColumns.ReadAsTheCallerWarning("sprk_location")));
+    }
+
+    /// <summary>
+    /// Task 067 (owner 2026-11-27), must not fire: an invoice amount (<c>sprk_totalamount</c>) is a business column, not an
+    /// access-model one, so from the filing parent it is copied though the caller cannot read it, with no warning and no caller
+    /// column read. The list matches by name on every table, so the source table here does not change the decision. MUTATION:
+    /// putting <c>sprk_totalamount</c> on the access-model list keeps the caller's view and leaves sprk_location unwritten.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_totalamount")]
+    [InlineData("sprk_approvedtotal")]
+    public async Task CreateAsync_FromTheFilingParent_AnInvoiceAmountTheCallerCannotRead_IsCopied(string amountColumn)
+    {
+        _sources[("sprk_matter", OrdinaryMatter)][amountColumn] = "1250.00";
+        MatterEventTypeToEventProfile(Rule(amountColumn, "sprk_location", Text));
+        _scripted.SecuredColumns.Add(amountColumn);
+        _callerRead.Secured.Add(amountColumn);
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_location").Should().Be("1250.00", "a business column of the filing parent is copied whatever the caller can read");
+        StringOf(fields, "sprk_description").Should().Be("From the matter");
+        outcome.MappingWarnings.Should().BeEmpty();
+        _callerRead.Paths.Should().BeEmpty("no access-model column is mapped, so no caller column read is made");
+    }
+
+    /// <summary>Task 067 C4: the filing parent is read app-only once, for its id, and for exactly the mapped columns (plus the
+    /// gate columns the source rule always read, which are never copied).</summary>
+    [Fact]
+    public async Task CreateAsync_FromTheFilingParent_TheAppOnlyReadAsksForTheOneRecordsMappedColumns()
+    {
+        MatterEventTypeToEventProfile();
+
+        await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        var read = _sourceReads.Should().ContainSingle().Subject;
+        (read.Table, read.Id).Should().Be(("sprk_matter", OrdinaryMatter));
+        // The gate reads: owner, secure flag (SourceGateColumns) and the matter's Access Permission (task 022b).
+        read.Columns.Except(MappingSourceCopyGate.SourceGateColumns("sprk_matter"), StringComparer.OrdinalIgnoreCase)
+            .Except([Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column], StringComparer.OrdinalIgnoreCase)
+            .Should().BeEquivalentTo("sprk_defaulteventtype", "sprk_matterdescription");
     }
 
     [Fact]
@@ -275,6 +373,9 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         var fields = _creates.Should().ContainSingle().Subject.Fields;
         fields.Should().NotContainKey("sprk_description").And.NotContainKey("sprk_EventType_Ref@odata.bind");
         outcome.MappingWarnings.Should().ContainSingle().Which.Code.Should().Be(RecordCreationWarning.MappingSourceUnavailableCode);
+        // Task 067 C1 (must fire): the caller's Read on the filing parent is asked first; without it nothing is read app-only.
+        _sourceReads.Should().BeEmpty();
+        _callerRead.Paths.Should().BeEmpty();
     }
 
     [Fact]

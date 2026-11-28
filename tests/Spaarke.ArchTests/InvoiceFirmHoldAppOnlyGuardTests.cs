@@ -58,6 +58,7 @@ public sealed class InvoiceFirmHoldAppOnlyGuardTests
     private static readonly Type[] RegistrationOnlyTypes =
     [
         typeof(InheritedAccessPermission), // AccessColumns: the column is refused to the app-only generic writers
+        typeof(Sprk.Bff.Api.Services.Dataverse.FieldMapping.AccessModelSourceColumns), // Exact: a mapping never reads the column past the caller's view; reads and writes no row
     ];
 
     /// <summary>The assemblies whose types may reach Dataverse: the BFF and its data layer.</summary>

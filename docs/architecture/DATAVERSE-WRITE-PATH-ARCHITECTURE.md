@@ -107,6 +107,14 @@ The one thing only a plugin does — reject/mutate *any* client's write synchron
 
 Result: one engine, three triggers (create inline · manual push · async fix-up), and field values present when the new record's page loads (the UX requirement), for every surface.
 
+**Which source values are copied** (owner 2026-11-27, field-mapping-server-write-path-r1 task 067; UAC-r2 conditions C1–C7):
+- From the row's own **filing parent**, a mapped source column is copied whether or not it is field-secured and whether or not the caller can read it. The filing parent is decided by table AND id on create and email send; on push it is a listed Filing edge or family mode; on Repair it is always the row's filing parent.
+- The caller's Read on the source is asked first (C1). The app-only read is of that one record and exactly its mapped columns (C4). Each copy past the caller's column view gets one Information log line naming the rule, source and target columns, never the value (C7).
+- The access-model columns in `AccessModelSourceColumns` (identity, external-invite, grant and secure-root columns, and an invoice's firm and firm hold) are never copied past the caller's view (C3). The ArchTest `AccessModelSourceColumnsGuardTests` forces every field-secured column of `contact`, `systemuser`, `sprk_document`, `sprk_communication` and the secure-root tables to be classified.
+- Every other source keeps the caller's checks: the read is masked to what the caller can read (`MappingSourceCallerMask`, the one gate), and a field-secured source column is not copied (`FieldSecuredSourceRule`).
+- **Owner-accepted consequence:** a copied value is readable by whoever can read the target column; field-secure the target column to keep the copy restricted.
+- Detail: [`SPAARKE-FIELD-MAPPING-FRAMEWORK.md`](SPAARKE-FIELD-MAPPING-FRAMEWORK.md) Constraints.
+
 ### 4.3 Moving wizards to the server write path (WP-3)
 
 Today the wizards write through `IDataService` bound to the `Xrm.WebApi` adapter. A client `bffDataServiceAdapter` existed (never used, deleted by field-mapping-server-write-path-r1 task 063), but the BFF has **no generic create endpoint** behind it (`/api/dataverse` exposes reads only). The migration is therefore: typed BFF create endpoints per invariant-bearing table (via `RecordCreationService`), then switch each wizard's create call to the BFF. The wizard keeps its UI, preview, and validation; the server applies and returns the authoritative record.

@@ -145,6 +145,45 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         warning.Detail.Should().Contain(RecordCreationService.SourceColumnFieldSecured).And.NotContain("From the project");
     }
 
+    /// <summary>Task 067 C2 (table AND id), must not fire: an explicit source carrying the pair's id under another table is not
+    /// the filing parent, so a column the caller cannot read on it is masked (#2188), with one caller column read.</summary>
+    [Fact]
+    public async Task Task067_AColumnTheCallerCannotRead_OfAnExplicitSourceWithThePairsIdButAnotherTable_IsMasked()
+    {
+        TheRecordTypes();
+        _sources[("sprk_project", OrdinaryMatter)] = new Entity("sprk_project", OrdinaryMatter)
+        {
+            ["sprk_projectnotes"] = "From the project",
+        };
+        Profile("sprk_project", "sprk_event", Rule("sprk_projectnotes", "sprk_description", Memo));
+        _callerRead.Secured.Add("sprk_projectnotes");
+
+        var outcome = await Service().CreateAsync(
+            EventByPair(OrdinaryMatter, mappingSource: ("sprk_project", OrdinaryMatter)), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_description");
+        fields.Values.Select(v => v?.ToString()).Should().NotContain(v => v != null && v.Contains("From the project"));
+        _callerRead.Paths.Should().Equal($"sprk_projects({OrdinaryMatter:D})");
+    }
+
+    /// <summary>Task 067, must fire: the record named by the regarding pair is the filing parent, so a column the caller cannot
+    /// read on it is copied.</summary>
+    [Fact]
+    public async Task Task067_AColumnTheCallerCannotRead_OfTheSourceResolvedFromTheRegardingPair_IsCopied()
+    {
+        TheRecordTypes();
+        MatterEventTypeToEventProfile();
+        _callerRead.Secured.Add("sprk_matterdescription");
+
+        var outcome = await Service().CreateAsync(EventByPair(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_description").Should().Be("From the matter");
+        _callerRead.Paths.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Task065_AFieldSecuredSourceColumnOfTheSourceResolvedFromTheRegardingPair_TheCallerCanRead_IsWritten_WithNoWarning()
     {

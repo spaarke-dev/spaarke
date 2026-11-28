@@ -862,7 +862,8 @@ public partial class FieldMappingPushFamilyContractTests
 
         public static async Task<World> StartAsync(
             Guid[] writable, AccessRights sourceRights = AccessRights.Read | AccessRights.Write,
-            string target = "sprk_event", string targetSet = "sprk_events", FieldMappingRuleEntity[]? rules = null)
+            string target = "sprk_event", string targetSet = "sprk_events", FieldMappingRuleEntity[]? rules = null,
+            string? sourceValue = "REF-166")
         {
             var dataverse = new ScriptedDataverse();
             dataverse.Children.AddRange([ChildA, ChildB, ChildC]);
@@ -875,7 +876,7 @@ public partial class FieldMappingPushFamilyContractTests
                 services.AddSingleton(reader);
             });
             dataverse.Inner = host.Impersonated.Object;
-            host.ArrangeHappyPathData(targetEntity: target, targetSet: targetSet, rules: rules);
+            host.ArrangeHappyPathData(targetEntity: target, targetSet: targetSet, rules: rules, sourceValue: sourceValue);
             return new World { Host = host, Dataverse = dataverse };
         }
 

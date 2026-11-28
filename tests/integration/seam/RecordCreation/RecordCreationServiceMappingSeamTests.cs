@@ -747,13 +747,15 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     // =====================================================================================
 
     [Fact]
-    public async Task CreateAsync_ASourceColumnTheCallerCannotRead_IsNotCopied_ButTheReadableOnesAre()
+    public async Task CreateAsync_FromASourceThatIsNotTheFilingParent_ASourceColumnTheCallerCannotRead_IsNotCopied_ButTheReadableOnesAre()
     {
-        // Must fire: the app read returns sprk_location ("Courtroom 4"); field security hides it from the caller.
+        // Must fire: the app read returns sprk_location ("Courtroom 4"); field security hides it from the caller. Task 067 (C2):
+        // the mask holds for every source that is not the row's filing parent (here the event is filed under another matter).
         MatterToEventProfile();
         _callerRead.Secured.Add("sprk_location");
 
-        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+        var outcome = await Service().CreateAsync(
+            EventUnder(SecureMatter, mappingSource: ("sprk_matter", OrdinaryMatter)), AsCaller(), CancellationToken.None);
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var fields = _creates.Should().ContainSingle().Subject.Fields;
@@ -775,7 +777,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     [InlineData("403")]
     [InlineData("500")]
     [InlineData("no-user-context")]
-    public async Task CreateAsync_WhenTheCallerReadOfTheSourceFails_NothingIsMapped_WithTheUniformWarning_AndTheRowIsCreated(
+    public async Task CreateAsync_FromASourceThatIsNotTheFilingParent_WhenTheCallerReadOfTheSourceFails_NothingIsMapped_WithTheUniformWarning(
         string failure)
     {
         MatterToEventProfile();
@@ -790,9 +792,11 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             case "no-user-context": _callerRead.FailWithStatus = 0; break; // no caller context (OBO unavailable)
         }
 
-        var failed = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+        // Task 067 (C2): the caller column read is made for a source that is not the row's filing parent.
+        var failed = await Service().CreateAsync(
+            EventUnder(SecureMatter, mappingSource: ("sprk_matter", OrdinaryMatter)), AsCaller(), CancellationToken.None);
         var denied = await Service().CreateAsync(
-            EventUnder(OrdinaryMatter, mappingSource: ("sprk_matter", DeniedMatter)), AsCaller(), CancellationToken.None);
+            EventUnder(SecureMatter, mappingSource: ("sprk_matter", DeniedMatter)), AsCaller(), CancellationToken.None);
 
         failed.Succeeded.Should().BeTrue("a mapping failure never refuses the create: {0}", failed.Refusal?.Detail);
         _sourceReads.Should().ContainSingle("the app read happened (the probe answered Read) — and was then discarded");

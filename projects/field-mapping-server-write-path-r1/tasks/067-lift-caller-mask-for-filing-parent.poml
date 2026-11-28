@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Copy the filing parent's mapped values whatever the caller can read on its columns; Repair copies field-secured values too (owner 2026-11-27)</title>
+    <phase>6 W6 Standard, guards, docs, retirement</phase>
+    <gate>UAC-r2 diff review against conditions C1–C7 (below) before merge</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a field-security rule on the BFF create, send, push and Repair paths; security; bff-api.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Lifts a field-security mask on four write paths; every other boundary must hold exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>065</deps>
+    <tags>bff-api, field-mapping, security, auth</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the owner's decisions of 2026-11-27 (notes/decisions.md): (1) "Yes also field secured values": the Repair pass copies a value from a field-secured source column of the row's filing parent; (2) "a field to field copy executed regardless of the user as access to the destination record": a mapped value from the row's filing parent is read app-only and copied whatever the caller can read on that parent's COLUMNS. Within UAC-r2's conditions C1–C7.</prompt>
+  <role>SPAARKE BFF developer; Dataverse write path; authorization.</role>
+  <goal>From the row's own filing parent, a mapped source column is copied on create, email send, push and Repair whether or not it is field-secured and whether or not the caller can read it, except the closed deny-list of access-model columns (C3). The caller must still be able to read the parent RECORD (C1). Any other source keeps today's mask and field-secured drop.</goal>
+
+  <context>
+    <background>
+      Task 065 lifted `FieldSecuredSourceRule.Split` for the filing parent on create (table and id) and on push (listed Filing edge), but kept the read as the caller: `MappingSourceCallerMask` (#2188) on create and at email send (`SendTimeFieldMapping`), and `RetrieveSourceRecordValuesAsCallerAsync` on push. Repair (system principal) still never copies a field-secured source column (`RecordCreationService.Repair.cs` ~1370–1400). The owner now lifts the caller read for the filing parent and asks Repair to copy too. Consequence, owner-accepted: a caller who cannot read a secured parent column sees its value in the child's target column unless that target is secured too.
+    </background>
+    <uac-r2-conditions>
+      C1. The FR-04 source Read probe stays AS THE CALLER and is REQUIRED. The app-only read lifts FIELD security only. If the caller cannot read the parent record, nothing is read app-only and nothing is copied, and the answer is the same as for an unknown id. Must-fire on create, send and push: caller without Read on the parent → no app-only read of the mapped columns happens and nothing is copied.
+      C2. Filing parent only, decided by table AND id exactly as in 065. Push: listed Filing edges only (`IsListedFilingEdgeColumn` / family mode), decided before the source read. Send: only when the mapping source is the filing parent. Every other source keeps the mask and the Split drop. Must-fire for each surface.
+      C3. A closed DENY-LIST of access-model columns never read past the mask, whatever a rule says: contact adx_identity_passwordhash, adx_identity_logonenabled, sprk_externalinvitecodehash, sprk_externalinvitedemailhash, sprk_externalinvitedtenantid, sprk_externalinvitedon, sprk_externalobjectid, sprk_externaltenantid, sprk_identityplane, sprk_identitycollision* (prefix), sprk_standinggrant, sprk_accesspermissiongrant, sprk_externalaccessremovedon; sprk_issecure and sprk_accessinheritance on every table; systemuser sprk_hometenantid / sprk_homeobjectid. A rule naming one as its source falls back to the masked read (create/send) or the as-caller read (push), and on Repair keeps today's not-copied rule, with a warning naming the target. One source of truth: a pinned constant in one place (no field-security profile in the repo names these sets) plus an ArchTest that fails when a column in the repo solution XML that is field-secured (IsSecured=1) on contact, systemuser or any table carrying sprk_issecure is neither on the deny-list nor in an explicit allowed list. Must-fire on at least adx_identity_passwordhash and sprk_issecure.
+      C4. The app-only read reads only the mapped source columns of that ONE parent row ($select / ColumnSet of exactly those columns), never the whole row or another record.
+      C5. Unchanged, each keeps its existing must-fire test: the mapped filing lookup's AppendTo refusal; invariant and access-conferring targets (`IsCopyInvariantColumn`); `MappingSourceCopyGate` (secure-source owner rule); the final whole-row check; adapter defaults; Repair's forward-only, fill-only, owner and lease rules.
+      C6. Unit/seam/contract must-fire and must-not-fire tests for every condition, plus a mutation run on each new condition (record which tests fail). No live dev test (owner).
+      C7. Log at Information the rule id and the source and target column names (never the value) whenever a secured or caller-unreadable column is copied past the mask, so an audit can find it.
+    </uac-r2-conditions>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Mapping.cs (step 3 mask + 065's `fromFilingRecord`)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/MappingSourceCallerMask.cs (an explicit filing-parent bypass that still enforces C1, C3, C4; keep the class the single gate the ArchTest requires)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/SendTimeFieldMapping.cs (~153)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs (~640–700, `RetrieveSourceRecordValuesAsCallerAsync` ~1058; `filedUnderTheSource`)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs (~1119, ~1267, ~1370–1400, ~1947)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/FieldSecuredSourceRule.cs (home for the C3 deny-list constant, or a sibling file in the same folder)</file>
+      <file role="modify">tests/Spaarke.ArchTests/MappingSourceCallerMaskGuardTests.cs, tests/Spaarke.ArchTests/FieldSecuredSourceRuleGuardTests.cs (+ the C3 classification guard)</file>
+      <file role="modify">existing seam/contract tests for create mapping, send-time mapping, push field-secured source, Repair</file>
+      <file role="modify">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md, docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md, docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file role="do-not-touch">projects/**/notes and CLAUDE.md (main session), anything under .claude/, CallerWriteAuthorization.cs, and the UAC-r2 do-not-edit files in current-task.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>Lift applies only when the mapping source is the row's filing parent by table AND id (create: `SourceIsCallersFilingRecordAsync`; push: Filing edge; send: the filing parent; Repair: the row's filing parent). Every other source is byte-for-byte today's behaviour.</constraint>
+    <constraint>C1–C7 above are binding.</constraint>
+    <constraint>No new endpoint, service, DI registration, package or Dataverse column. Static helpers per ADR-010.</constraint>
+    <constraint>Tests go in existing test files or tests/unit/domain/**; never new files under tests/unit/Sprk.Bff.Api.Tests/. Never run Sprk.Bff.Api.Tests unfiltered.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Create from the filing parent: a field-secured column the caller cannot read is copied; a log line names rule, source and target (no value).</criterion>
+    <criterion>Send from the filing parent: same.</criterion>
+    <criterion>Push on a Filing edge: same; through a non-Filing lookup: not copied, warning, counted skipped (065 behaviour).</criterion>
+    <criterion>Repair: a field-secured column of the filing parent is copied (fill-only, forward-only unchanged).</criterion>
+    <criterion>C1: caller without Read on the parent → no app-only read, nothing copied, same answer as an unknown id (create, send, push).</criterion>
+    <criterion>C2: explicit non-filing source (and same id, other table) → mask and Split drop as today (create, send).</criterion>
+    <criterion>C3: a rule sourcing adx_identity_passwordhash or sprk_issecure is not copied past the mask on any surface, with a warning naming the target; the classification ArchTest has must-fire and must-not-fire controls.</criterion>
+    <criterion>C4: the app read's column set equals the mapped source columns of the one row (test asserts the request).</criterion>
+    <criterion>C5 tests still pass; mutation of each new condition fails at least one test.</criterion>
+    <criterion>`dotnet build src/server/api/Sprk.Bff.Api/` 0 warnings; filtered Sprk.Bff.Api.Tests green; Spaarke.ArchTests green (without --no-build).</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output>Code, tests and docs above; notes/task-067-notes.md (main session writes it from the agent's report).</output>
+  </outputs>
+</task>

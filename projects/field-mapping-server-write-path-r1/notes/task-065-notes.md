@@ -72,3 +72,12 @@ On the merged tip acd0470942:
 - Full approval on the fix and the merged head 05d5dce24d (master merged, no src/server resolution hunks).
 - On 05d5dce24d: build 0 warnings; filtered tests 1449/1449.
 - Deploy: next dev BFF candidate after merge, on the owner's exact-SHA go in UAC-r2's session; UAC-r2 re-runs the IsSecured check before it and runs the live push check (a user without read on a secured column pushes, the children stay unchanged) after it.
+
+## 7. Live on dev (UAC-r2, 2026-11-27)
+
+- Dev BFF ran master d9595dd98e (includes #3298) from ~20:19Z. Its 30-min gate passed: 69 requests, one pre-existing 500 (#3307). IsSecured re-check before the deploy: 18 tables, 0 non-boolean. Since ~20:57Z dev runs af8a5547ef, which is d9595dd98e plus spike tools only.
+- Live push check, preview only, nothing written:
+  - a non-admin user pushed on three profiles: all 200, and no rule is set to Manual Refresh on dev, so 0 records;
+  - none of the 57 active rules on dev has a field-secured source column;
+  - the K4 premise holds: for secured columns the user cannot read, the user's own read returned null on 71 of 71 rows, while app-only reads returned values.
+- Not covered: an actual Filing-edge copy of a secured value. It needs a temporary Manual-Refresh rule with a secured source on dev, which is the owner's call.
