@@ -62,13 +62,16 @@ public static class WorkspaceMatterEndpoints
 
         // POST /api/workspace/matters/ai-summary  (SSE stream)
         // Generates a professional AI-drafted summary for a matter given name/type/practice area.
+        // Task 239: the same route also drafts a Project Description when the body carries recordKind "project"
+        // (the Create Project wizard's "Generate with AI"); no recordKind means a matter, exactly as before.
         group.MapPost("/ai-summary", HandleAiSummary)
             .AddEndpointFilter<WorkspaceAuthorizationFilter>()
             .RequireRateLimiting("ai-stream")
             .WithName("MatterAiSummary")
-            .WithSummary("Generate AI draft summary for a matter (SSE stream)")
+            .WithSummary("Generate AI draft summary for a matter or project (SSE stream)")
             .WithDescription(
-                "Accepts JSON body {matterName, matterType, practiceArea}. " +
+                "Accepts JSON body {matterName, matterType, practiceArea} for a matter, or " +
+                "{recordKind: \"project\", projectName, projectType, practiceArea} for a project. " +
                 "Generates a professional summary using AI and streams progress events " +
                 "followed by a result event with {summary: string}.")
             .Produces(StatusCodes.Status200OK, contentType: "text/event-stream")
@@ -158,9 +161,112 @@ public static class WorkspaceMatterEndpoints
     // POST /api/workspace/matters/ai-summary  (SSE stream)
     // =========================================================================
 
-    private record AiSummaryRequest(string MatterName, string MatterType, string PracticeArea);
+    /// <summary>
+    /// Body of POST /ai-summary. <c>RecordKind</c> is optional: absent or "matter" drafts a matter summary from
+    /// MatterName/MatterType/PracticeArea (the original contract, unchanged); "project" drafts a Project Description
+    /// from ProjectName/ProjectType/PracticeArea (task 239).
+    /// </summary>
+    internal record AiSummaryRequest(
+        string MatterName,
+        string MatterType,
+        string PracticeArea,
+        string? RecordKind = null,
+        string? ProjectName = null,
+        string? ProjectType = null);
 
-    private static async Task HandleAiSummary(
+    internal enum AiSummaryKind
+    {
+        Matter,
+        Project
+    }
+
+    /// <summary>
+    /// Resolves the record kind. Null, empty or "matter" is a matter (the pre-task-239 request shape);
+    /// "project" is a project; anything else is unknown (the caller answers 400).
+    /// </summary>
+    internal static AiSummaryKind? ResolveAiSummaryKind(string? recordKind)
+    {
+        if (string.IsNullOrWhiteSpace(recordKind) || string.Equals(recordKind.Trim(), "matter", StringComparison.OrdinalIgnoreCase))
+            return AiSummaryKind.Matter;
+        if (string.Equals(recordKind.Trim(), "project", StringComparison.OrdinalIgnoreCase))
+            return AiSummaryKind.Project;
+        return null;
+    }
+
+    /// <summary>Longest value accepted for any prompt field (name, type, practice area); the values go into the AI prompt.</summary>
+    internal const int MaxAiSummaryFieldLength = 500;
+
+    /// <summary>
+    /// Returns the 400 detail for an invalid request, or null when it is valid.
+    /// A matter needs matterName (unchanged); a project needs projectName; an unknown recordKind is refused;
+    /// every prompt field is capped at <see cref="MaxAiSummaryFieldLength"/> characters.
+    /// </summary>
+    internal static string? ValidateAiSummaryRequest(AiSummaryRequest? request)
+    {
+        var kind = ResolveAiSummaryKind(request?.RecordKind);
+        if (kind is null)
+            return "recordKind must be 'matter' or 'project'.";
+        if (kind == AiSummaryKind.Project)
+        {
+            if (string.IsNullOrWhiteSpace(request?.ProjectName))
+                return "projectName is required.";
+            return TooLong("projectName", request.ProjectName)
+                ?? TooLong("projectType", request.ProjectType)
+                ?? TooLong("practiceArea", request.PracticeArea);
+        }
+        if (string.IsNullOrWhiteSpace(request?.MatterName))
+            return "matterName is required.";
+        return TooLong("matterName", request.MatterName)
+            ?? TooLong("matterType", request.MatterType)
+            ?? TooLong("practiceArea", request.PracticeArea);
+    }
+
+    private static string? TooLong(string field, string? value) =>
+        value is not null && value.Length > MaxAiSummaryFieldLength
+            ? $"{field} must be {MaxAiSummaryFieldLength} characters or fewer."
+            : null;
+
+    /// <summary>Builds the prompt for a validated request. The matter prompt is byte-for-byte what it was before task 239.</summary>
+    internal static string BuildAiSummaryPrompt(AiSummaryRequest request, AiSummaryKind kind) =>
+        kind == AiSummaryKind.Project ? BuildProjectPrompt(request) : BuildMatterPrompt(request);
+
+    private static string BuildMatterPrompt(AiSummaryRequest request) =>
+        $"""
+        You are a legal assistant helping draft professional matter summaries for a law firm.
+        Generate a concise, professional summary (2-3 paragraphs) for a legal matter with the following details:
+        - Matter Name: {request.MatterName}
+        - Matter Type: {request.MatterType ?? "Not specified"}
+        - Practice Area: {request.PracticeArea ?? "Not specified"}
+
+        The summary should:
+        1. Open with the nature and purpose of the matter
+        2. Describe the key legal work and objectives
+        3. Note any important considerations or typical next steps for this type of matter
+
+        Write in clear, professional language suitable for internal distribution to legal staff and partners.
+        Do not use placeholder text, hypothetical examples, or state that you are an AI.
+        Respond with only the summary text — no headings, labels, or JSON.
+        """;
+
+    private static string BuildProjectPrompt(AiSummaryRequest request) =>
+        $"""
+        You are a legal assistant helping draft professional project descriptions for a law firm.
+        Generate a concise, professional description (2-3 paragraphs) for a legal project with the following details:
+        - Project Name: {request.ProjectName}
+        - Project Type: {request.ProjectType ?? "Not specified"}
+        - Practice Area: {request.PracticeArea ?? "Not specified"}
+
+        The description should:
+        1. Open with the nature and purpose of the project
+        2. Describe the key work and objectives
+        3. Note any important considerations, scope boundaries or typical next steps for this type of project
+
+        Write in clear, professional language suitable for internal distribution to legal staff and partners.
+        Do not use placeholder text, hypothetical examples, or state that you are an AI.
+        Respond with only the description text — no headings, labels, or JSON.
+        """;
+
+    internal static async Task HandleAiSummary(
         AiSummaryRequest request,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -168,8 +274,10 @@ public static class WorkspaceMatterEndpoints
         IBriefingAi? briefingAi = null)
     {
         var response = httpContext.Response;
+        var isProject = ResolveAiSummaryKind(request?.RecordKind) == AiSummaryKind.Project;
+        var recordLabel = isProject ? "Project" : "Matter";
 
-        // Fail fast when AI is disabled — matter AI summary has no non-AI fallback.
+        // Fail fast when AI is disabled — the AI summary has no non-AI fallback.
         if (briefingAi is null)
         {
             response.StatusCode = StatusCodes.Status503ServiceUnavailable;
@@ -179,19 +287,23 @@ public static class WorkspaceMatterEndpoints
                 {
                     title = "Service Unavailable",
                     status = 503,
-                    detail = "Matter AI summary requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable."
+                    detail = $"{recordLabel} AI summary requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable."
                 }, JsonOptions), ct);
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(request?.MatterName))
+        var validationError = ValidateAiSummaryRequest(request);
+        if (validationError is not null)
         {
             response.StatusCode = StatusCodes.Status400BadRequest;
             response.ContentType = "application/problem+json";
             await response.WriteAsync(
-                JsonSerializer.Serialize(new { title = "Bad Request", status = 400, detail = "matterName is required." }, JsonOptions), ct);
+                JsonSerializer.Serialize(new { title = "Bad Request", status = 400, detail = validationError }, JsonOptions), ct);
             return;
         }
+
+        var kind = isProject ? AiSummaryKind.Project : AiSummaryKind.Matter;
+        var recordLower = recordLabel.ToLowerInvariant();
 
         response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
@@ -199,35 +311,28 @@ public static class WorkspaceMatterEndpoints
         response.Headers["X-Accel-Buffering"] = "no";
         httpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
 
-        logger.LogInformation(
-            "Matter AI summary SSE request. MatterName={MatterName}, CorrelationId={CorrelationId}",
-            request.MatterName, httpContext.TraceIdentifier);
+        if (isProject)
+        {
+            logger.LogInformation(
+                "Project AI summary SSE request. ProjectName={ProjectName}, CorrelationId={CorrelationId}",
+                request!.ProjectName, httpContext.TraceIdentifier);
+        }
+        else
+        {
+            logger.LogInformation(
+                "Matter AI summary SSE request. MatterName={MatterName}, CorrelationId={CorrelationId}",
+                request!.MatterName, httpContext.TraceIdentifier);
+        }
 
         try
         {
             // Steps advance quickly since there is no document to extract
-            await WriteSSEAsync(response, AnalysisStreamChunk.Progress("document_loaded", "Loading matter details..."), ct);
-            await WriteSSEAsync(response, AnalysisStreamChunk.Progress("extracting_text", "Reading matter information..."), ct);
+            await WriteSSEAsync(response, AnalysisStreamChunk.Progress("document_loaded", $"Loading {recordLower} details..."), ct);
+            await WriteSSEAsync(response, AnalysisStreamChunk.Progress("extracting_text", $"Reading {recordLower} information..."), ct);
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("context_ready", "Preparing summary prompt..."), ct);
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("analyzing", "Generating summary..."), ct);
 
-            var prompt =
-                $"""
-                You are a legal assistant helping draft professional matter summaries for a law firm.
-                Generate a concise, professional summary (2-3 paragraphs) for a legal matter with the following details:
-                - Matter Name: {request.MatterName}
-                - Matter Type: {request.MatterType ?? "Not specified"}
-                - Practice Area: {request.PracticeArea ?? "Not specified"}
-
-                The summary should:
-                1. Open with the nature and purpose of the matter
-                2. Describe the key legal work and objectives
-                3. Note any important considerations or typical next steps for this type of matter
-
-                Write in clear, professional language suitable for internal distribution to legal staff and partners.
-                Do not use placeholder text, hypothetical examples, or state that you are an AI.
-                Respond with only the summary text — no headings, labels, or JSON.
-                """;
+            var prompt = BuildAiSummaryPrompt(request, kind);
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
@@ -242,8 +347,8 @@ public static class WorkspaceMatterEndpoints
             await response.Body.FlushAsync(ct);
 
             logger.LogInformation(
-                "Matter AI summary complete. CharCount={CharCount}, CorrelationId={CorrelationId}",
-                summaryText.Length, httpContext.TraceIdentifier);
+                "{RecordLabel} AI summary complete. CharCount={CharCount}, CorrelationId={CorrelationId}",
+                recordLabel, summaryText.Length, httpContext.TraceIdentifier);
         }
         catch (FeatureDisabledException ex)
         {
@@ -251,20 +356,20 @@ public static class WorkspaceMatterEndpoints
             // since the response is already committed as text/event-stream. Use stable errorCode
             // for client-side discrimination.
             logger.LogDebug(
-                "Matter AI summary called while AI feature disabled. ErrorCode={ErrorCode}, CorrelationId={CorrelationId}",
-                ex.ErrorCode, httpContext.TraceIdentifier);
+                "{RecordLabel} AI summary called while AI feature disabled. ErrorCode={ErrorCode}, CorrelationId={CorrelationId}",
+                recordLabel, ex.ErrorCode, httpContext.TraceIdentifier);
             await WriteSSEAsync(response, AnalysisStreamChunk.FromError($"[{ex.ErrorCode}] {ex.Message}"), CancellationToken.None);
             await response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            logger.LogWarning("Matter AI summary timed out. CorrelationId={CorrelationId}", httpContext.TraceIdentifier);
+            logger.LogWarning("{RecordLabel} AI summary timed out. CorrelationId={CorrelationId}", recordLabel, httpContext.TraceIdentifier);
             await WriteSSEAsync(response, AnalysisStreamChunk.FromError("Summary generation timed out. Please try again."), CancellationToken.None);
             await response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            logger.LogError(ex, "Matter AI summary SSE failed. CorrelationId={CorrelationId}", httpContext.TraceIdentifier);
+            logger.LogError(ex, "{RecordLabel} AI summary SSE failed. CorrelationId={CorrelationId}", recordLabel, httpContext.TraceIdentifier);
             await WriteSSEAsync(response, AnalysisStreamChunk.FromError("An error occurred while generating the summary."), CancellationToken.None);
             await response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
         }

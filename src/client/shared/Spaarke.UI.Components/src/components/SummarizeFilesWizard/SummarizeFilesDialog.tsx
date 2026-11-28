@@ -427,6 +427,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
             onValidChange={setProjectFormValid}
             onFormValues={setProjectFormValues}
             initialFormValues={projectFormValuesRef.current}
+            authenticatedFetch={authenticatedFetch}
+            bffBaseUrl={bffBaseUrl}
           />
         ),
       },

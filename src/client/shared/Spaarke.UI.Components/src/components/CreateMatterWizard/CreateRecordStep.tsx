@@ -30,6 +30,8 @@ import * as React from 'react';
 import {
   Field,
   Input,
+  MessageBar,
+  MessageBarBody,
   Skeleton,
   SkeletonItem,
   Text,
@@ -56,6 +58,7 @@ import {
   searchContactsAsLookup,
   searchOrganizationsAsLookup,
   fetchAiDraftSummary,
+  AI_DRAFT_UNAVAILABLE_MESSAGE,
 } from './matterService';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { useAiPrefill, type IResolvedPrefillFields } from '../../hooks/useAiPrefill';
@@ -316,6 +319,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
 
   // -- AI summary generation state --
   const [isGeneratingSummary, setIsGeneratingSummary] = React.useState(false);
+  const [summaryDraftFailed, setSummaryDraftFailed] = React.useState(false);
 
   // -- Notify parent of validity changes --
   const valid = isFormValid(form);
@@ -494,6 +498,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
 
   const handleGenerateSummary = React.useCallback(async () => {
     setIsGeneratingSummary(true);
+    setSummaryDraftFailed(false);
     try {
       const result = await fetchAiDraftSummary(
         form.matterName,
@@ -502,7 +507,12 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         authenticatedFetch,
         bffBaseUrl
       );
-      dispatch({ type: 'SET_FIELD', field: 'summary', value: result.summary });
+      // A failed draft (rate limit, AI disabled, timeout, network) leaves the user's text as it is.
+      if (result.isFallback) {
+        setSummaryDraftFailed(true);
+      } else {
+        dispatch({ type: 'SET_FIELD', field: 'summary', value: result.summary });
+      }
     } finally {
       setIsGeneratingSummary(false);
     }
@@ -642,6 +652,11 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
                 {isGeneratingSummary ? 'Generating\u2026' : 'Generate with AI'}
               </Button>
             </div>
+            {summaryDraftFailed && (
+              <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalXS }}>
+                <MessageBarBody>{AI_DRAFT_UNAVAILABLE_MESSAGE}</MessageBarBody>
+              </MessageBar>
+            )}
             <Textarea
               value={form.summary}
               onChange={handleFieldChange('summary')}
