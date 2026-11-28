@@ -30,8 +30,10 @@
  *    past the first window. After it lands a framed surface is checked once more (FRAMED_FOCUS_CONFIRM_MS) and retried
  *    if the frame lost focus in between; the "do not fight a host that chose another element" rule is unchanged, and
  *    it extends to the top page: a frame that lacks the top-level focus takes it back only while the top document's
- *    activeElement is null, <body> or an <iframe> (what is left after the platform pane closes); a real element there
- *    (a button in the parent dialog) or an unreadable top document (cross-origin) ends the retries.
+ *    activeElement is null, <body> or an <iframe> (what is left after the platform pane closes). A real element there
+ *    (the closing pane's own input, a button in the parent dialog) skips that attempt without a focus call and the
+ *    schedule goes on, counted against the same budget, so a pane that lets go is followed by a re-focus and a choice
+ *    that stands is never taken; an unreadable top document (cross-origin) ends the retries.
  */
 
 import * as React from 'react';
@@ -55,20 +57,23 @@ function isFramedWindow(win: Window): boolean {
   }
 }
 
+type TopPageFocus = 'free' | 'busy' | 'unreadable';
+
 /**
- * Framed surface whose frame lacks the top-level focus: may we take it back? Only when the top page's focused element
- * is "nobody" (null or <body>) or an iframe (what the page shows after the platform pane closes). Anything else (a
- * button in the parent dialog, a platform dialog) means the top page chose where focus goes, and it is not fought. A
- * top document we cannot read (cross-origin) is treated the same way.
+ * Framed surface whose frame lacks the top-level focus: may we take it back? 'free' when the top page's focused
+ * element is "nobody" (null or <body>) or an iframe (what the page shows once the platform pane has closed); 'busy'
+ * when a real element holds it (the closing pane's own input, a button in the parent dialog, a platform dialog) - this
+ * attempt is skipped and a later one looks again; 'unreadable' when the top document cannot be read (cross-origin) -
+ * not fought, the retries end.
  */
-function topPageAllowsRefocus(win: Window): boolean {
+function topPageFocus(win: Window): TopPageFocus {
   try {
     const topDoc = win.top?.document;
-    if (!topDoc) return false;
+    if (!topDoc) return 'unreadable';
     const topActive = topDoc.activeElement;
-    return !topActive || topActive === topDoc.body || topActive.tagName === 'IFRAME';
+    return !topActive || topActive === topDoc.body || topActive.tagName === 'IFRAME' ? 'free' : 'busy';
   } catch {
-    return false;
+    return 'unreadable';
   }
 }
 
@@ -92,6 +97,7 @@ export function scheduleFocusReturn(spec: FocusReturnSpec): () => void {
   const framed = isFramedWindow(win);
   const maxAttempts = framed ? FRAMED_FOCUS_RETURN_MAX_ATTEMPTS : FOCUS_RETURN_MAX_ATTEMPTS;
   let attempts = 0;
+  let skipped = 0; // framed only: attempts passed over because the top page had a real element focused
   let landed = false; // framed only: focus landed once and the next step confirms the frame still holds it
   let cancelled = false;
   let timerId: number | undefined;
@@ -108,8 +114,17 @@ export function scheduleFocusReturn(spec: FocusReturnSpec): () => void {
     // A frame without the top-level focus keeps nothing: its activeElement may sit on the composer (it survives the
     // frame losing focus, and the pane that took focus away has just closed) while the keys go elsewhere.
     const frameHoldsFocus = !framed || doc.hasFocus();
-    // ...and when the top page itself put focus on a real element, that choice stands: stop, do not take it back.
-    if (!frameHoldsFocus && !topPageAllowsRefocus(win)) return;
+    if (!frameHoldsFocus) {
+      // The top page has a real element focused: the closing pane (it lets go shortly) or a choice that stands (the
+      // user clicked in the parent dialog). Take nothing now; look again on the next attempt, within the same budget.
+      const top = topPageFocus(win);
+      if (top === 'unreadable') return;
+      if (top === 'busy') {
+        skipped += 1;
+        if (attempts + skipped < maxAttempts) schedule(FOCUS_RETURN_RETRY_MS);
+        return;
+      }
+    }
     if (frameHoldsFocus && spec.isKept?.(active)) return;
     // Retry only: focus is somewhere other than where our last attempt left it, and not "nowhere".
     if (attempts > 0 && active !== seenAfterAttempt && active && active !== doc.body) return;
@@ -133,7 +148,7 @@ export function scheduleFocusReturn(spec: FocusReturnSpec): () => void {
       return;
     }
     landed = false;
-    if (attempts < maxAttempts) schedule(FOCUS_RETURN_RETRY_MS);
+    if (attempts + skipped < maxAttempts) schedule(FOCUS_RETURN_RETRY_MS);
   };
 
   schedule(0);

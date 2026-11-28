@@ -161,6 +161,54 @@ describe('scheduleFocusReturn in an iframe (task 238 c)', () => {
     }
   });
 
+  it('must fire: a real element on the top page at first (the closing pane) is waited out, then the frame takes focus', () => {
+    const paneInput = document.createElement('input');
+    document.body.appendChild(paneInput);
+    let topActive: Element | null = paneInput;
+    Object.defineProperty(document, 'activeElement', { get: () => topActive, configurable: true });
+    try {
+      const to = addButton(frame.doc);
+      frame.paneTakesFocus();
+
+      scheduleFocusReturn({ doc: frame.doc, target: () => to });
+      advance(0);
+      advance(200);
+      expect(frame.winFocus).not.toHaveBeenCalled(); // skipped while the pane's input has the top page's focus
+
+      topActive = frame.iframe; // the pane closed
+      advance(100);
+
+      expect(frame.winFocus).toHaveBeenCalled();
+      expect(frame.doc.activeElement).toBe(to);
+      expect(frame.topLevelFocus()).toBe(true);
+    } finally {
+      delete (document as unknown as Record<string, unknown>).activeElement;
+      paneInput.remove();
+    }
+  });
+
+  it('does not take the focus when the top page keeps a real element for the whole schedule, and stops within the budget', () => {
+    const parentButton = document.createElement('button');
+    document.body.appendChild(parentButton);
+    const restoreTop = setTopActiveElement(parentButton);
+    try {
+      const to = addButton(frame.doc);
+      frame.paneTakesFocus();
+      const timeoutSpy = jest.spyOn(window, 'setTimeout');
+
+      scheduleFocusReturn({ doc: frame.doc, target: () => to });
+      advance(10_000);
+
+      expect(frame.winFocus).not.toHaveBeenCalled();
+      expect(frame.doc.activeElement).not.toBe(to);
+      expect(timeoutSpy.mock.calls.length).toBeLessThanOrEqual(FRAMED_FOCUS_RETURN_MAX_ATTEMPTS);
+      timeoutSpy.mockRestore();
+    } finally {
+      restoreTop();
+      parentButton.remove();
+    }
+  });
+
   it('does not take the focus back when the top page focused a real element after the frame landed', () => {
     const parentButton = document.createElement('button');
     document.body.appendChild(parentButton);
