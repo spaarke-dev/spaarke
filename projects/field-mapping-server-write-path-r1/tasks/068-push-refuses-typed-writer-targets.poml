@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>The push refuses a mapping rule aimed at a column only its typed writers may write (DI-053, #3326)</title>
+    <phase>6 W6 Standard, guards, docs, retirement</phase>
+    <gate>UAC-r2 diff review (approved 2026-11-28, no conditions); own PR right after 067; both go to dev in the same candidate</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes which target columns the push writes on the BFF; security; bff-api.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Target-side access boundary on the push.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>067</deps>
+    <tags>bff-api, field-mapping, security</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Owner (2026-11-28, UAC-r2's session): "Yes ensure this is fixed." Create and Repair never write a target column only its typed writers may write (InheritedAccessPermission.RefuseAppOnlyWrite over the ParentLineage registry). The push wrote its targets as the caller and asked no such predicate. Make the push refuse such a rule at rule selection, with the same predicate.</prompt>
+  <role>SPAARKE BFF developer; Dataverse write path.</role>
+  <goal>A push (ordinary, family mode, preview and apply) never writes a typed-writer target column. The refused rule is counted in skippedRuleCount and named by its target column in a warning; the rest of the push proceeds as the caller.</goal>
+
+  <constraints>
+    <constraint>Use InheritedAccessPermission.RefuseAppOnlyWrite(table, [target], WriteIdentity.AppOnly) in PushRuleSelection; no list of its own.</constraint>
+    <constraint>Do NOT call IsCopyInvariantColumn on the push: it would refuse includeAssignedTo and re-filing, which the push owns (UAC-r2 accepted).</constraint>
+    <constraint>The refusal is decided before any source or child read.</constraint>
+    <constraint>Warnings name the column, never a value.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Must fire: a rule onto sprk_invoice.sprk_firmhold, sprk_vendororg or sprk_totalamount writes nothing for that column; the ordinary column of the same push is written as the caller (must not fire).</criterion>
+    <criterion>Must fire: a push whose rules are all refused reads no source and no child, and its warnings name each column, not the generic "None of this profile's rules is set to be pushed".</criterion>
+    <criterion>Family mode and preview refuse the same rules.</criterion>
+    <criterion>PushRuleSelection.TypedWriterTargetRefusal returns exactly RefuseAppOnlyWrite's refusal code.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Api/FieldMappings/PushRuleSelection.cs, FieldMappingEndpoints.cs (warnings); contract tests FieldMappingPushAuthorizationContractTests.TypedWriterTargets.cs, FieldMappingPushFamilyContractTests.TypedWriterTargets.cs; PushRuleSelectionTests; census entry; docs. Branch task/fm-068 (50c8c68c52).</output>
+  </outputs>
+</task>
