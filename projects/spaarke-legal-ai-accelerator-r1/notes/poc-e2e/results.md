@@ -881,3 +881,43 @@ What this does and doesn't settle:
   example, one id for Cowork tests and another for admin deployment).
 
 WP-6 runs on the accepted zip (`v0.7 no script new id`); none of 6a–6e needs the Python skill.
+
+**WP-6 runs (owner, Word desktop, 2026-11-27, probe v0.7 new id, Spaarke MCP off, one new chat per run, chip
+picked first): all five passed, with every hash exact.** The owner checked the document by eye.
+
+| Run | Result | Runner Copilot used | What came back to Copilot |
+|---|---|---|---|
+| 6a edit list | Exact. Paragraph ends `[WPE-1127-A 3 64de6251]`; three tracked replacements; three comments `c8be54a4`, `450530b5`, `1628a2b8` | A "sub-agent" (Office.js; tracked changes and comments worked). Copilot didn't check whether that agent changed the first or last line | Not the return value; Copilot quoted the document's last paragraph |
+| 6b error channel | Both lines exact: error `b4b1d9ac`, log `d1a5d160`. Document unchanged | `(doc) => {…}` form; Copilot changed only the first and last lines | Error message, console output, a failure status, a stack trace. Return value "not received" (none expected) |
+| 6c size 5k | Exact: `5k 354 13758e44` | `(doc) => {…}` HTML runner, with a shim Copilot wrote (below) | The return value (`Spaarke size probe ran: …`) |
+| 6d size 10k | Exact: `10k 787 36554631` | Same HTML runner and shim | The return value |
+| 6e size 17k | Exact: `17k 1391 c81f38e8` | A "sub-agent" again | Not the return value; Copilot quoted the paragraph |
+
+**Findings:**
+1. **The Word edition's core works.** Copilot filled in the one data line (`const EDITS = [...]`) correctly,
+   treating the quotation marks in the request as delimiters. Our fixed code then found each target, made tracked
+   replacements and added one comment per change. Every hash matched, so neither the code's logic nor the data was
+   altered.
+2. **A skill can carry at least 17 KB of code, the most a SKILL.md under 20,000 characters can hold.** The
+   1,391-number list arrived intact (hash exact). No size failed.
+3. **Word's Copilot has two code runners, and it picks one per run.**
+   - **Office.js runner, reached through a "sub-agent"** (6a, 6e, and WP-5 run 3). Form `async function main(context)`;
+     it has Word's API, so tracked changes and comments work. The return value isn't passed back.
+   - **HTML-document runner** (6b, 6c, 6d). Form `(doc) => {…}`; `doc` is the document's HTML
+     (`doc.body.insertAdjacentHTML`), not Word's API. Copilot made our code run there by writing a stand-in
+     `context` whose `insertParagraph` inserts `<p>` HTML (first line:
+     `(doc) => { const context = { document: { body: { insertParagraph: (t) => { doc.body.insertAdjacentHTML("beforeend", "<p>" + t + "</p>"); } } }, sync: async () => {} }; async function main(context) {`;
+     last line `} return await main(context); }`). Return values, errors and console output all come back from
+     this runner. Copilot stayed inside the "first and last line only" rule, but that rule let it wrap our code
+     in a fake API.
+4. **The error channel is proven only on the HTML runner.** 6b ran there. Whether an error thrown on the Office.js
+   runner reaches Copilot is untested, and a redline applier must run on the Office.js runner (the HTML runner
+   has no tracked changes or comments). 6a's error paths (`edit N matched 0 times`) would throw on the Office.js
+   runner.
+5. **Risk for a real Word skill:** if Copilot picks the HTML runner for a redline and shims the Word calls, it
+   could write plain text where tracked changes are needed, or fail. The skill needs a rule to require the
+   Office.js runner and to stop, not shim, when only the HTML runner is offered. Untested whether Copilot obeys it.
+   For a redline, the stand-in would have to fake `changeTrackingMode`, `search` and `insertComment`; in 6a
+   Copilot didn't try that and used the Office.js runner.
+
+Not checked: whether Track Changes was back to its earlier setting after 6a.

@@ -9,8 +9,8 @@
 
 | Field | Value |
 |---|---|
-| **Active** | WP-6 (Word desktop: edit list, error channel, code size). Probe uploaded 2026-11-27: admin center accepted `v0.7 no script new id.zip` (app id `9248c601-e4c2-5d92-89f0-833ebaed526f`, coordination row P1b, told). **Owner runs WP-6 6a–6e** (`tier-test-script.md`) |
-| **Next action** | Record the owner's WP-6 results in `results.md` (after "Correction 2"). Then the owner removes the probe → tell coordination (P1b) |
+| **Active** | WP-6 DONE 2026-11-27: all five runs passed, hash-exact (`results.md`, "WP-6 runs"). New finding: Word's Copilot has two code runners (Office.js via sub-agent; HTML `(doc) => {}` with a Copilot-written shim); error channel proven on the HTML runner only. Probe still installed (P1b, app id `9248c601-…`) |
+| **Next action** | Owner decides: a small follow-up probe (WP-7: error thrown on the Office.js runner; a skill rule that requires the Office.js runner and refuses to shim) on the same new id, or remove the probe now → tell coordination (P1b removed) |
 | **Uncommitted** | None (except the owner's untracked `notes/copilot v claude nda comparison/` — never commit it) |
 
 ### Admin-upload finding (2026-11-27, settled)
