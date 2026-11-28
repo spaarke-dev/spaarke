@@ -412,6 +412,68 @@ so Copilot shouldn't need to change any line.
 with its comments for 6a. Then delete the test document. **Afterwards:** keep v0.7 until the results are in, then
 remove it and tell me (copilot-platform-coordination tracks it).
 
+**Result (2026-11-27): all five passed** (`results.md`, "WP-6 runs"). Word used two different code runners; WP-7
+follows up.
+
+### WP-7. Word desktop: errors on the Office.js runner, and can a skill insist on that runner? (added 2026-11-27)
+
+**Why.** In WP-6 Word's Copilot ran code two ways: through Office.js (Word's real editing API, needed for tracked
+changes and comments) and through an HTML runner, where Copilot wrapped our code in a stand-in of its own. The error
+test ran on the HTML runner, so we don't know whether errors come back from Office.js. Probe **v0.8** changes three
+things. Every skill now tells Copilot to use Office.js and never a stand-in. Every piece of code checks first that it
+has real Office.js and stops with a `Spaarke runner check` error if not. And the size paragraph now gets a Word
+comment, which only Office.js can make, so the document shows which runner ran it.
+
+**Setup (once):**
+1. Admin center, the installed **Spaarke Word Probe** (v0.7): update it with
+   `Spaarke Word probe plugin v0.8 no script new id.zip` (same app id `9248c601-…`, version 1.8.0). If the admin
+   center won't update it, remove it and upload `Spaarke Word probe plugin v0.8 no script id admin-test-2.zip`
+   instead (another new id, `15c2936d-…`), scoped to just you. Tell me which went in. Wait until the probe shows in
+   Word's Copilot pane with the new skill `spaarke-word-probe-office-error`.
+2. Word desktop: **new blank document**. Copilot pane: **Spaarke MCP off**, **Spaarke Word Probe** on. If the new
+   skill doesn't show in **+**, close and reopen Word.
+3. A **new Copilot chat for each run**; pick the skill's chip from **+** first.
+
+**Runs, in this order:**
+
+| Run | Before the run | Chip | Type exactly |
+|---|---|---|---|
+| 7a | — | `spaarke-word-probe-office-error` | *Run the Spaarke Office.js error probe.* |
+| 7b | Turn **Track Changes on** (Review tab) | `spaarke-word-probe-edits` | *Run the Spaarke edit probe with these edits: "two (2) years" to "three (3) years"; "Delaware" to "New York"; "45 days" to "60 days".* |
+| 7c | Check Track Changes is **still on**, then turn it **off** | `spaarke-word-probe-size-10k` | *Run the Spaarke size probe 10k.* |
+| 7d | — | `spaarke-word-probe-edits` | *Run the Spaarke edit probe with these edits: "two (2) years" to "three (3) years"; "Delaware" to "New York"; "30 days" to "60 days".* |
+
+7b fails on purpose: the paragraph says "30 days", not "45 days".
+
+**Expected:**
+- **7a.** A new paragraph *Spaarke Office.js error probe: WPO-1127-A* with one comment
+  `Spaarke runner comment WPO-1127-A 934216c8`. What matters is which lines Copilot quotes:
+  - error `Spaarke probe error WPO-1127-A 29c2566f`;
+  - console `Spaarke probe log WPO-1127-A 7370760f`.
+- **7b.** Error `Spaarke edit probe WPE-1127-B: edit 3 matched 0 times 109d6833`. A new paragraph
+  *Spaarke edit probe: The term is two (2) years. Governing law is Delaware. Notice is 30 days.*, untracked, with no
+  changes, no comments and no bracketed mark. **Track Changes is still on** after the run.
+- **7c.** Paragraph `Spaarke size probe: WPZ-1127-B 10k 787 ad091b28` with the comment
+  `Spaarke size comment WPZ-1127-B 10k 787 ad091b28`.
+- **7d.** As in 6a, with new hashes. The paragraph ends `[WPE-1127-B 3 b576ab0c]`, there are three tracked
+  changes, and the comments are `Spaarke edit 1/3 WPE-1127-B d2ee75c9`, `2/3 … 1565ea50` and `3/3 … 91cc3609`.
+- **In every run** Copilot should say which runner ran the code and whether a sub-agent did. A reply ending
+  `Spaarke runner check …: no Office.js …`, or the line *Office.js runner not available*, means the code didn't
+  get Office.js.
+
+| Result | Means |
+|---|---|
+| 7a or 7b: the error line quoted exactly | Errors from the Office.js runner reach Copilot: a Word skill can stop and report a failed check |
+| 7a or 7b: no error line, though the comment (7a) or paragraph (7b) is there | The Office.js runner doesn't pass errors back: a Word skill can only report through the document |
+| 7b: Track Changes still on | Our code puts the user's setting back even when it fails |
+| 7c: paragraph **and** comment | The rule kept Copilot on Office.js for code that WP-6 ran on the HTML runner |
+| 7c: paragraph without a comment, or `runner check` | Copilot still used the HTML runner: the rule isn't enough |
+| *Office.js runner not available* in any run | Copilot followed the rule but couldn't reach Office.js in that run |
+
+**Record:** for each run, the reply (screenshot is fine) and a screenshot of the document with its comments at the
+end. Then delete the test document. **Afterwards:** keep v0.8 until the results are in, then remove it and tell me
+(copilot-platform-coordination tracks it).
+
 ---
 
 ## P-1. One custom instruction for Word and Cowork? (moved here from Word; run before C-1)
