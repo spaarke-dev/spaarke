@@ -174,3 +174,28 @@ TrackingFieldTrio on dev serves 1.0.68 (bundle SHA-256 prefix `63406a99c0dc`, ma
 | Matter MAT-000113 → Tracking "Email members" → composer → Close (X) | Email members | PASS (was body) |
 | Same → composer → Cancel | Email members | PASS |
 | Tracking "Grant access" → its dialog → Cancel (opened by a mis-aimed click) | Grant access | PASS (its own opener) |
+
+## Remaining checks, main session, 2026-11-28 (owner's Chrome, own tab, 1288x945)
+
+Nothing was saved, created or sent: every wizard was cancelled, and the composer was closed with a recipient in To but never sent.
+
+| Check | Result |
+|---|---|
+| A4 Console → Corporate Workspace → Get Started → Create New To Do → To Do Details → Assigned To (cleared, then clicked) | PASS: it is a side-pane button, and the pane opens on top of the in-app wizard (dark chrome) |
+| A4 Smart To Do "+ New Task" inside the Console | Now opens the same in-app Create New To Do wizard (it used to open the Dataverse form). The label still reads "New Task"; the rename to "New To Do" is an owner request |
+| A5 Matter MAT-000113 → Billing → New Invoice | Opens with a Firm step (one radio per firm the account belongs to), then Record, File, Details. **Still open (eBilling's `CreateInvoiceWizard`):** the Record step is a searchable radio list with the matter preselected but changeable (no `lockedRecord`); the wizard sits inside a white-header outer dialog; Next needs an uploaded PDF, so Details was not reached. There is no Vendor Organization lookup any more: the firm comes from the Firm step |
+| Checklist A7 Rule Review → New rule set → Firm | Not testable on dev: the Rule Review page (eBilling) is not deployed there, and the Console does not host it |
+| Find Similar → Document Relationship Viewer → preview → ⋮ Email → Compose → To | PASS: the pane opens on top, nothing blocks it (no backdrop), and a contact found by search fills To ("Jane Smith (jane.smith@…)") |
+| Same, after the pick | **Focus** ends on the viewer frame's `<body>`, not on the To button (the task 199 hand-back does not reach this iframe path). Minor a11y |
+| Same, picking "Jane Smith" from the pane's **Recent records** | To stays empty with no message. The recent entry is a deleted system user (`lookupObjects` returned a systemuser id that `retrieveRecord` reports as not found); `createXrmEmailComposeHandlers.ts:221-240` logs `[EmailCompose] recipient email resolve failed` and drops the pick silently. Stale dev data exposed a silent-failure gap in the shared composer |
+| Closing the composer with a recipient filled | Closes without asking (already noted 2026-11-22) |
+
+### Status of task 185
+Every host in the checklist has now been run, or recorded as not testable on dev (A7 Rule Review, D3 Communication Actions). What is left is not a deploy defect:
+- **Owner requests (section A):**
+  - "Draft with AI" in the Create Project description;
+  - rename "New Task" to "New To Do";
+  - a Console entry for Create Invoice, in-app launch, record locked in record context, and a firm choice when the record has no linked firm (eBilling's wizard).
+- **New minor defects:**
+  - the shared composer drops an unresolvable recipient pick silently;
+  - focus is not handed back in the viewer's iframe composer.
