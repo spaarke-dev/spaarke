@@ -161,6 +161,60 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     expect(onNavigate).toHaveBeenCalledWith('next');
   });
 
+  describe('keyboard focus after a move to either end (ISS-055)', () => {
+    const Browse: React.FC<{ guard?: SprkModalNav['onBeforeNavigate']; external?: number }> = ({ guard, external }) => {
+      const [index, setIndex] = React.useState(0);
+      React.useEffect(() => {
+        if (external !== undefined) setIndex(external);
+      }, [external]);
+      return (
+        <SprkModal
+          open
+          onClose={noop}
+          title="Rec"
+          nav={{
+            index,
+            total: 2,
+            onNavigate: dir => setIndex(i => (dir === 'next' ? i + 1 : i - 1)),
+            onBeforeNavigate: guard,
+          }}
+        >
+          <input aria-label="Body field" />
+        </SprkModal>
+      );
+    };
+    const prev = () => screen.getByRole('button', { name: /previous record/i });
+    const next = () => screen.getByRole('button', { name: /next record/i });
+
+    it('moves focus off the button that became disabled, to the other nav button', async () => {
+      renderWithProviders(<Browse />);
+      next().focus();
+      fireEvent.click(next());
+      await waitFor(() => expect(next()).toBeDisabled());
+      expect(document.activeElement).toBe(prev());
+      fireEvent.click(prev());
+      await waitFor(() => expect(prev()).toBeDisabled());
+      expect(document.activeElement).toBe(next());
+    });
+
+    it('does the same when the move waits on an async guard', async () => {
+      renderWithProviders(<Browse guard={() => Promise.resolve(true)} />);
+      next().focus();
+      fireEvent.click(next());
+      await waitFor(() => expect(next()).toBeDisabled());
+      expect(document.activeElement).toBe(prev());
+    });
+
+    it('leaves focus alone when it is somewhere real, or when the index changes without a nav move', async () => {
+      const { rerender } = renderWithProviders(<Browse />);
+      const field = screen.getByRole('textbox', { name: 'Body field' });
+      field.focus();
+      rerender(<Browse external={1} />);
+      await waitFor(() => expect(next()).toBeDisabled());
+      expect(document.activeElement).toBe(field);
+    });
+  });
+
   it('nav.disabled turns both ‹ › off and runs neither the guard nor onNavigate; unset leaves them on (ISS-016)', () => {
     const onNavigate = jest.fn();
     const onBeforeNavigate = jest.fn(() => true);

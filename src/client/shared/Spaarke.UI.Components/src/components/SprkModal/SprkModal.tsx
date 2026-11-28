@@ -343,11 +343,39 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // Browse guard (`nav.onBeforeNavigate`): without one, navigate synchronously; with one, navigate only
   // when it allows it. A throwing / rejecting guard blocks the move (fail closed) and is reported with a
   // console.warn, so a broken guard shows up as a diagnosable failure rather than a dead ‹ › button.
+  // Keyboard focus after a move (ISS-055): the button just pressed becomes `disabled` when the move reaches either end, and a
+  // real browser then drops focus to the body. After each move, if focus was lost (on the body, or on a now-disabled nav button),
+  // put it on the nav button in the direction of travel, else the other one, else the close button. Focus that is somewhere real
+  // is left alone.
+  const prevButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const nextButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const movedDirRef = React.useRef<'prev' | 'next' | null>(null);
+  const navIndex = nav?.index;
+  React.useEffect(() => {
+    const dir = movedDirRef.current;
+    movedDirRef.current = null;
+    if (!dir) return;
+    const prev = prevButtonRef.current;
+    const next = nextButtonRef.current;
+    const active = document.activeElement;
+    const lost =
+      !active || active === document.body || (active === prev && prev.disabled) || (active === next && next.disabled);
+    if (!lost) return;
+    const close = surfaceRef.current?.querySelector<HTMLButtonElement>('button[aria-label="Close"]') ?? null;
+    const order = dir === 'next' ? [next, prev, close] : [prev, next, close];
+    order.find(b => b && !b.disabled)?.focus();
+  }, [navIndex]);
+
+  const navigateTo = (dir: 'prev' | 'next') => {
+    movedDirRef.current = dir;
+    nav?.onNavigate(dir);
+  };
+
   const handleNavigate = (dir: 'prev' | 'next') => {
     if (!nav || nav.disabled) return;
     const guard = nav.onBeforeNavigate;
     if (!guard) {
-      nav.onNavigate(dir);
+      navigateTo(dir);
       return;
     }
     const reportGuardFailure = (err: unknown) =>
@@ -360,7 +388,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
       return;
     }
     void Promise.resolve(verdict).then(allowed => {
-      if (allowed) nav.onNavigate(dir);
+      if (allowed) navigateTo(dir);
     }, reportGuardFailure);
   };
 
@@ -397,6 +425,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                   <Button
                     appearance="subtle"
                     size="small"
+                    ref={prevButtonRef}
                     icon={<ChevronLeft20Regular />}
                     disabled={nav.disabled || nav.index <= 0}
                     onClick={() => handleNavigate('prev')}
@@ -410,6 +439,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                   <Button
                     appearance="subtle"
                     size="small"
+                    ref={nextButtonRef}
                     icon={<ChevronRight20Regular />}
                     disabled={nav.disabled || nav.index >= nav.total - 1}
                     onClick={() => handleNavigate('next')}
