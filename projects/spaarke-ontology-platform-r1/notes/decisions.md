@@ -897,3 +897,9 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 
 - **Decision (owner, answered in this session):** option (a). Task 235's billing kind drops the line codes (`accept-line`, `reduce-line`, `disallow-line`, `add-line`); invoice-level billing codes stay. Line decisions remain visible on the invoice. Volume then grows with invoices, not lines, so one kind's `MaxPages` bound is far from the 503 that would take down the whole tab. Narrows D-234 for billing.
 - **Rejected:** (b) newest-up-to-cap with a truncation flag (contract, baseline and client change; breaks the tab's "never a partial list" rule); (c) accepting a whole-tab 503 past 25,000 line records in 90 days.
+
+## D-237 — Being the requester neither blocks nor grants approval of an intake decision (owner, 2026-11-28; intake-pipeline-r1 task 017)
+
+- **Decision (owner, typed in this session):** a user may approve or reject a request they created when their team membership or access privileges would let them approve it anyway (for example, an attorney who creates a request and pushes it through). Being the requester is no bar to approving it. It grants nothing either: the action's Gate and the caller's access decide, as for any other user.
+- **Applies to:** the `approve-intake` / `reject-intake` catalog actions (intake-pipeline-r1 task 017) and any later Decide action with the same shape. No separation-of-duties check is added in `DecisionCommitService` or the catalog.
+- **Test obligation (review condition):** must-fire: a requester without approval rights is refused (`NotAuthorized`, 403) before any write. Must-not-fire: a requester with approval rights succeeds.
