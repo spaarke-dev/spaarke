@@ -1,6 +1,6 @@
 # Current Task State — specialist-legal-agents-r1 (umbrella), Phase 0
 
-> **Last Updated**: 2026-11-27 ~21:00Z (spike `af8a5547ef` live on dev ~20:57Z with all 4 spike tools, rollback `d9595dd98e`, gate PASSED 21:28Z; owner uploaded all 8; scope + load check pending)
+> **Last Updated**: 2026-11-28 ~04:20Z (dev BFF `b84fa5f061` = spike `af8a5547ef` + mcp-r2 file probe since ~04:15Z, tools/list 10, rollback `af8a5547ef`; `af8a5547ef` gate PASSED 21:28Z; R7 scope OK; owner uploaded all 8; scope + load check pending)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
 > **Recovery**: read this file, then `CLAUDE.md` (binding rules, gotchas), then `tasks/TASK-INDEX.md`.
 

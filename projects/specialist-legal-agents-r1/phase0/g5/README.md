@@ -47,7 +47,7 @@ The function tools are the ones the Phase 0 spike branch exposes on `/mcp/legal-
 - **The three descriptions split the prompt set.** `spike_review_nda` now claims NDAs and confidentiality agreements, mutual or one-way (N-02, N-08, N-10), and excludes other agreement types and legal hold notices; the agreement stub excludes NDAs and confidentiality agreements; the legal hold stub excludes NDAs and other agreements. A branch test pins this.
 - **The package needs no change.** It uses dynamic discovery (BR-5), and its instructions describe the three functions by purpose, not by tool name. Record the tool names above from `tools/list`, then run the smoke prompt.
 - **FR-05 column.** The stubs return an instruction ("tell the user in one sentence … do not review the document yourself and do not call another tool"); record whether the agent followed it for A and H prompts. `spike_review_nda` returns no instruction block, so N prompts are "n.a.".
-- **2026-11-27:** the stubs were off dev ~20:19Z–20:57Z (master `d9595dd98e`); back at spike `af8a5547ef` since ~20:57Z. Any later dev deploy from master removes them again.
+- **2026-11-27:** the stubs were off dev ~20:19Z–20:57Z (master `d9595dd98e`); back at spike `af8a5547ef` since ~20:57Z. Since 2026-11-28 ~04:15Z dev runs `b84fa5f061` (adds the mcp-r2 file probe; stubs unchanged). Any later dev deploy from master removes them again.
 - If dev is ever rolled back below `5cd40984b0`, the stubs are gone: do not run G5 then; if the owner runs it anyway, score only N and C prompts and record "no tool on dev" for A and H.
 
 #### The package (task 020)
