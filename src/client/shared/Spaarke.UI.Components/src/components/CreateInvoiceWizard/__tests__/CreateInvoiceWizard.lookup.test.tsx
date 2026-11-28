@@ -14,6 +14,9 @@ import { CreateInvoiceWizard } from '../CreateInvoiceWizard';
 const BASE = 'https://bff.example.test';
 const MATTER_ID = '11111111-1111-4111-8111-111111111111';
 const PROJECT_ID = '22222222-2222-4222-8222-222222222222';
+const WORK_ID = '44444444-4444-4444-8444-444444444444';
+const FIRM_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const FIRM_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 const fetchFn = jest.fn(async () => ({ ok: true, status: 200, json: async () => [] }));
 const dataService = {
@@ -33,6 +36,43 @@ function navigation(result: Array<{ id: string; name: string; entityType: string
     openLookup,
   } as INavigationService;
   return { service, openLookup };
+}
+
+/** A BFF stand-in: the firms of any record, the 202 of a submission, and an accepted status. */
+function bff(firms: { firmId: string; name: string }[]) {
+  const calls: { url: string; method: string; body?: unknown }[] = [];
+  const fn = jest.fn(async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET';
+    calls.push({ url, method, body: init?.body });
+    if (/\/core-records\/\w+\/[\w-]+\/firms$/.test(url)) return { ok: true, status: 200, json: async () => firms };
+    if (method === 'POST' && /\/invoice-submissions\?firmId=/.test(url)) {
+      return { ok: true, status: 202, json: async () => ({ submissionId: 's-1', trackingNumber: 'INV-9.1' }) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        submissionId: 's-1',
+        status: 'Accepted',
+        trackingNumber: 'INV-9.1',
+        firmInvoiceNumber: 'INV-9',
+      }),
+    };
+  });
+  return { fn: fn as unknown as typeof fetch, calls };
+}
+
+const pdf = () => new File(['%PDF-1.4'], 'invoice.pdf', { type: 'application/pdf' });
+const submitButton = () => screen.getByRole('button', { name: /^submit invoice$/i });
+
+/** From the Record step (a record chosen) through the PDF and the invoice number to the Submit click. */
+async function uploadAndSubmit(container: HTMLElement) {
+  fireEvent.click(next());
+  fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [pdf()] } });
+  await waitFor(() => expect(next()).toBeEnabled());
+  fireEvent.click(next());
+  fireEvent.change(await screen.findByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+  fireEvent.click(submitButton());
 }
 
 function mount(props: Partial<React.ComponentProps<typeof CreateInvoiceWizard>> = {}) {
@@ -79,13 +119,75 @@ describe('CreateInvoiceWizard — record lookup', () => {
     await waitFor(() => expect(screen.getByTestId('selected-record')).toHaveTextContent('Patent portfolio · Project'));
   });
 
-  it('a cancelled lookup (no rows) or a row of another table selects nothing', async () => {
-    const { service } = navigation([{ id: PROJECT_ID, name: 'A contact', entityType: 'contact' }]);
+  it.each([
+    ['a cancelled lookup (no rows)', [] as Array<{ id: string; name: string; entityType: string }>],
+    ['a row of another table', [{ id: PROJECT_ID, name: 'A contact', entityType: 'contact' }]],
+    ['a row with no id', [{ id: '', name: 'Nameless', entityType: 'sprk_matter' }]],
+  ])('%s selects nothing', async (_name, rows) => {
+    const { service, openLookup } = navigation(rows);
     mount({ navigationService: service });
     fireEvent.click(await screen.findByRole('button', { name: /choose a record/i }));
+    await waitFor(() => expect(openLookup).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByRole('button', { name: /choose a record/i })).toBeEnabled());
     expect(screen.queryByTestId('selected-record')).toBeNull();
     expect(next()).toBeDisabled();
+  });
+
+  it.each([
+    ['matter', 'sprk_matter', 'matters', MATTER_ID],
+    ['project', 'sprk_project', 'projects', PROJECT_ID],
+    ['work assignment', 'sprk_workassignment', 'workassignments', WORK_ID],
+  ])(
+    'submits a looked-up %s to its own route, with the braces stripped and the id lower-cased',
+    async (_label, entityType, segment, id) => {
+      const { service } = navigation([{ id: `{${id.toUpperCase()}}`, name: 'Picked', entityType }]);
+      const server = bff([{ firmId: FIRM_A, name: 'Alpha LLP' }]);
+      const t = mount({ navigationService: service, authenticatedFetch: server.fn });
+      fireEvent.click(await screen.findByRole('button', { name: /choose a record/i }));
+      await waitFor(() => expect(next()).toBeEnabled());
+      await uploadAndSubmit(t.container);
+
+      await waitFor(() => expect(server.calls.some(c => c.method === 'POST')).toBe(true));
+      const post = server.calls.find(c => c.method === 'POST')!;
+      expect(post.url).toBe(`${BASE}/api/finance/${segment}/${id}/invoice-submissions?firmId=${FIRM_A}`);
+      expect(post.url).not.toMatch(/[{}]/);
+    }
+  );
+
+  it('must fire: a looked-up record survives the firm step that firm_required brings in, and the POST goes to it with the chosen firm', async () => {
+    const { service } = navigation([
+      { id: `{${PROJECT_ID.toUpperCase()}}`, name: 'Beyond the first page', entityType: 'sprk_project' },
+    ]);
+    const server = bff([
+      { firmId: FIRM_A, name: 'Alpha LLP' },
+      { firmId: FIRM_B, name: 'Beta LLP' },
+    ]);
+    const t = mount({ navigationService: service, authenticatedFetch: server.fn });
+    fireEvent.click(await screen.findByRole('button', { name: /choose a record/i }));
+    await waitFor(() => expect(next()).toBeEnabled());
+    await uploadAndSubmit(t.container);
+
+    // The record has two firms: nothing was uploaded; the Choose firm step is first.
+    expect(await screen.findByRole('radiogroup', { name: /Firms/ })).toBeInTheDocument();
+    expect(server.calls.some(c => c.method === 'POST')).toBe(false);
+    fireEvent.click(screen.getByRole('radio', { name: /Beta LLP/ }));
+    fireEvent.click(next());
+
+    // The Record step: the looked-up record is still the selection and Next is on.
+    await waitFor(() =>
+      expect(screen.getByTestId('selected-record')).toHaveTextContent('Beyond the first page · Project')
+    );
+    expect(next()).toBeEnabled();
+
+    fireEvent.click(next());
+    await waitFor(() => expect(next()).toBeEnabled());
+    fireEvent.click(next());
+    fireEvent.click(await screen.findByRole('button', { name: /^submit invoice$/i }));
+
+    await waitFor(() => expect(server.calls.some(c => c.method === 'POST')).toBe(true));
+    expect(server.calls.find(c => c.method === 'POST')!.url).toBe(
+      `${BASE}/api/finance/projects/${PROJECT_ID}/invoice-submissions?firmId=${FIRM_B}`
+    );
   });
 
   it('must not fire: no navigation service means the list only', async () => {

@@ -7,7 +7,8 @@ import * as React from 'react';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { InvoiceSubmissionWizard } from '../InvoiceSubmissionWizard';
-import type { InvoiceCoreRecordList, InvoiceCoreRecordOption } from '../types';
+import { InvoiceSubmissionError } from '../types';
+import type { InvoiceCoreRecordList, InvoiceCoreRecordOption, InvoiceFirmOption } from '../types';
 
 const MATTER: InvoiceCoreRecordOption = {
   kind: 'matter',
@@ -25,6 +26,8 @@ function mount(options: {
   lookupRecord?: () => Promise<InvoiceCoreRecordOption | null>;
   lockedRecord?: InvoiceCoreRecordOption;
   loadRecords?: () => Promise<InvoiceCoreRecordList>;
+  loadFirms?: () => Promise<InvoiceFirmOption[] | null>;
+  submit?: jest.Mock;
 }) {
   return renderWithProviders(
     <InvoiceSubmissionWizard
@@ -32,7 +35,8 @@ function mount(options: {
       lookupRecord={options.lookupRecord}
       lockedRecord={options.lockedRecord}
       loadRecords={options.loadRecords ?? jest.fn().mockResolvedValue({ records: [MATTER] })}
-      submit={jest.fn()}
+      loadFirms={options.loadFirms}
+      submit={options.submit ?? jest.fn()}
       getStatus={jest.fn()}
       onClose={jest.fn()}
     />
@@ -103,6 +107,80 @@ describe('InvoiceSubmissionWizard — lookupRecord', () => {
     expect(await screen.findByTestId('record-lookup-error')).toHaveTextContent(/could not be opened/i);
     expect(screen.getByRole('radio', { name: /Acme v\. Roadrunner/ })).toBeChecked();
     expect(next()).toBeEnabled();
+  });
+
+  // The adapter reads a record's firms only on submit, so a record looked up before the first submit carries firm key '': the
+  // `firm_required` reload (firm A chosen, the list read again under A) must not drop it.
+  it('must fire: a looked-up record survives the firm step that firm_required brings in, and the submit carries it with the firm', async () => {
+    const ALPHA = { firmId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Alpha LLP' };
+    const BETA = { firmId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Beta LLP' };
+    const loadFirms = jest.fn().mockResolvedValueOnce(null).mockResolvedValue([ALPHA, BETA]);
+    const submit = jest
+      .fn()
+      .mockRejectedValueOnce(
+        new InvoiceSubmissionError({ statusCode: 400, errorCode: 'ebilling.submission.firm_required' })
+      )
+      .mockResolvedValue({ submissionId: 's-1', trackingNumber: 'TRK-1' });
+    const utils = mount({ lookupRecord: jest.fn().mockResolvedValue(OUTSIDE_PAGE), loadFirms, submit });
+
+    fireEvent.click(await screen.findByTestId('choose-record-button'));
+    await waitFor(() => expect(next()).toBeEnabled());
+    fireEvent.click(next());
+    const input = utils.container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(['%PDF-1.4'], 'invoice.pdf', { type: 'application/pdf' })] },
+    });
+    await waitFor(() => expect(next()).toBeEnabled());
+    fireEvent.click(next());
+    fireEvent.change(await screen.findByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(screen.getByRole('button', { name: /^submit invoice$/i }));
+
+    // The firm step is first now; pick a firm and go on to the Record step: the looked-up record is still the selection.
+    expect(await screen.findByText('Choose the firm this invoice is from')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Beta LLP' }));
+    fireEvent.click(next());
+    await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ });
+    expect(screen.getByTestId('selected-record')).toHaveTextContent('Beyond the first page · Project');
+    expect(next()).toBeEnabled();
+
+    fireEvent.click(next());
+    await waitFor(() => expect(next()).toBeEnabled());
+    fireEvent.click(next());
+    fireEvent.click(await screen.findByRole('button', { name: /^submit invoice$/i }));
+
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    expect(submit.mock.calls[1][0].record).toEqual(OUTSIDE_PAGE);
+    expect(submit.mock.calls[1][0].firmId).toBe(BETA.firmId);
+  });
+
+  it('must not fire: a record looked up and then replaced by a list pick is not resurrected by the firm reload', async () => {
+    const ALPHA = { firmId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Alpha LLP' };
+    const BETA = { firmId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Beta LLP' };
+    const loadFirms = jest.fn().mockResolvedValueOnce(null).mockResolvedValue([ALPHA, BETA]);
+    const submit = jest
+      .fn()
+      .mockRejectedValue(
+        new InvoiceSubmissionError({ statusCode: 400, errorCode: 'ebilling.submission.firm_required' })
+      );
+    const utils = mount({ lookupRecord: jest.fn().mockResolvedValue(OUTSIDE_PAGE), loadFirms, submit });
+
+    fireEvent.click(await screen.findByTestId('choose-record-button'));
+    await waitFor(() => expect(screen.getByTestId('selected-record')).toHaveTextContent('Beyond the first page'));
+    fireEvent.click(await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ }));
+    fireEvent.click(next());
+    fireEvent.change(utils.container.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: { files: [new File(['%PDF-1.4'], 'invoice.pdf', { type: 'application/pdf' })] },
+    });
+    await waitFor(() => expect(next()).toBeEnabled());
+    fireEvent.click(next());
+    fireEvent.change(await screen.findByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(screen.getByRole('button', { name: /^submit invoice$/i }));
+
+    await screen.findByText('Choose the firm this invoice is from');
+    fireEvent.click(screen.getByRole('radio', { name: 'Beta LLP' }));
+    fireEvent.click(next());
+    await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ });
+    expect(screen.getByTestId('selected-record')).toHaveTextContent('Acme v. Roadrunner');
   });
 
   it('must not fire: with no lookupRecord there is no button and no selected line (the external SPA step is unchanged)', async () => {

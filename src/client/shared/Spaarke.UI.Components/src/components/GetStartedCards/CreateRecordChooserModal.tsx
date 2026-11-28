@@ -55,6 +55,12 @@ const CREATE_CARD: Partial<Record<GetStartedCardId, { consumerType: string; enti
   'assign-work': { consumerType: 'create-work-assignment', entityType: 'sprk_workassignment' },
 };
 
+/**
+ * The cards the chooser shows: exactly the ones that launch a record wizard. The other cards (Summarize, Find Similar, Email,
+ * Meeting, Create Invoice) create no record the reconciliation can link, and a click on one only closed the chooser.
+ */
+const CHOOSER_CARD_IDS: readonly GetStartedCardId[] = Object.freeze(Object.keys(CREATE_CARD) as GetStartedCardId[]);
+
 export interface CreateRecordChooserModalProps {
   /** Whether the chooser is open. */
   open: boolean;
@@ -106,8 +112,8 @@ export const CreateRecordChooserModal: React.FC<CreateRecordChooserModalProps> =
       // Close the chooser immediately (the wizard opens in its own surface).
       onClose();
       if (!map) {
-        // A non-record card (summarize / find-similar / email / meeting) — the
-        // reconciliation "New record" flow only creates a regarding record.
+        // Not reachable from the chooser (it renders only the record cards); kept so a card added to the widget without a
+        // wizard behind it still settles the promise.
         settle(null);
         return;
       }
@@ -141,7 +147,7 @@ export const CreateRecordChooserModal: React.FC<CreateRecordChooserModalProps> =
       uiScale={uiScale}
     >
       <div data-testid="create-record-chooser">
-        <GetStartedCardsWidget onCardClick={handleCardClick} />
+        <GetStartedCardsWidget onCardClick={handleCardClick} cardIds={CHOOSER_CARD_IDS} />
       </div>
     </SprkModal>
   );

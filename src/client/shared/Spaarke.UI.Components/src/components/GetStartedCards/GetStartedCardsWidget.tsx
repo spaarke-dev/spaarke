@@ -134,6 +134,13 @@ export interface GetStartedCardsWidgetProps {
 
   /** Optional class name applied to the grid container. */
   className?: string;
+
+  /**
+   * Limits which cards render (ids not listed are left out, unknown ids are ignored; the cards keep the widget's own display
+   * order). Absent: every card renders, as before. For a host that can act on only some of the cards: the reconciliation
+   * "Create a record" chooser launches the three record wizards only, so it never shows a card that does nothing.
+   */
+  cardIds?: readonly GetStartedCardId[];
 }
 
 // ---------------------------------------------------------------------------
@@ -367,9 +374,17 @@ function moveFocus(container: HTMLDivElement, fromIndex: number, direction: 'lef
  * />
  * ```
  */
-export const GetStartedCardsWidget: React.FC<GetStartedCardsWidgetProps> = ({ onCardClick, className }) => {
+export const GetStartedCardsWidget: React.FC<GetStartedCardsWidgetProps> = ({ onCardClick, className, cardIds }) => {
   const styles = useStyles();
   const gridRef = useRef<HTMLDivElement>(null);
+
+  // The cards to render: all of them, or the subset the host asked for. Keyed on the ids' content, so a host that builds its
+  // array inline does not rebuild the handlers on every render.
+  const cardIdsKey = cardIds ? cardIds.join('|') : null;
+  const cards = useMemo<readonly CardDefinition[]>(
+    () => (cardIdsKey === null ? CARDS : CARDS.filter(card => cardIdsKey.split('|').includes(card.id))),
+    [cardIdsKey]
+  );
 
   /**
    * Stable per-card click handler. We pre-build the array so each ActionCard
@@ -380,10 +395,10 @@ export const GetStartedCardsWidget: React.FC<GetStartedCardsWidgetProps> = ({ on
    */
   const cardHandlers = useMemo(
     () =>
-      CARDS.map(card => () => {
+      cards.map(card => () => {
         onCardClick?.(card.id);
       }),
-    [onCardClick]
+    [cards, onCardClick]
   );
 
   /**
@@ -442,7 +457,7 @@ export const GetStartedCardsWidget: React.FC<GetStartedCardsWidgetProps> = ({ on
       onKeyDown={handleGridKeyDown}
       data-testid="getstartedcards-widget"
     >
-      {CARDS.map((card, i) => (
+      {cards.map((card, i) => (
         // Wrapper div carries the `data-card-index` attribute used by the
         // arrow-key focus handler. We do NOT pass `tabIndex` or `role` to the
         // wrapper — those live on ActionCard itself (`role="button"`,

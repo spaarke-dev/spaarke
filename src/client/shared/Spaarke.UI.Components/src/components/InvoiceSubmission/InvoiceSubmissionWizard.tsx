@@ -406,8 +406,12 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         setSelected(prev => {
           if (!prev) return null;
           if (result.records.some(r => recordKey(r) === recordKey(prev))) return prev;
-          // A record the user looked up under this firm is kept although the list does not offer it.
-          return looked && looked.key === recordKey(prev) && looked.firmKey === firmKey ? prev : null;
+          // A record the user looked up under this firm is kept although the list does not offer it. One looked up before any firm
+          // was known (firmKey '': the adapter reads a record's firms only on submit) is kept too: the firms the wizard then
+          // loads, and the firm step it shows after `firm_required`, are that record's own.
+          return looked && looked.key === recordKey(prev) && (looked.firmKey === '' || looked.firmKey === firmKey)
+            ? prev
+            : null;
         });
         setRecordsFirmKey(firmKey);
       })
@@ -945,13 +949,30 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   ];
 
   // The shell fixes its steps at mount: wait for the firm list (see above).
-  if (firms === null) {
+  // Embedded there is no modal to keep: a bare spinner stands in until the list is known.
+  if (firms === null && embedded) {
     return open ? (
       <div className={styles.compact}>
         <Spinner size="small" label="Loading" />
       </div>
     ) : null;
   }
+
+  // In a modal the shell stays mounted while the list is read (the first read, and the read after `firm_required`): a bare spinner
+  // would show outside the modal frame, and unmounting the shell would close and reopen the dialog and lose its focus. It holds a
+  // single "Loading" step, and `resetKey` rebuilds it in place with the real steps once the list is known.
+  const loadingSteps: IWizardStepConfig[] = [
+    {
+      id: 'loading',
+      label: 'Loading',
+      renderContent: () => (
+        <div className={styles.stepContent}>
+          <Spinner size="small" label="Loading" />
+        </div>
+      ),
+      canAdvance: () => false,
+    },
+  ];
 
   return (
     <div className={styles.compact}>
@@ -961,7 +982,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         hideTitle={hideTitle}
         uiScale={uiScale}
         title={title}
-        steps={steps}
+        steps={firms === null ? loadingSteps : steps}
+        resetKey={firms === null ? 'loading' : `ready-${firmsReload}`}
         onClose={handleShellClose}
         onFinish={handleFinish}
         finishLabel="Submit invoice"
