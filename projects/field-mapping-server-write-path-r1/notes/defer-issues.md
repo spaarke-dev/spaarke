@@ -522,3 +522,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing; not changed by 067. Create and Repair refuse a typed-writer column (`ParentLineage` registry) as a mapping target; the push writes as the caller and leaves the column to the caller's Dataverse privileges. |
 | **Need** | The push uses the same predicate (`IsCopyInvariantColumn` → `RefuseAppOnlyWrite`), skips and names a refused rule, and keeps writing ordinary columns. Must-fire on `sprk_firmhold`, `sprk_vendororg`, `sprk_totalamount` for a caller with Update and field-security update. Optional: refuse saving such a rule. |
 | **Status** | Filed. Own task and PR after 067 (access-control review 2026-11-27, option a). |
+
+## DI-054 — The record-family push panel's skipped-rules line names only one reason
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-28, review of #3326 (K2, client). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3327 |
+| **Class** | Wording, user-visible. `RecordFamilyActionPanel.tsx` `SKIPPED_RULES_TEXT` says skipped fields are copied only at create; since #3326 a push also skips a rule whose target is server-managed, which is never copied by a mapping. |
+| **Need** | One fixed line covering both reasons; update its tests; rebuild the consumers that bundle the shared library. |
+| **Status** | Filed. Shared-library change with its own deploy; not in #3326. |

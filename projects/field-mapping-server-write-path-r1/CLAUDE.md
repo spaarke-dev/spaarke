@@ -49,13 +49,18 @@ Evidence (file:line): `notes/design-review-2026-10-19.md`. Line numbers drift; r
       external flag, contact identity) keeps the caller's checks: a failure drops it with a warning;
     - a value mapped from a source that is not the caller's filing parent, or an adapter default, keeps the
       caller's checks (dropped with a warning on failure);
-  - a value from a field-secured SOURCE column is copied when the source is the row's filing parent (owner
-    2026-11-26: "security does not matter"; task 065): on create when the source is the caller's filing record (table
-    and id); on push only for rows filed under the source by a listed Filing edge (family mode, or ordinary mode when
-    the parent lookup is that edge's column). The value is still read as the caller, so only what the caller can read
-    is copied, and once copied it is readable by whoever can read the target column. From any other source, and on
-    push through any other lookup, it is not copied (dropped with a warning), and an unknown security state maps
-    nothing. Repair never copies it.
+  - a mapped column of the row's **filing parent** is read app-only and copied whatever the caller may read on it,
+    field-secured columns included (owner 2026-11-26/27: "a mapping rule maps regardless of user privileges"; tasks
+    065, 067), on create (source = the caller's filing record, table and id), send (the email's primary association),
+    push (a listed Filing edge, or family mode with one) and Repair (which copies field-secured filing-parent
+    columns too). Bounds the owner kept on 2026-11-27:
+    - **C1** the caller's record-level Read on the source is probed first; without it nothing is read or copied
+      (indistinguishable from an unknown id);
+    - **C2** any other source keeps `MappingSourceCallerMask.ApplyAsync` and the field-secured drop, unchanged;
+    - **C3** a column on `AccessModelSourceColumns` (closed list) keeps the caller's view, with a warning;
+    - the push's app-only read is one row, `$select` of exactly the mapped columns; one Information log line per
+      copy past the mask (rule id and column names, never the value); the push preview shows only the caller's view.
+    Target columns only their typed writers may write are never a mapping target, on any surface (#3326).
 
   (FR-08)
 - MUST resolve the owner record-first via `ResolveOwnerAsync` for roots and children. Never user- or app-owned except

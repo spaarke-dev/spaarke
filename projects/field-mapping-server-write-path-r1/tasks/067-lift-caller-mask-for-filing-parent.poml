@@ -4,7 +4,7 @@
     <title>Copy the filing parent's mapped values whatever the caller can read on its columns; Repair copies field-secured values too (owner 2026-11-27)</title>
     <phase>6 W6 Standard, guards, docs, retirement</phase>
     <gate>UAC-r2 diff review against conditions C1–C7 (below) before merge</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a field-security rule on the BFF create, send, push and Repair paths; security; bff-api.</rigor-reason>
     <model-tier>opus</model-tier>
