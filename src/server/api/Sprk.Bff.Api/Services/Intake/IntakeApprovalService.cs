@@ -55,7 +55,8 @@ public enum IntakeApprovalOutcome
     /// <summary>Someone else claimed it, or the claim lost a race.</summary>
     AlreadyClaimed,
 
-    /// <summary>A read the transition needs failed (an output's SPE version); nothing was written.</summary>
+    /// <summary>A read or write the transition needs failed (the run, an output's SPE version, the conditional write); nothing was written,
+    /// or (after a timeout) the outcome is unknown and a retry converges.</summary>
     Unavailable,
 }
 
@@ -88,9 +89,11 @@ public sealed record IntakeApprovalResult(IntakeApprovalOutcome Outcome, IntakeA
 /// <remarks>
 /// <para><b>Writes.</b> Only through <see cref="IntakeRunStore"/>, each conditional on the row version read, so a race refuses instead of
 /// acting twice. The claim sets only the claimer column, as the app (G5: checked as the user, written as the app); it grants nothing and
-/// creates no Assigned-To access row (a service request is never grantable to a contact, uac-r2 2026-11-28).</para>
+/// creates no Assigned-To access row (a service request is never grantable to a contact, uac-r2 2026-11-28). Approve and reject write the
+/// run and the request in ONE transaction conditional on both rows as the checks read them, so a request whose stage or claimer changed
+/// in between refuses (ontology-r1 (b)). A write fault is <see cref="IntakeApprovalOutcome.Unavailable"/>.</para>
 /// <para><b>Idempotent on retry.</b> An approval already recorded is finished (its Return enqueued once, marker after send) and answered
-/// Done; a rejection already recorded has its request stage finished. The continuation's key is <c>intake-return:{runId:N}</c>.</para>
+/// Done; a rejection already recorded is answered Done. The continuation's key is <c>intake-return:{runId:N}</c>.</para>
 /// <para><b>ADR-015.</b> Logs carry ids, outcomes and codes only; never document text or a reject reason (this class never sees one).</para>
 /// </remarks>
 public class IntakeApprovalService
@@ -149,7 +152,18 @@ public class IntakeApprovalService
         }
 
         var context = authorized.Context!;
-        var run = context.Request.CurrentRunId is { } runId ? await _store.ReadRunAsync(runId, ct).ConfigureAwait(false) : null;
+        IntakeRunSnapshot? run;
+        try
+        {
+            run = context.Request.CurrentRunId is { } runId ? await _store.ReadRunAsync(runId, ct).ConfigureAwait(false) : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // After authorization, so the caller may learn that the read failed.
+            _logger.LogWarning("Intake approval: the run of request {RequestId} could not be read ({ExceptionType})", requestId, ex.GetType().Name);
+            return Refuse(IntakeApprovalOutcome.Unavailable, "The request could not be read right now; nothing was written.");
+        }
+
         if (run is null || run.RequestId != requestId || run.JobType != (int)ProcessingJobType.IntakeRun || string.IsNullOrEmpty(run.HarnessKey))
         {
             return Refuse(IntakeApprovalOutcome.WrongState, "The request has no intake run waiting for approval.");
@@ -311,7 +325,17 @@ public class IntakeApprovalService
             return check;
         }
 
-        var written = await _store.ClaimRequestAsync(requestId, context.Request.RowVersion, context.CallerContactId, ct).ConfigureAwait(false);
+        IntakeApprovalWriteResult written;
+        try
+        {
+            written = await _store.ClaimRequestAsync(requestId, context.Request.RowVersion, context.CallerContactId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Intake approval: claim of request {RequestId} faulted ({ExceptionType})", requestId, ex.GetType().Name);
+            return Refuse(IntakeApprovalOutcome.Unavailable, "The request could not be claimed right now; try again.");
+        }
+
         _logger.LogInformation("Intake approval: claim of request {RequestId}: {Result}", requestId, written);
         return written switch
         {
@@ -324,7 +348,7 @@ public class IntakeApprovalService
 
     /// <summary>
     /// Approves (the executor's write, after its preflight ran the same checks): records each output's current SPE version and
-    /// <see cref="IntakeRunState.ApprovedOn"/> in one conditional run write, then enqueues the run's continuation once. The checks run again
+    /// <see cref="IntakeRunState.ApprovedOn"/> in one transaction conditional on the run and the request as read, then enqueues the run's continuation once. The checks run again
     /// first (uac-r2 (a): at approve, not only at claim).
     /// </summary>
     public virtual async Task<IntakeApprovalResult> ApproveAsync(HttpContext http, Guid requestId, CancellationToken ct)
@@ -344,7 +368,18 @@ public class IntakeApprovalService
                 return Refuse(IntakeApprovalOutcome.Unavailable, "The approved version of an output document could not be read; nothing was approved.");
             }
 
-            var written = await _store.RecordApprovalAsync(run, versions, ct).ConfigureAwait(false);
+            IntakeApprovalWriteResult written;
+            try
+            {
+                written = await _store.RecordApprovalAsync(run, check.Context.Request, versions, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // All or nothing; after a timeout the outcome may be unknown: a retry re-reads and finds the approval, or records it.
+                _logger.LogWarning("Intake approval: approval of run {RunId} faulted ({ExceptionType})", run.RunId, ex.GetType().Name);
+                return Refuse(IntakeApprovalOutcome.Unavailable, "The approval could not be saved right now; try again.");
+            }
+
             if (written != IntakeApprovalWriteResult.Written)
             {
                 _logger.LogInformation("Intake approval: approval of run {RunId} not written ({Result})", run.RunId, written);
@@ -359,8 +394,8 @@ public class IntakeApprovalService
     }
 
     /// <summary>
-    /// Rejects: the run ends Cancelled (never Failed) in one conditional write, then the request goes back to In review. The checks run
-    /// again first. A rejection already recorded only has its request stage finished.
+    /// Rejects: the run ends Cancelled (never Failed) and the request goes back to In review, in one transaction conditional on both rows.
+    /// The checks run again first. A rejection already recorded is Done with no write.
     /// </summary>
     public virtual async Task<IntakeApprovalResult> RejectAsync(HttpContext http, Guid requestId, CancellationToken ct)
     {
@@ -373,7 +408,17 @@ public class IntakeApprovalService
         var run = check.Context!.Run!;
         if (run.State.RejectedOn is null)
         {
-            var written = await _store.RecordRejectionAsync(run, ct).ConfigureAwait(false);
+            IntakeApprovalWriteResult written;
+            try
+            {
+                written = await _store.RecordRejectionAsync(run, check.Context.Request, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Intake approval: rejection of run {RunId} faulted ({ExceptionType})", run.RunId, ex.GetType().Name);
+                return Refuse(IntakeApprovalOutcome.Unavailable, "The rejection could not be saved right now; try again.");
+            }
+
             if (written != IntakeApprovalWriteResult.Written)
             {
                 _logger.LogInformation("Intake approval: rejection of run {RunId} not written ({Result})", run.RunId, written);
@@ -381,11 +426,6 @@ public class IntakeApprovalService
             }
 
             _logger.LogInformation("Intake approval: run {RunId} rejected", run.RunId);
-        }
-
-        if (check.Context.Request.IntakeStage == IntakeRequestStages.AwaitingApproval)
-        {
-            await _store.WriteRequestStageAsync(requestId, run.RunId, IntakeRequestStages.InReview, makeCurrentRun: false, ct).ConfigureAwait(false);
         }
 
         return check;

@@ -106,7 +106,10 @@ internal sealed class IntakeApprovalTestBed
     }
 
     /// <summary>The service as production builds it, with the caller's contact answered by <see cref="Contacts"/>.</summary>
-    public IntakeApprovalService Service()
+    public IntakeApprovalService Service() => ServiceMock().Object;
+
+    /// <summary><see cref="Service"/>'s mock (CallBase), so a test can verify which members were reached.</summary>
+    public Mock<IntakeApprovalService> ServiceMock()
     {
         var service = new Mock<IntakeApprovalService>(
             Run.Store,
@@ -124,7 +127,7 @@ internal sealed class IntakeApprovalTestBed
                 : Caller.ByUser(user) is { } caller
                     ? new UserContactResolution(UserContactStatus.One, caller.ContactId, false, null, null)
                     : new UserContactResolution(UserContactStatus.None, null, false, null, null)));
-        return service.Object;
+        return service;
     }
 
     public static HttpContext Http(Caller? caller)

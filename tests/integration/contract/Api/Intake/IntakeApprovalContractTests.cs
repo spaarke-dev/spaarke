@@ -8,11 +8,13 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
+using Moq;
 using Sprk.Bff.Api.Api.Intake;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Intake;
@@ -34,7 +36,7 @@ public sealed class IntakeApprovalContractTests
 {
     private static string ClaimPath(Guid id) => $"/api/v1/intake/requests/{id}/claim";
 
-    private static async Task<(WebApplication App, HttpClient Client)> HostAsync(IntakeApprovalTestBed bed, Caller? caller)
+    private static async Task<(WebApplication App, HttpClient Client)> HostAsync(IntakeApprovalTestBed bed, Caller? caller, IntakeApprovalService? service = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.Logging.ClearProviders();
@@ -48,7 +50,7 @@ public sealed class IntakeApprovalContractTests
         builder.Services.AddAuthorization();
         builder.Services.AddRateLimiter(opt =>
             opt.AddPolicy("dataverse-query", _ => System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("dataverse-query-test")));
-        builder.Services.AddSingleton(bed.Service());
+        builder.Services.AddSingleton(service ?? bed.Service());
         builder.WebHost.UseTestServer();
 
         var app = builder.Build();
@@ -65,9 +67,10 @@ public sealed class IntakeApprovalContractTests
         return (app, client);
     }
 
-    private static async Task<(HttpStatusCode Status, JsonObject? Body)> ClaimAsync(IntakeApprovalTestBed bed, Caller? caller, Guid? id = null)
+    private static async Task<(HttpStatusCode Status, JsonObject? Body)> ClaimAsync(
+        IntakeApprovalTestBed bed, Caller? caller, Guid? id = null, IntakeApprovalService? service = null)
     {
-        var (app, client) = await HostAsync(bed, caller);
+        var (app, client) = await HostAsync(bed, caller, service);
         await using (app)
         {
             var response = await client.PostAsync(ClaimPath(id ?? IntakeRunTestBed.RequestId), content: null);
@@ -182,6 +185,41 @@ public sealed class IntakeApprovalContractTests
         status.Should().Be(HttpStatusCode.ServiceUnavailable);
         body!["reasonCode"]!.GetValue<string>().Should().Be(IntakeApprovalEndpoints.DisabledCode);
         bed.WritesSince(before).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Claim_ACallerTheFilterRefuses_NeverReachesTheHandler()
+    {
+        // The route-level gate (ADR-008) is the filter itself: a refusal is answered there, and the handler's claim never runs.
+        var readOnly = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
+        readOnly.Rights[Alice.Token] = Spaarke.Dataverse.AccessRights.Read;
+        var readOnlyService = readOnly.ServiceMock();
+        var (readOnlyStatus, _) = await ClaimAsync(readOnly, Alice, service: readOnlyService.Object);
+
+        var outsider = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
+        outsider.Teams[Alice.UserId] = [OtherTeamId];
+        var outsiderService = outsider.ServiceMock();
+        var (outsiderStatus, _) = await ClaimAsync(outsider, Alice, service: outsiderService.Object);
+
+        readOnlyStatus.Should().Be(HttpStatusCode.NotFound);
+        outsiderStatus.Should().Be(HttpStatusCode.Forbidden);
+        readOnlyService.Verify(s => s.ClaimAsync(It.IsAny<HttpContext>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+        outsiderService.Verify(s => s.ClaimAsync(It.IsAny<HttpContext>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task Claim_TheClaimWriteFaults_Is503Unavailable_NotA500()
+    {
+        var bed = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
+        bed.Run.Dataverse.Mock.Setup(s => s.UpdateIfRowVersionMatchesAsync(IntakeRunStore.RequestEntity, It.IsAny<Guid>(), It.IsAny<string>(),
+                It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse is unavailable"));
+
+        var (status, body) = await ClaimAsync(bed, Alice);
+
+        status.Should().Be(HttpStatusCode.ServiceUnavailable);
+        body!["reasonCode"]!.GetValue<string>().Should().Be(IntakeApprovalEndpoints.UnavailableCode);
+        bed.ClaimedBy().Should().BeNull();
     }
 }
 

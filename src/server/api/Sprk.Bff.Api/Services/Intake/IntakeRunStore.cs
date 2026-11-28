@@ -737,14 +737,16 @@ public class IntakeRunStore
     }
 
     /// <summary>
-    /// The approval write (task 017): <see cref="IntakeRunState.ApprovedOn"/> and the approved versions, in ONE write conditional on
-    /// <paramref name="run"/>'s row version, and only while the run still waits for approval. A run changed since it was read is
-    /// <see cref="IntakeApprovalWriteResult.Changed"/> and nothing is written (the caller decides again on a fresh read).
+    /// The approval write (task 017): <see cref="IntakeRunState.ApprovedOn"/> and the approved versions on the run, in ONE transaction
+    /// conditional on BOTH rows as they were read (ontology-r1 (b)): the run at <paramref name="run"/>'s row version, and the request at
+    /// <paramref name="request"/>'s, so a request whose stage or claimer changed since the checks read it refuses the approval. The
+    /// request's part writes its stage unchanged (Awaiting approval): it is the condition, not a change. Only while the run still waits
+    /// for approval. Either row changed since it was read is <see cref="IntakeApprovalWriteResult.Changed"/> and nothing is written.
     /// </summary>
     public virtual async Task<IntakeApprovalWriteResult> RecordApprovalAsync(
-        IntakeRunSnapshot run, IReadOnlyDictionary<Guid, string> versions, CancellationToken ct)
+        IntakeRunSnapshot run, IntakeApprovalRequestSnapshot request, IReadOnlyDictionary<Guid, string> versions, CancellationToken ct)
     {
-        if (run.RowVersion is null || IsTerminalStatus(run.Status) || run.State.ApprovedOn is not null || run.State.RejectedOn is not null)
+        if (!IsDecidable(run, request) || request.IntakeStage != IntakeRequestStages.AwaitingApproval)
         {
             return IntakeApprovalWriteResult.NotApplicable;
         }
@@ -752,25 +754,20 @@ public class IntakeRunStore
         var state = run.State;
         state.ApprovedOn = _time.GetUtcNow();
         state.ApprovedVersions = new Dictionary<Guid, string>(versions);
-        try
-        {
-            await _entities.UpdateIfRowVersionMatchesAsync(RunEntity, run.RunId, run.RowVersion,
-                new Dictionary<string, object> { [RunState] = Serialize(state) }, ct).ConfigureAwait(false);
-            return IntakeApprovalWriteResult.Written;
-        }
-        catch (System.Data.DBConcurrencyException)
-        {
-            return IntakeApprovalWriteResult.Changed;
-        }
+        return await WriteDecisionAsync(
+            run, new Dictionary<string, object> { [RunState] = Serialize(state) },
+            request, new Dictionary<string, object> { [RequestIntakeStage] = new OptionSetValue(IntakeRequestStages.AwaitingApproval) },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// The rejection write (task 017): <see cref="IntakeRunState.RejectedOn"/> and the terminal status Cancelled (never Failed), in ONE
-    /// write conditional on <paramref name="run"/>'s row version, and only while the run still waits for approval.
+    /// The rejection write (task 017): <see cref="IntakeRunState.RejectedOn"/> and the terminal status Cancelled (never Failed) on the
+    /// run, and the request's stage back to In review, in ONE transaction conditional on both rows as they were read (see
+    /// <see cref="RecordApprovalAsync"/>), and only while the run still waits for approval.
     /// </summary>
-    public virtual async Task<IntakeApprovalWriteResult> RecordRejectionAsync(IntakeRunSnapshot run, CancellationToken ct)
+    public virtual async Task<IntakeApprovalWriteResult> RecordRejectionAsync(IntakeRunSnapshot run, IntakeApprovalRequestSnapshot request, CancellationToken ct)
     {
-        if (run.RowVersion is null || IsTerminalStatus(run.Status) || run.State.ApprovedOn is not null || run.State.RejectedOn is not null)
+        if (!IsDecidable(run, request) || request.IntakeStage != IntakeRequestStages.AwaitingApproval)
         {
             return IntakeApprovalWriteResult.NotApplicable;
         }
@@ -779,17 +776,48 @@ public class IntakeRunStore
         var state = run.State;
         state.RejectedOn = now;
         state.Claim = null;
-        try
-        {
-            await _entities.UpdateIfRowVersionMatchesAsync(RunEntity, run.RunId, run.RowVersion, new Dictionary<string, object>
+        return await WriteDecisionAsync(
+            run,
+            new Dictionary<string, object>
             {
                 [RunState] = Serialize(state),
                 [RunStatus] = new OptionSetValue((int)ProcessingJobStatus.Cancelled),
                 [RunCompleted] = now.UtcDateTime,
-            }, ct).ConfigureAwait(false);
+            },
+            request, new Dictionary<string, object> { [RequestIntakeStage] = new OptionSetValue(IntakeRequestStages.InReview) },
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The run and the request it was read with are still the pair a decision may write: both versions known, the run the
+    /// request's current one, waiting, and decided neither way.</summary>
+    private static bool IsDecidable(IntakeRunSnapshot run, IntakeApprovalRequestSnapshot request) =>
+        run.RowVersion is not null
+        && request.RowVersion is not null
+        && request.CurrentRunId == run.RunId
+        && !IsTerminalStatus(run.Status)
+        && run.State.ApprovedOn is null
+        && run.State.RejectedOn is null;
+
+    /// <summary>
+    /// The run's and the request's parts of a decision as ONE transaction, each conditional on the row version it was read at: all or
+    /// nothing. A version mismatch on either row is <see cref="IntakeApprovalWriteResult.Changed"/>; any other failure propagates (the
+    /// outcome may be unknown after a timeout: the caller's retry re-reads and finds the decision recorded, or records it).
+    /// </summary>
+    private async Task<IntakeApprovalWriteResult> WriteDecisionAsync(
+        IntakeRunSnapshot run, Dictionary<string, object> runFields,
+        IntakeApprovalRequestSnapshot request, Dictionary<string, object> requestFields, CancellationToken ct)
+    {
+        try
+        {
+            await _entities.ExecuteTransactionAsync(
+            [
+                DataverseServiceClientImpl.BuildConditionalUpdate(RunEntity, run.RunId, run.RowVersion!, runFields),
+                DataverseServiceClientImpl.BuildConditionalUpdate(RequestEntity, request.RequestId, request.RowVersion!, requestFields),
+            ], ct).ConfigureAwait(false);
             return IntakeApprovalWriteResult.Written;
         }
-        catch (System.Data.DBConcurrencyException)
+        catch (Exception ex) when (ex is System.Data.DBConcurrencyException
+            || (ex is not OperationCanceledException && DataverseServiceClientImpl.IsRowVersionMismatch(ex)))
         {
             return IntakeApprovalWriteResult.Changed;
         }

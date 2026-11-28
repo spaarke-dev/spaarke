@@ -1311,7 +1311,8 @@ public partial class RouteAuthorizationGuardTests
     // MapMcp (the SDK's MCP registration form). Classified by GovernedFiles (RouteLevelGate). Task 021 (2026-11-12, ADR-028 A10) removed its
     // interim Pending waiver; the route is declared by the MCP credit (McpRoutes + McpTools, RouteAuthorizationGuardTests.Mcp.cs).
     // 157 -> 158 (2026-11-28, spaarke-intake-pipeline-r1 task 017, FR-11). Net +1: Api/Intake/IntakeApprovalEndpoints.cs ADDED --
-    // POST /api/v1/intake/requests/{requestId:guid}/claim. Classified by GovernedFiles (RouteLevelGate) and a HandlerDecision below.
+    // POST /api/v1/intake/requests/{requestId:guid}/claim. Classified by GovernedFiles (RouteLevelGate: the credited
+    // AddEndpointFilter<IntakeApprovalAuthorizationFilter> below).
     private const int ExpectedEndpointFileCount = 158;
 
     // =============================================================================================
@@ -1402,12 +1403,12 @@ public partial class RouteAuthorizationGuardTests
         new CreditedForm("AddRecordRouteAccessAuthorizationFilter", "Api/Filters/RecordRouteAccessAuthorizationFilter.cs",
             "RetrievePrincipalAccess on the route record over OBO via CallerRecordAccessProbe "
             + "(RecordRouteAccessAuthorizationFilter.cs:110), 403 on deny (:155); the probe throwing is a denial (task 076)."),
-        new CreditedForm("AddEndpointFilter<IntakeApprovalAuthorizationFilter>", "Services/Intake/IntakeApprovalService.cs",
-            "spaarke-intake-pipeline-r1 task 017: the filter (IntakeApprovalEndpoints.cs:115) runs IntakeApprovalService.AuthorizeAsync, whose "
-            + "first I/O is RetrievePrincipalAccess on the route request over OBO via CallerRecordAccessProbe."
-            + "GetCallerRightsForAuthorizationGateAsync (IntakeApprovalService.cs:181), requiring Read AND Write (:182); no right, a fault, an "
-            + "unknown id or a row that is not an intake request is the uniform 404 (:184, :192, :198); then owning-team membership and the "
-            + "caller's own single linked contact, 403 otherwise (:212). The FilterFile is the service that decides; the filter is its adapter."),
+        new CreditedForm("AddEndpointFilter<IntakeApprovalAuthorizationFilter>", "Api/Intake/IntakeApprovalAuthorizationFilter.cs",
+            "spaarke-intake-pipeline-r1 task 017: the filter (IntakeApprovalAuthorizationFilter.cs:24) runs IntakeApprovalService.AuthorizeAsync "
+            + "and returns its refusal without calling next (:25), whose first I/O is RetrievePrincipalAccess on the route request over OBO via "
+            + "CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync (IntakeApprovalService.cs:195), requiring Read AND Write (:196); "
+            + "no right, a fault, an unknown id or a row that is not an intake request is the uniform 404 (:198, :206, :212); then owning-team "
+            + "membership and the caller's own single linked contact, 403 otherwise (:226). IntakeApprovalService is in DecisionServices."),
         new CreditedForm("AddEntityAccessFilter", "Api/Filters/EntityAccessFilter.cs",
             "OBO RetrievePrincipalAccess (AppendTo) on SaveRequest.TargetEntity via CallerRecordAccessProbe.GetCallerRightsAsync "
             + "(EntityAccessFilter.cs:276), 403 on deny (:291). Its pass-through on a null target is in the task-167 note."),
@@ -2789,6 +2790,8 @@ public partial class RouteAuthorizationGuardTests
         "IDataversePrivilegeChecker",    // DataverseAuthorizationFilter: entity-level Read privilege (schema routes)
         "WorkspaceLayoutService",        // owner-scoped layout lookups, deny on mismatch
         "CallerRecordAccessProbe",       // OBO RetrievePrincipalAccess, fails closed
+        "IntakeApprovalService",         // spaarke-intake-pipeline-r1 task 017: AuthorizeAsync asks CallerRecordAccessProbe (Read AND Write
+                                         // on the request), then owning-team membership and the caller's own contact; every fault denies
     };
 
     /// <summary>

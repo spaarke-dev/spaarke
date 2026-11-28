@@ -171,6 +171,39 @@ public sealed partial class DecisionCommitServiceTests
     }
 
     [Fact]
+    public async Task Task017_TheRealShape_TheRequestIsItsOwnCore_TheExecutorActsOnIt_AndTheRecordNamesTheDecider()
+    {
+        // The Signal as the evaluation writes it (SignalReevaluationJobTests.IntakeApproval): the service request is the core record, with
+        // no matter, filed under its own regarding lookup.
+        var typeRequest = Guid.Parse("c0430000-0000-4000-8000-000000000e03");
+        var rig = IntakeRig();
+        rig.Entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", typeRequest, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", typeRequest) { ["sprk_recordlogicalname"] = "sprk_servicerequest" });
+        rig.Signals[Primary]["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", typeRequest);
+        rig.Signals[Primary]["sprk_corerecordid"] = IntakeRequest.ToString("D");
+        rig.Signals[Primary].Attributes.Remove("sprk_matter");
+        // The caller's own read of the core record (the request): an active row that is not an outbound inquiry.
+        rig.Inquiries[IntakeRequest] = (Guid.Empty, BudgetInquiryExecutor.DirectionOutbound + 1, 0);
+
+        var result = await rig.CommitAsync(IntakeReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.ReasonCode);
+        var request = rig.Executors["approve-intake"].Requests.Single();
+        request.Core!.Entity.Should().Be("sprk_servicerequest");
+        request.Core.Id.Should().Be(IntakeRequest);
+        request.Subject!.Id.Should().Be(IntakeRequest);
+        request.MatterId.Should().BeNull("a request core has no matter");
+        // The decider: the caller's own contact as Assigned To Internal, the caller as Confirmed By, and the caller as the requester the
+        // ownership context stamps as sprk_createdbyperson; never an owner.
+        rig.Record.GetAttributeValue<EntityReference>("sprk_assignedtointernal").Id.Should().Be(CallerContactId);
+        rig.Record.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Caller);
+        rig.OwnerAsks.Should().NotBeEmpty();
+        rig.OwnerAsks[0].RequestedBy!.SystemUserId.Should().Be(Caller);
+        rig.Record.GetAttributeValue<EntityReference>("ownerid").LogicalName.Should().Be("team");
+        rig.Record.GetAttributeValue<string>("sprk_corerecordid").Should().Be(IntakeRequest.ToString("D"));
+    }
+
+    [Fact]
     public async Task Task017_RejectingAnIntake_RunsTheRejectExecutor_WritesOneRecord_AndResolvesTheItem()
     {
         var rig = IntakeRig();

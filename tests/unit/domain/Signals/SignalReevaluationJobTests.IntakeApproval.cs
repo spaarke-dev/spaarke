@@ -17,6 +17,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Signals;
 public partial class SignalReevaluationJobTests
 {
     private static readonly Guid IntakeRequestId = Guid.Parse("01700000-0000-4000-8000-0000000000e1");
+    private static readonly Guid IntakeRequestOwningTeamId = Guid.Parse("01700000-0000-4000-8000-0000000000e2");
     private const string IntakePolicyCode = "POL-INTAKE-APPROVAL";
     private const string IntakeBody = """{"type":"Existence","subject":"sprk_servicerequest","when":{"sprk_intakestage":100000003},"all":[]}""";
 
@@ -31,6 +32,7 @@ public partial class SignalReevaluationJobTests
             {
                 ["sprk_servicerequestid"] = IntakeRequestId,
                 ["sprk_intakestage"] = new OptionSetValue(100000003),
+                ["ownerid"] = new EntityReference("team", IntakeRequestOwningTeamId),
             },
         };
 
@@ -41,7 +43,11 @@ public partial class SignalReevaluationJobTests
         created.GetAttributeValue<OptionSetValue>("sprk_lane").Value.Should().Be(SignalWriter.LaneDecide);
         created.GetAttributeValue<EntityReference>("sprk_regardingservicerequest").Id.Should().Be(IntakeRequestId);
         created.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(IntakeRequestId), "the request is its own core record");
+        // The owner is the ownership resolver's answer (D-129/D-130: the core record's business-unit default team), NOT the request's own
+        // owning team, which the approval's membership check reads. The two differ when a request is owned by another team: an open
+        // question in the task notes, pinned here so a change to either side is seen.
         created.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
+        DefaultTeamId.Should().NotBe(IntakeRequestOwningTeamId);
         created.GetAttributeValue<string>("sprk_dedupekey").Should().Be($"{IntakePolicyCode}|sprk_servicerequest|{Lower(IntakeRequestId)}|1");
 
         h.Org.ResetCounts();

@@ -354,7 +354,55 @@ internal sealed class InMemoryDataverse
                 Apply(table, id, version, fields);
                 return Task.CompletedTask;
             });
+
+        // Task 017: a transaction of conditional updates, all or nothing. Every version is compared before anything is applied; a mismatch
+        // throws as production does (DataverseTransactionException over the ConcurrencyVersionMismatch fault, naming the request's index).
+        Mock.Setup(s => s.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
+            .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
+            {
+                lock (_gate)
+                {
+                    if (TransactionFault is { } fault && fault() is { } thrown)
+                    {
+                        throw thrown;
+                    }
+
+                    var updates = requests.Select(r => (Microsoft.Xrm.Sdk.Messages.UpdateRequest)r).ToList();
+                    for (var index = 0; index < updates.Count; index++)
+                    {
+                        var target = updates[index].Target;
+                        if (!_rows.TryGetValue((target.LogicalName, target.Id), out var row))
+                        {
+                            throw new DataverseTransactionException("row missing", index, false,
+                                new FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "does not exist"));
+                        }
+
+                        if (updates[index].ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches
+                            && target.RowVersion != Convert.ToString(row["versionnumber"]))
+                        {
+                            throw new DataverseTransactionException("version mismatch", index, false,
+                                new FaultException<OrganizationServiceFault>(
+                                    new OrganizationServiceFault { ErrorCode = DataverseServiceClientImpl.ConcurrencyVersionMismatch }, "version mismatch"));
+                        }
+                    }
+
+                    Transactions.Add(updates.Select(u => (u.Target.LogicalName, u.Target.Id)).ToList());
+                    foreach (var update in updates)
+                    {
+                        Apply(update.Target.LogicalName, update.Target.Id, expectedVersion: null,
+                            update.Target.Attributes.ToDictionary(a => a.Key, a => a.Value ?? (object)DBNull.Value));
+                    }
+                }
+
+                return Task.CompletedTask;
+            });
     }
+
+    /// <summary>Every transaction applied, as the (table, id) of each row it wrote, in order.</summary>
+    public List<IReadOnlyList<(string Table, Guid Id)>> Transactions { get; } = new();
+
+    /// <summary>When set and it returns an exception, the next transaction throws it and applies nothing (a fault, or a timeout).</summary>
+    public Func<Exception?>? TransactionFault { get; set; }
 
     /// <summary>Arms a crash: the first run write that turns <paramref name="condition"/> true is applied, then throws.</summary>
     public void CrashAfter(Func<IntakeRunState, bool> condition) => _crash = condition;

@@ -1363,13 +1363,11 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::MarkContinuationEnqueuedAsync"] = "Writes sprk_processingjob only (RunEntity): the run state's markers.",
         ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::WriteRequestStageAsync"] =
             "Writes sprk_servicerequest only (RequestEntity): sprk_intakestage and the sprk_currentrun lookup (to a run), built here.",
-        // spaarke-intake-pipeline-r1 task 017: the approval's three writes, each conditional on the row version read.
+        // spaarke-intake-pipeline-r1 task 017: the claim write, conditional on the row version read. (Approve and reject write the run
+        // and the request as one conditional transaction, not through the generic update.)
         ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::ClaimRequestAsync"] =
             "Writes sprk_servicerequest only (RequestEntity): the one claimer column (RequestClaimedBy, a contact reference built here), " +
             "conditioned on the row version; never an owner, a link column or an Access Permission.",
-        ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::RecordApprovalAsync"] = "Writes sprk_processingjob only (RunEntity): the run state.",
-        ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::RecordRejectionAsync"] =
-            "Writes sprk_processingjob only (RunEntity): the run state, the terminal status Cancelled and the completion date.",
         // ebilling-r1 task 095d-2b-2: the re-run's after-commit Signal steps record their state on the submission.
         ["Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionRerun::WriteSignalStateAsync"] =
             "Writes sprk_invoicesubmission only (FinanceBaseValues.SubmissionEntity): sprk_findingsjson and sprk_adminattention, a payload it builds itself.",

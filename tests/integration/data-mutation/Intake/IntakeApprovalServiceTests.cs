@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Intake;
@@ -263,21 +264,114 @@ public sealed class IntakeApprovalServiceTests
     }
 
     [Fact]
-    public async Task Reject_TheStageWriteFailedAfterTheRunEnded_ARetryFinishesTheStageOnly()
+    public async Task Reject_TheTransactionFaults_IsUnavailable_WritesNeitherRow_AndARetryWritesBothOnce()
     {
         var bed = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
         bed.SetClaimer(Alice.ContactId);
         var service = bed.Service();
-        await service.RejectAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None);
-        // As if the request write had not landed: the stage is still Awaiting approval.
-        bed.SetRequestColumn(IntakeRunStore.RequestIntakeStage, new OptionSetValue(IntakeRequestStages.AwaitingApproval));
-        var runWrites = bed.Run.Dataverse.RunWrites(bed.RunId).Count;
+        var before = bed.Run.Dataverse.Writes.Count;
+        bed.Run.Dataverse.TransactionFault = () => new DataverseTransactionException("no answer", null, outcomeUnknown: false, null);
 
+        var first = await service.RejectAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None);
+
+        first.Outcome.Should().Be(IntakeApprovalOutcome.Unavailable, "a write fault is a coded refusal, never a throw");
+        bed.WritesSince(before).Should().BeEmpty("the run's end and the request's stage are one transaction: neither landed");
+        bed.Run.RunStatus(bed.RunId).Should().Be((int)ProcessingJobStatus.InProgress);
+        bed.Run.RequestStage().Should().Be(IntakeRequestStages.AwaitingApproval);
+
+        bed.Run.Dataverse.TransactionFault = null;
         var retry = await service.RejectAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None);
+        var again = await service.RejectAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None);
 
         retry.Outcome.Should().Be(IntakeApprovalOutcome.Done);
+        again.Outcome.Should().Be(IntakeApprovalOutcome.Done, "a rejection already recorded is answered as done");
+        bed.Run.RunStatus(bed.RunId).Should().Be((int)ProcessingJobStatus.Cancelled);
         bed.Run.RequestStage().Should().Be(IntakeRequestStages.InReview);
-        bed.Run.Dataverse.RunWrites(bed.RunId).Should().HaveCount(runWrites, "the run is not written again");
+        bed.Run.Dataverse.Transactions.Should().ContainSingle().Which.Should().Equal(
+            (IntakeRunStore.RunEntity, bed.RunId), (IntakeRunStore.RequestEntity, IntakeRunTestBed.RequestId));
+    }
+
+    // ── ontology-r1 (b): the decision is conditional on the request as the checks read it ──────────
+
+    [Theory]
+    [InlineData(IntakeApprovalAction.Approve, "claimer")]
+    [InlineData(IntakeApprovalAction.Approve, "stage")]
+    [InlineData(IntakeApprovalAction.Reject, "claimer")]
+    [InlineData(IntakeApprovalAction.Reject, "stage")]
+    public async Task Decision_TheRequestChangedAfterTheChecksReadIt_IsWrongState_AndNothingIsWrittenOrEnqueued(IntakeApprovalAction action, string change)
+    {
+        var bed = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
+        bed.SetClaimer(Alice.ContactId);
+        // The checks have read the request (and the run); before the decision writes, someone changes the request on the form.
+        var changed = 0;
+        bed.Run.Dataverse.RunReadGate = () =>
+        {
+            if (Interlocked.Exchange(ref changed, 1) == 0)
+            {
+                if (change == "claimer")
+                    bed.SetClaimer(Bob.ContactId);
+                else
+                    bed.SetRequestColumn(IntakeRunStore.RequestIntakeStage, new OptionSetValue(IntakeRequestStages.InReview));
+            }
+
+            return Task.CompletedTask;
+        };
+        var before = bed.Run.Dataverse.Writes.Count;
+        var service = bed.Service();
+
+        var result = action == IntakeApprovalAction.Approve
+            ? await service.ApproveAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None)
+            : await service.RejectAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None);
+
+        result.Outcome.Should().Be(IntakeApprovalOutcome.WrongState, "the transition is conditional on the stage and the claimer it was checked against");
+        bed.WritesSince(before).Should().BeEmpty();
+        bed.Run.Run(bed.RunId).State.ApprovedOn.Should().BeNull();
+        bed.Run.Run(bed.RunId).State.RejectedOn.Should().BeNull();
+        bed.Run.RunStatus(bed.RunId).Should().Be((int)ProcessingJobStatus.InProgress);
+        bed.Run.Enqueued.Should().BeEmpty("nothing approved, so nothing is returned");
+    }
+
+    [Fact]
+    public async Task Approve_WritesTheRunAndTheRequestCondition_InOneTransaction()
+    {
+        var bed = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
+        bed.SetClaimer(Alice.ContactId);
+
+        await bed.Service().ApproveAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None);
+
+        bed.Run.Dataverse.Transactions.Should().ContainSingle().Which.Should().Equal(
+            (IntakeRunStore.RunEntity, bed.RunId), (IntakeRunStore.RequestEntity, IntakeRunTestBed.RequestId));
+        bed.Run.RequestStage().Should().Be(IntakeRequestStages.AwaitingApproval, "the request's part is the condition: its stage is unchanged");
+        bed.ClaimedBy().Should().Be(Alice.ContactId);
+    }
+
+    [Fact]
+    public async Task Approve_TheTransactionFaults_IsUnavailable_AndNothingIsApprovedOrEnqueued()
+    {
+        var bed = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
+        bed.SetClaimer(Alice.ContactId);
+        bed.Run.Dataverse.TransactionFault = () => new TimeoutException("no answer");
+        var before = bed.Run.Dataverse.Writes.Count;
+
+        var result = await bed.Service().ApproveAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None);
+
+        result.Outcome.Should().Be(IntakeApprovalOutcome.Unavailable);
+        bed.WritesSince(before).Should().BeEmpty();
+        bed.Run.Run(bed.RunId).State.ApprovedOn.Should().BeNull();
+        bed.Run.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Claim_TheRunCannotBeRead_IsUnavailable_AndWritesNothing()
+    {
+        var bed = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
+        bed.Run.Dataverse.RunReadGate = () => throw new TimeoutException("no answer");
+        var before = bed.Run.Dataverse.Writes.Count;
+
+        var result = await bed.Service().ClaimAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None);
+
+        result.Outcome.Should().Be(IntakeApprovalOutcome.Unavailable, "a fault after authorization is a coded 503, never a 500");
+        bed.WritesSince(before).Should().BeEmpty();
     }
 
     [Fact]
