@@ -364,11 +364,24 @@ public static class SecureRecordOwnerTeam
     /// task-144 verifier (round 2) on that condition; the PR names it.</para>
     /// <para>A <paramref name="logger"/>, when given, records the ambiguity as an error (the ownership resolver's
     /// refusal log, task 144).</para>
+    /// <para>ISS-010 D1: with a <paramref name="cache"/> (a reconciler pass's, or one child-records request's), the answer is read
+    /// once per configured name (the value read now, so a reload is never served the old unit) and kept only when exactly one unit
+    /// was found; <see langword="null"/> reads every time, as before.</para>
     /// </remarks>
-    internal static async Task<(Guid? Id, bool Ambiguous)> ResolveSecureBusinessUnitAsync(
-        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct, ILogger? logger = null)
+    internal static Task<(Guid? Id, bool Ambiguous)> ResolveSecureBusinessUnitAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct, ILogger? logger = null,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerLookupCache? cache = null)
     {
         var secureBuName = BusinessUnitName(configuration);
+        return cache is null
+            ? ReadSecureBusinessUnitAsync(dataverse, secureBuName, ct, logger)
+            : cache.SecureBusinessUnitAsync(secureBuName, () => ReadSecureBusinessUnitAsync(dataverse, secureBuName, ct, logger));
+    }
+
+    /// <summary>The read behind <see cref="ResolveSecureBusinessUnitAsync"/>.</summary>
+    private static async Task<(Guid? Id, bool Ambiguous)> ReadSecureBusinessUnitAsync(
+        IGenericEntityService dataverse, string secureBuName, CancellationToken ct, ILogger? logger)
+    {
         var buQuery = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 2, NoLock = true };
         buQuery.Criteria.AddCondition("name", ConditionOperator.Equal, secureBuName);
         var businessUnits = (await dataverse.RetrieveMultipleAsync(buQuery, ct).ConfigureAwait(false)).Entities;

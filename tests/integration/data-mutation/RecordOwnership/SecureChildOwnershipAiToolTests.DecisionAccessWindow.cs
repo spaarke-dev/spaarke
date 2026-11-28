@@ -63,8 +63,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// <summary>The same commit WITH the window (design §5, "C as recommended": 23 / 10 / 2).</summary>
     private static readonly AccessCalls WithWindow = new(10, 13, 4, 6, 2, 25, TotalWith);
 
-    private const int TotalWithout = 137;
-    private const int TotalWith = 114;
+    // ISS-010 D1 (#3184): 11 fewer than part C measured (137 / 114): the request reads the business unit and teams once (14 reads, 3).
+    private const int TotalWithout = 126;
+    private const int TotalWith = 103;
 
     /// <summary>
     /// The profile: with the window, the four-action decision asks each record-access question once per step (window 0 holds
@@ -107,7 +108,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     /// <summary>
     /// K4 off switch, must-fire: <c>Signals:DecisionAccessWindow:Enabled=false</c> makes the commit ask the wire every time (the profile
-    /// is back at the no-window counts: 32 record-access, 18 privilege-set, 8 catalog, 137 calls), with the same writes and the same
+    /// is back at the no-window counts: 32 record-access, 18 privilege-set, 8 catalog, 126 calls since D1), with the same writes and the same
     /// response as the window-on commit. Fails if the switch is not read (the window then saves its 23 calls).
     /// </summary>
     [Fact]
@@ -124,7 +125,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
         var counted = CountAccess(w.Profile);
         counted.Should().Be(WithoutWindow, $"measured: {counted}");
-        (counted.PrincipalAccess, counted.PrivilegeSets, counted.RecordTypeRefs, counted.Total).Should().Be((32, 18, 8, 137));
+        (counted.PrincipalAccess, counted.PrivilegeSets, counted.RecordTypeRefs, counted.Total).Should().Be((32, 18, 8, TotalWithout));
         w.Profile.WriteTranscript().Should().Be(onWrites, "the switch changes how often a question is asked, never what is written");
         Normalized(result).Should().Be(Normalized(onResult));
     }

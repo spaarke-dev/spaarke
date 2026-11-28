@@ -62,13 +62,14 @@ internal sealed partial class RecordCreationService
     private async Task<(RecordCreationRefusal? Refusal, (RecordCreationRefusal? Refusal, Dictionary<string, object>? Plan) Planned)>
         SecureFromCreationGateAsync(
             string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item, IDataverseUserClient user, Guid me,
-            Guid? ownerContextObjectId, RecordRequester? requestedBy, string noun, string correlationId, CancellationToken ct)
+            Guid? ownerContextObjectId, RecordRequester? requestedBy, string noun, string correlationId, CancellationToken ct,
+            RecordOwnerLookupCache? ownerLookups = null)
     {
         var planned = await PlanStampBeforeOwnerAsync(table, item, noun, ct).ConfigureAwait(false);
         if (planned.Refusal is { } stampRefusal)
             return (stampRefusal, planned);
 
-        var ordinary = await DecideOwnerAsync(table, rule, item, planned.Plan, ownerContextObjectId, me, requestedBy, noun, ct)
+        var ordinary = await DecideOwnerAsync(table, rule, item, planned.Plan, ownerContextObjectId, me, requestedBy, noun, ct, ownerLookups)
             .ConfigureAwait(false);
         if (ordinary.Refusal is { } ownerRefusal)
             return (ownerRefusal, planned);

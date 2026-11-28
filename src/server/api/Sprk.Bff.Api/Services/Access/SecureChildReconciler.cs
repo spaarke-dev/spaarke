@@ -1825,7 +1825,8 @@ public sealed class SecureChildReconciler
             {
                 // The ordinary pass has just read the Secure Record business unit (not ambiguous, or it would have ended):
                 // its questions reuse that answer rather than reading it again per row.
-                _lookupCache.SecureBusinessUnit = (ordinary.SecureBusinessUnit, false);
+                _lookupCache.SeedSecureBusinessUnit(
+                    SecureRecordOwnerTeam.BusinessUnitName(owner._configuration), (ordinary.SecureBusinessUnit, false));
             }
 
             _owner = owner;
