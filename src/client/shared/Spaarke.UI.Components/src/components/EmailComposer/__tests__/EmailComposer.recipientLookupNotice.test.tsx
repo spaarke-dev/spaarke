@@ -146,4 +146,45 @@ describe('EmailComposer: a recipient pick that cannot be resolved is reported (t
 
     expect(notice()).not.toBeNull();
   });
+
+  it('must fire: a lookup that fails shows "The lookup could not be opened. Try again."', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      renderComposer({ onLookupRecipients: jest.fn().mockRejectedValue(new Error('pane did not open')) });
+
+      fireEvent.click(toButton());
+
+      await waitFor(() => expect(notice()).not.toBeNull());
+      expect(notice()).toHaveTextContent('The lookup could not be opened. Try again.');
+      expect(notice()).not.toHaveTextContent('pane did not open');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('the failure notice clears on the next lookup that settles', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      renderComposer({
+        onLookupRecipients: jest.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce([chip]),
+      });
+      fireEvent.click(toButton());
+      await waitFor(() => expect(notice()).not.toBeNull());
+
+      fireEvent.click(toButton());
+      await waitFor(() => expect(screen.getByText('pat@example.com')).toBeInTheDocument());
+      await waitFor(() => expect(notice()).toBeNull());
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('must not fire: a cancelled lookup (null) shows no failure notice', async () => {
+    renderComposer({ onLookupRecipients: jest.fn().mockResolvedValue(null) });
+
+    fireEvent.click(toButton());
+    await waitFor(() => expect(toButton()).toBeEnabled());
+
+    expect(notice()).toBeNull();
+  });
 });

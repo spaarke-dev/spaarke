@@ -717,13 +717,26 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // line, instead of dropping the pick silently. A settled pick replaces the notice (an empty list clears it); a
   // cancel leaves it; any later edit of To/Cc/Bcc clears it. The pick's own `onChange` runs in microtasks right after
   // the lookup settles, so `recipientPickRef` holds the "this change is the pick" flag until the next macrotask.
+  // A lookup that itself failed (the platform pane did not open, the host threw) shows one line of its own; the
+  // RecipientField still logs the error. It clears the same way the skipped-pick lines do.
   const [recipientNotice, setRecipientNotice] = React.useState<IRecipientLookupSkip[]>([]);
+  const [recipientLookupFailed, setRecipientLookupFailed] = React.useState(false);
   const recipientPickRef = React.useRef(false);
   const onLookupRecipients = props.onLookupRecipients;
   const lookupRecipients = React.useCallback(
     (field: 'to' | 'cc' | 'bcc') => async (): Promise<IRecipient[] | null> => {
-      const result = await onLookupRecipients!(field);
+      let result: IRecipient[] | null;
+      try {
+        result = await onLookupRecipients!(field);
+      } catch (err) {
+        if (mountedRef.current) {
+          setRecipientNotice([]);
+          setRecipientLookupFailed(true);
+        }
+        throw err;
+      }
       if (result && mountedRef.current) {
+        setRecipientLookupFailed(false);
         setRecipientNotice((result as IRecipientLookupResult).skipped ?? []);
         recipientPickRef.current = true;
         window.setTimeout(() => {
@@ -735,7 +748,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [onLookupRecipients]
   );
   const changeRecipients = React.useCallback((field: 'to' | 'cc' | 'bcc', value: IRecipient[]) => {
-    if (!recipientPickRef.current) setRecipientNotice(prev => (prev.length > 0 ? [] : prev));
+    if (!recipientPickRef.current) {
+      setRecipientNotice(prev => (prev.length > 0 ? [] : prev));
+      setRecipientLookupFailed(false);
+    }
     dispatch({ type: 'SET_RECIPIENTS', field, value });
   }, []);
 
@@ -1620,9 +1636,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         )}
       </div>
 
-      {recipientNotice.length > 0 && (
+      {(recipientNotice.length > 0 || recipientLookupFailed) && (
         <MessageBar intent="warning" role="status" data-testid="recipient-lookup-notice">
           <MessageBarBody>
+            {recipientLookupFailed && <div>The lookup could not be opened. Try again.</div>}
             {recipientNotice.map((skip, i) => (
               <div key={`${skip.name}-${i}`}>
                 Could not add {skip.name}: {skip.reason}
