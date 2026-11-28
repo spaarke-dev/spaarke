@@ -17,10 +17,10 @@
 
 ## acme (FR-31, tasks 046/047/058)
 - 2026-11-28: the owner's "skip ACME until provisioning-r1 indicates it is stable" needs no change.
-  - acme's registry row names its own BFF, so the dev BFF skips it (#2761), and every run since 02:50Z is ok.
+  - acme's registry row names its own BFF, so the dev BFF skips it. The fix is uac-r2's #2761 / #2791, live since 2026-11-13 20:40Z; there has been no acme fault since (40,910 fault rows from 2026-10-14 to 11-13).
   - provisioning-r1 says acme is stable. Its setup status must not be changed.
   - Detail: `notes/task-047-notes.md` "Resolved 2026-11-28".
-- 046's data fix may now be moot. The owner decides whether 046 closes as "no fix needed".
+- 046's data fix is moot: #2791 resolved the fault. The owner decides whether 046 and #2578 close as "fixed by #2791".
 - provisioning-r1 FYI, not this project's: at 03:45Z a dev path met an acme SPE container (both stamps use the Model 1 container type), and the ownership guard refused it, as intended. Which dev path enumerated it is unknown.
 - Registration default (`DATAVERSE_URL`): it keeps the Warning (owner, 2026-11-27).
 

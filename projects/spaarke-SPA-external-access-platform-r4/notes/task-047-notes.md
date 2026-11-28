@@ -95,8 +95,11 @@ The membership tests run the REAL `DataverseContactIdentityStore` over a hand-wr
 
 **Resolved 2026-11-28 (items 2 and 3).** Owner decision: "skip ACME until provisioning-r1 indicates it is stable". provisioning-r1's read-only checks, same day, showed no change is needed:
 - acme's registry row is Ready and names its own BFF in `sprk_appservicename`, so the #2761 rule (`IsServedByThisBff`) already leaves it to that BFF.
-- In the dev App Insights, every run since 2026-11-28 02:50Z logs "Skipped 1 registry row(s) served by another BFF" and reports status=ok and failed=0.
-- No `0x80072560` in 3 days and nothing naming spaarke-acme in 2 days. The faults came from a build without #2791.
+- Fault history (provisioning-r1, App Insights with `--offset 90d`; the first check used the CLI's 1-hour default and was corrected):
+  - the acme `0x80072560` faults ran from 2026-10-14 21:10Z to 2026-11-13 20:35Z: 40,910 rows in traces and exceptions;
+  - the first "served by another BFF: sprk-acme-prod-api=1" skip is at 2026-11-13 20:40Z, the next run;
+  - no fault has appeared since.
+- **The fix is uac-r2's #2761 / #2791 (`f23dfed281`), live on dev since 2026-11-13, not a provisioning change.** The row's `sprk_appservicename` predates 2026-11-06, the start of the audit: no audit entry changes it, so it was most likely written by the October provisioning. The pre-#2761 job reconciled every Ready row, whatever App Service it named.
 - provisioning-r1 considers acme stable (its run completed 2026-11-26 and set Ready). It asked that the row's setup status not be changed: L2 and the provisioning skill read it.
 - No cooldown and no skip-list were added. Task 058's gate should see no acme rows.
 
