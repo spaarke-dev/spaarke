@@ -90,6 +90,11 @@ const alreadyNamed = () =>
     existingDocument: { id: EXISTING_ID, name: EXISTING_NAME },
   });
 const alreadyWithheld = () => response(202, { success: true, duplicate: false, ...job, contentDuplicate: true });
+// A re-save answered through the job key (the caller's earlier save of these bytes resolved to an existing document):
+// 200, `duplicate: true`, `contentDuplicate: true`, and never an `existingDocument` (the server names nothing there).
+const reSavedContentDuplicate = () => response(200, { success: true, duplicate: true, ...job, contentDuplicate: true });
+// A re-save of an attachment that was an ordinary save: 200, `duplicate: true`, no `contentDuplicate`.
+const reSavedPlain = () => response(200, { success: true, duplicate: true, ...job });
 const forbidden = () =>
   response(403, {
     type: 'https://spaarke.com/errors/office/access-denied',
@@ -221,6 +226,31 @@ describe('SaveFlow — an attachment already in Spaarke (task 143, owner A1)', (
     expect(retry).not.toHaveBeenCalled();
   });
 
+  it('a 200 duplicate answer through the job key that says contentDuplicate: "Already in Spaarke", counted neither saved nor failed', async () => {
+    answerSaves(reSavedContentDuplicate);
+    const outcome = await saveAttachmentsOnly([A]);
+
+    const line = within(outcome).getByTestId('attachments-only-already-in-spaarke');
+    expect(line.textContent).toBe(`${A}: Already in Spaarke`);
+    expect(within(line).queryByRole('link')).toBeNull();
+    expect(
+      within(outcome).getByText(
+        'The attachment is already in Spaarke. Nothing new was saved, and the email was not saved.'
+      )
+    ).toBeInTheDocument();
+    expect(outcome).not.toHaveTextContent('saved to Spaarke');
+    expect(outcome).not.toHaveTextContent('not saved:');
+    expect(openLinksCalls()).toHaveLength(0);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('negative: a 200 duplicate answer without contentDuplicate is still counted saved (already saved by an earlier save)', async () => {
+    answerSaves(reSavedPlain);
+    const outcome = await saveAttachmentsOnly([A]);
+
+    expect(within(outcome).getByText('1 attachment saved to Spaarke. The email was not saved.')).toBeInTheDocument();
+    expect(within(outcome).queryByTestId('attachments-only-already-in-spaarke')).toBeNull();
+  });
   it('negative: an ordinary accepted save is "saved", never "already in Spaarke"', async () => {
     answerSaves(accepted);
     const outcome = await saveAttachmentsOnly([A]);

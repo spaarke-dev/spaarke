@@ -88,6 +88,14 @@ public class OfficeAttachmentContentDuplicateTests
         return document.RootElement.Clone();
     }
 
+    /// <summary>The same request again: the caller's earlier job matches through the persistent key (200, the duplicate answer).</summary>
+    private static async Task<JsonElement> ReSaveAsync(Host host, SaveRequest request)
+    {
+        var response = await host.Client.PostAsJsonAsync("/api/office/save", request);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        return document.RootElement.Clone();
+    }
     private static void ShouldBeAlreadyInSpaarkeWithoutIdentity(JsonElement body)
     {
         body.GetProperty("success").GetBoolean().Should().BeTrue();
@@ -192,6 +200,45 @@ public class OfficeAttachmentContentDuplicateTests
         ShouldHaveChangedNothing(host.World, existingId);
     }
 
+    [Fact(DisplayName = "Task 143 A1: re-saving a content-duplicate attachment (answered through the job key) still says contentDuplicate, naming nothing")]
+    public async Task ReSaveOfAContentDuplicate_AnsweredByTheKey_SaysContentDuplicate_WithoutIdentity()
+    {
+        using var host = new Host();
+        var existingId = host.SeedExisting();
+        var request = AttachmentSave(ExhibitBytes);
+
+        var first = await SaveAsync(host, request);
+        var firstJobId = first.GetProperty("jobId").GetGuid();
+        host.World.AccessChecks.Clear();
+
+        var second = await ReSaveAsync(host, request);
+
+        second.GetProperty("duplicate").GetBoolean().Should().BeTrue("the persistent key matched the caller's earlier job");
+        second.GetProperty("jobId").GetGuid().Should().Be(firstJobId, "no second job");
+        second.GetProperty("contentDuplicate").GetBoolean().Should().BeTrue("the pane says \"Already in Spaarke\", not saved");
+        second.TryGetProperty("existingDocument", out _).Should().BeFalse("this path never names the existing document");
+        host.World.AccessChecks.Should().BeEmpty("no identity on this answer, so no access check");
+        ShouldHaveChangedNothing(host.World, existingId);
+    }
+
+    [Fact(DisplayName = "Task 143 A1: the same re-save of a content duplicate by an external caller names nothing and asks no narrowing")]
+    public async Task ReSaveOfAContentDuplicate_ExternalCaller_NamesNothing_AsksNoNarrowing()
+    {
+        using var host = new Host();
+        var existingId = host.SeedExisting();
+        host.AppOnly.Document(existingId);
+        host.Mode = NarrowingCallerMode.External;
+        var request = AttachmentSave(ExhibitBytes);
+        await SaveAsync(host, request);
+        var narrowingCallsBefore = host.AppOnly.Calls;
+
+        var second = await ReSaveAsync(host, request);
+
+        second.GetProperty("contentDuplicate").GetBoolean().Should().BeTrue();
+        second.TryGetProperty("existingDocument", out _).Should().BeFalse();
+        host.AppOnly.Calls.Should().Be(narrowingCallsBefore, "no identity to narrow");
+    }
+
     // ── Must not fire ──────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "Task 143 A1: must not fire — an attachment save that is not a duplicate carries neither field and asks no access check")]
@@ -206,5 +253,22 @@ public class OfficeAttachmentContentDuplicateTests
         body.TryGetProperty("existingDocument", out _).Should().BeFalse();
         host.World.DocumentCreates.Should().Be(1, "a new attachment is saved as before");
         host.World.AccessChecks.Should().BeEmpty("no identity to gate");
+    }
+
+    [Fact(DisplayName = "Task 143 A1: must not fire — re-saving an attachment that was NOT a content duplicate is the plain duplicate answer")]
+    public async Task ReSaveOfANormalAttachment_AnsweredByTheKey_CarriesNoContentDuplicateFields()
+    {
+        using var host = new Host();
+        host.SeedExisting();
+        var request = AttachmentSave(OtherBytes);
+        var first = await SaveAsync(host, request);
+
+        var second = await ReSaveAsync(host, request);
+
+        second.GetProperty("duplicate").GetBoolean().Should().BeTrue();
+        second.GetProperty("jobId").GetGuid().Should().Be(first.GetProperty("jobId").GetGuid());
+        second.TryGetProperty("contentDuplicate", out _).Should().BeFalse();
+        second.TryGetProperty("existingDocument", out _).Should().BeFalse();
+        host.World.DocumentCreates.Should().Be(1, "only the first save created a document");
     }
 }

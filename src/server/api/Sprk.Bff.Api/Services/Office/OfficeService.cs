@@ -626,10 +626,19 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     "Duplicate save detected, returning existing job {JobId}",
                     existingJob.JobId);
 
+                // Task 143 (owner A1): an earlier save of these bytes that resolved to an EXISTING document through content
+                // de-dup (its job's phase says so) is still a content duplicate on a re-save, so the answer says so
+                // (`ContentDuplicate`) and the pane reports "Already in Spaarke" rather than counting it saved. This path never
+                // names the existing document (`ExistingDocument` stays unset): that identity is read only through the
+                // job-status gate, and nothing here reads or returns it.
+                var isContentDuplicateJob = request.ContentType == SaveContentType.Attachment
+                    && string.Equals(existingJob.CurrentPhase, ContentDuplicatePhase, StringComparison.Ordinal);
+
                 return new SaveResponse
                 {
                     Success = true,
                     Duplicate = true,
+                    ContentDuplicate = isContentDuplicateJob,
                     JobId = existingJob.JobId,
                     StatusUrl = $"/api/office/jobs/{existingJob.JobId}",
                     StreamUrl = $"/api/office/jobs/{existingJob.JobId}/stream",
