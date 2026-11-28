@@ -306,10 +306,50 @@ public class SendTimeFieldMappingTests
 
         var send = () => Sut().SendAsync(Email(subject: "", body: "<p>b</p>", Analysed()), Http());
 
-        (await send.Should().ThrowAsync<SdapProblemException>()).Which.Detail.Should().Contain("Subject is required");
+        var problem = (await send.Should().ThrowAsync<SdapProblemException>()).Which;
+        problem.Detail.Should().Contain("Subject is required");
+        AssertNoAnalysisValueIn(problem.Detail, problem.Message);
         _graph.Requests.Should().BeEmpty();
+        _stored.Should().BeNull("nothing is stored for a send that fails its validation");
         _probe.Asked.Should().Contain(AnalysisId);
         _entities.Verify(e => e.RetrieveAsync("sprk_analysis", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Task 067, must not leak: a caller who cannot read the analysis gets none of its values, whichever field was left for the
+    /// mapping. Nothing is sent (no Graph request carries a subject, a body or any other field), nothing is stored, and the
+    /// response (the validation problem: its detail, title, code and extensions) carries no value of the analysis.
+    /// MUTATION: reading the analysis app-only for this caller sends the message with its title or summary.
+    /// </summary>
+    [Theory]
+    [InlineData(AccessRights.None, "", "<p>b</p>", "Subject is required")]
+    [InlineData(AccessRights.None, "Typed subject", "", "Body is required")]
+    [InlineData(AccessRights.None, "", "", "Subject is required")]
+    [InlineData(AccessRights.Write | AccessRights.Append, "Typed subject", "", "Body is required")]
+    public async Task ACallerWhoCannotReadTheAnalysis_NoAnalysisValueIsSentStoredOrReturned(
+        AccessRights rights, string subject, string body, string validation)
+    {
+        SubjectAndBodyProfile();
+        _probe.Rights[AnalysisId] = rights;
+
+        var send = () => Sut().SendAsync(Email(subject: subject, body: body, Analysed()), Http());
+
+        var problem = (await send.Should().ThrowAsync<SdapProblemException>()).Which;
+        problem.Detail.Should().Contain(validation);
+        AssertNoAnalysisValueIn(problem.Detail, problem.Title, problem.Code, problem.Message, JsonSerializer.Serialize(problem.Extensions));
+        _graph.Requests.Should().BeEmpty("no message is sent, so no field of one carries a value");
+        AssertNoAnalysisValueIn(_graph.Requests.Select(r => r.Body).ToArray());
+        _stored.Should().BeNull("nothing is stored");
+        _entities.Verify(e => e.RetrieveAsync("sprk_analysis", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private static void AssertNoAnalysisValueIn(params string?[] texts)
+    {
+        foreach (var text in texts.Where(t => t is not null))
+        {
+            text.Should().NotContain(AnalysisTitle).And.NotContain(AnalysisSummary)
+                .And.NotContain("Master services agreement").And.NotContain("three open risks");
+        }
     }
 
     [Fact]
