@@ -1,0 +1,40 @@
+{
+  "_version": "1.0",
+  "kind": "intake-approval-policies",
+  "description": "The intake approval policy of spaarke-intake-pipeline-r1 task 017 (FR-11; owner decision 2026-11-28: intake approval runs on the Decide lane). A Decide-lane Existence rule over the service request: it holds while the request's intake stage is Awaiting approval (sprk_intakestage 100000003). Only the intake pipeline sets sprk_intakestage, so outbound inquiries (sprk_direction Outbound, the same table) never match: their stage is empty. The intake run raises the evaluation itself (the IntakeAwaitingApproval Signal trigger); the nightly pass is the backstop, and a stage that moves on without a decision closes the Signal (ConditionCleared). The plan offers approve-intake and reject-intake, exactly one of which is taken; the commit route refuses dismissal and Also resolve for this plan, and the policy never counts toward suppression (D-11). workType is null on purpose: the Console Decide lane has no approval card yet, so the item shows under Other until task 019 adds the work type. Applied to Dataverse by scripts/intake/Apply-IntakeApprovalPolicy.ps1 (which runs scripts/Apply-DoLanePolicies.ps1 -DefinitionPath config/intake-approval.policies.json; an idempotent upsert by the fixed ids below). The policy is created with sprk_enabled = No; the owner turns it on, and the script never changes sprk_enabled on an existing row. A version row is immutable once published (FR-49, D-14): a changed body, plan or template is a NEW version entry, never an edit of this one.",
+  "policies": [
+    {
+      "policyId": "00000000-0000-4000-8000-000000170001",
+      "code": "POL-INTAKE-APPROVAL",
+      "name": "Intake request awaiting approval",
+      "shortName": "Intake request awaiting approval",
+      "lane": "Decide",
+      "subjectType": "Service Request",
+      "workType": null,
+      "severity": "Info",
+      "priority": 500,
+      "countsTowardSuppression": false,
+      "currentVersion": 1,
+      "versions": [
+        {
+          "versionId": "00000000-0000-4000-8000-000000170011",
+          "versionNumber": 1,
+          "inForceFrom": "2026-11-28T00:00:00Z",
+          "ruleType": "Existence",
+          "ruleBody": {
+            "type": "Existence",
+            "subject": "sprk_servicerequest",
+            "when": {
+              "sprk_intakestage": 100000003
+            },
+            "all": []
+          },
+          "shortHeadline": "Intake request awaiting approval",
+          "messageTemplate": "This intake request is awaiting approval.",
+          "proposedAction": "approve-intake: review the output and approve it, or reject it with reject-intake.",
+          "decisionPlan": { "actions": ["approve-intake", "reject-intake"], "nextSteps": [] }
+        }
+      ]
+    }
+  ]
+}

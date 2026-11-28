@@ -94,6 +94,10 @@ $NextStepCodes = @('add-todo', 'create-event', 'send-email', 'assign-work')
 $KindRules = @{
     'do-lane-policies'        = @{ Lane = 'Do'; NextSteps = $NextStepCodes; Codes = @('mark-complete', 'reschedule', 'reassign', 'send-reminder', 'extend-response-date', 'record-the-response') }
     'know-promotion-policies' = @{ Lane = 'Decide'; NextSteps = $NextStepCodes; Codes = @('send-budget-inquiry', 'revise-budget', 'approve-variance', 'assign-work', 'assign-task') }
+    # spaarke-intake-pipeline-r1 task 017 (config/intake-approval.policies.json, run through scripts/intake/Apply-IntakeApprovalPolicy.ps1): the intake
+    # approval plan offers only its own two actions and no Next steps, and its policy may leave workType empty (the Console shows it under Other
+    # until task 019 adds an approval work type). The intake codes are in no other kind's list, so no other plan can offer them.
+    'intake-approval-policies' = @{ Lane = 'Decide'; NextSteps = @(); Codes = @('approve-intake', 'reject-intake'); AllowNoWorkType = $true }
 }
 $MaxHeadline = 200; $MaxProposedAction = 400; $MaxShortName = 100
 
@@ -143,6 +147,9 @@ $workMap = Get-OptionMap 'sprk_policy' 'sprk_worktype'
 $severityMap = Get-OptionMap 'sprk_policy' 'sprk_severity'
 $ruleTypeMap = Get-OptionMap 'sprk_policyversion' 'sprk_ruletype'
 
+# The sprk_worktype option value of a policy; $null when the definition leaves it empty (only a kind with AllowNoWorkType may, task 017).
+function Get-WorkTypeValue($p) { if ($null -eq $p.workType) { $null } else { $workMap[$p.workType] } }
+
 # ConvertFrom-Json turns an ISO timestamp string into a DateTime; the definition and the wire both want the ISO text.
 function Get-Instant($value) {
     if ($value -is [datetime]) { $value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'") } else { [string]$value }
@@ -191,7 +198,8 @@ function Test-Definition($def) {
         if ($p.shortName.Length -gt $MaxShortName) { $problems.Add("${at}: shortName exceeds $MaxShortName characters") }
         if ($p.lane -ne $rules.Lane -or -not $laneMap.ContainsKey($p.lane)) { $problems.Add("${at}: lane must be $($rules.Lane) (kind $($def.kind)) and exist on the live column") }
         if (-not $subjectMap.ContainsKey($p.subjectType)) { $problems.Add("${at}: subjectType '$($p.subjectType)' is not on the live column") }
-        if (-not $workMap.ContainsKey($p.workType)) { $problems.Add("${at}: workType '$($p.workType)' is not on the live column") }
+        if ($null -eq $p.workType) { if (-not $rules.AllowNoWorkType) { $problems.Add("${at}: workType is required (kind $($def.kind))") } }
+        elseif (-not $workMap.ContainsKey($p.workType)) { $problems.Add("${at}: workType '$($p.workType)' is not on the live column") }
         if (-not $severityMap.ContainsKey($p.severity)) { $problems.Add("${at}: severity '$($p.severity)' is not on the live column") }
         $numbers = @($p.versions | ForEach-Object { $_.versionNumber })
         if ($numbers.Count -eq 0 -or ($numbers | Select-Object -Unique).Count -ne $numbers.Count) { $problems.Add("${at}: version numbers must be present and unique") }
@@ -257,7 +265,7 @@ function Get-PolicyDiffs($p, $row) {
         sprk_shortname               = $p.shortName
         sprk_lane                    = $laneMap[$p.lane]
         sprk_subjecttype             = $subjectMap[$p.subjectType]
-        sprk_worktype                = $workMap[$p.workType]
+        sprk_worktype                = (Get-WorkTypeValue $p)
         sprk_severity                = $severityMap[$p.severity]
         sprk_priority                = [int]$p.priority
         sprk_countstowardsuppression = [bool]$p.countsTowardSuppression
@@ -447,7 +455,7 @@ foreach ($p in $definition.policies) {
             sprk_shortname               = $p.shortName
             sprk_lane                    = $laneMap[$p.lane]
             sprk_subjecttype             = $subjectMap[$p.subjectType]
-            sprk_worktype                = $workMap[$p.workType]
+            sprk_worktype                = (Get-WorkTypeValue $p)
             sprk_severity                = $severityMap[$p.severity]
             sprk_priority                = [int]$p.priority
             sprk_countstowardsuppression = [bool]$p.countsTowardSuppression
@@ -466,7 +474,7 @@ foreach ($p in $definition.policies) {
         if ($d.Count -gt 0) {
             $patch = [ordered]@{
                 sprk_name = $p.name; sprk_shortname = $p.shortName; sprk_lane = $laneMap[$p.lane]; sprk_subjecttype = $subjectMap[$p.subjectType]
-                sprk_worktype = $workMap[$p.workType]; sprk_severity = $severityMap[$p.severity]; sprk_priority = [int]$p.priority
+                sprk_worktype = (Get-WorkTypeValue $p); sprk_severity = $severityMap[$p.severity]; sprk_priority = [int]$p.priority
                 sprk_countstowardsuppression = [bool]$p.countsTowardSuppression
             }
             if ($PSCmdlet.ShouldProcess("$DataverseUrl sprk_policy $($p.policyId)", "UPDATE $($p.code): $($d -join '; ')")) {

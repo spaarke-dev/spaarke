@@ -47,15 +47,32 @@ public class DecisionActionCatalogScriptListsTests
         return QuotedCodes(m.Groups[1].Value);
     }
 
+    /// <summary>spaarke-intake-pipeline-r1 task 017: the intake approval actions belong to their own definition kind only.</summary>
+    private static readonly string[] IntakeApprovalCodes = [DecisionActionCatalog.ApproveIntakeCode, DecisionActionCatalog.RejectIntakeCode];
+
     [Theory]
-    [InlineData("do-lane-policies", DecisionLane.Do)]
-    [InlineData("know-promotion-policies", DecisionLane.Decide)]
-    public void TheScriptsPlanActionCodes_AreExactlyTheCatalogsCodesForThatLane(string kind, DecisionLane lane)
+    [InlineData("do-lane-policies", DecisionLane.Do, false)]
+    [InlineData("know-promotion-policies", DecisionLane.Decide, false)]
+    [InlineData("intake-approval-policies", DecisionLane.Decide, true)]
+    public void TheScriptsPlanActionCodes_AreExactlyTheCatalogsCodesForThatLane(string kind, DecisionLane lane, bool intakeApproval)
     {
-        var catalog = DecisionActionCatalog.All.Where(a => a.PlanLane == lane && !a.SubstitutionOnly).Select(a => a.Code);
+        // Task 017: the Decide lane's codes are split between the two Decide kinds. The intake approval plan offers only its two actions,
+        // and no other Decide plan may offer them (the commit route treats any plan naming one as an intake approval).
+        var catalog = DecisionActionCatalog.All
+            .Where(a => a.PlanLane == lane && !a.SubstitutionOnly)
+            .Select(a => a.Code)
+            .Where(code => IntakeApprovalCodes.Contains(code) == intakeApproval);
 
         LaneCodes(ScriptText(), kind).Should().BeEquivalentTo(catalog,
             "a code missing from the script makes the lint refuse a valid plan; an extra one lets the lint pass a plan DecisionPlanService refuses at read time" + " (SubstitutionOnly codes such as create-budget are never authored: DecisionPlanService refuses them, so the script must too)");
+    }
+
+    [Fact]
+    public void TheIntakeApprovalKind_OffersNoNextSteps()
+    {
+        var m = Regex.Match(ScriptText(), @"'intake-approval-policies'\s*=\s*@\{[^}]*?NextSteps\s*=\s*@\(([^)]*)\)");
+        m.Success.Should().BeTrue("the intake approval kind lists its Next steps explicitly");
+        QuotedCodes(m.Groups[1].Value).Should().BeEmpty("an intake approval is approved or rejected; it creates no Next step");
     }
 
     [Fact]
