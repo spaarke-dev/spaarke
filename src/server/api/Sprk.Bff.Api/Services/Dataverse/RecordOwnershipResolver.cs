@@ -55,6 +55,7 @@
 //       (ReparentAsync), assigning it in a separate update and reading it back.
 //   Contact access is unaffected: contacts reach children through app-only reads keyed on the parent.
 
+using System.Collections.Concurrent;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -284,15 +285,151 @@ internal sealed record UnfiledCommunicationFacts(Guid CommunicationId, Guid? Cre
 /// <summary>
 /// UAC task 194b V-fix: one reconciler pass's cache of the per-pass-constant ownership lookups
 /// (<see cref="RecordOwnershipContext.LookupCache"/>). Only answers are kept: a read that faults propagates and is asked again.
-/// Not thread-safe: a pass decides its rows one at a time.
 /// </summary>
+/// <remarks>
+/// <para><b>ISS-010 part D1 (#3184): one per request on the child-records route.</b> Besides a pass's instance
+/// (<c>new RecordOwnerLookupCache()</c>), ONE request of <c>ChildRecordEndpoints.CreateAsync</c> carries one instance
+/// (<see cref="ForRequest"/>, in that request's <see cref="HttpContext.Items"/> under a private key), which
+/// <c>RecordCreationService</c> hands to every owner question and share sync of a CREATE of that request (never a repair, a job
+/// or any other create). It keeps the business-unit and team CONFIGURATION reads only: the Secure Record business unit by its
+/// configured name (R1), the Secure Record owner team by the configured unit and team names (R2),
+/// and each business unit's default owner team (R4). The acting user's own row is not kept (ISS-010 D1 review round 2: the route
+/// asks by system user id, so an object-id key never fired).
+/// The restricted-content and communication-filing answers a pass keeps are NOT kept per request
+/// (<see cref="RequestScoped"/>): a request may write communications, and neither was reviewed for request scope.</para>
+/// <para><b>What is kept.</b> In a request's instance, only a successful, non-empty answer: a fault, a cancellation, "not found", "ambiguous" and a
+/// refusal are removed (the exact entry, <c>TryRemove</c> of that key and instance) before the reader returns or rethrows, so the
+/// next read goes to the wire and a misconfiguration refuses the same way on every create. A pass keeps every R1 and R4 answer
+/// that did not fault, "not found" included, exactly as before ISS-010 D1 (a fault or cancellation is removed). No caller-access answer is ever kept
+/// here (ADR-009): the caller's Deep-depth business-unit test, <c>RetrievePrincipalAccess</c> and
+/// <c>RetrieveUserSetOfPrivilegesByNames</c> never pass through this type.</para>
+/// <para><b>Thread safety.</b> Each R1, R2 and R4 answer is a <see cref="Lazy{T}"/> of the read's task in a
+/// <see cref="ConcurrentDictionary{TKey, TValue}"/>, so concurrent first reads of one key issue one call and share its outcome.
+/// The restricted-content and communication-filing dictionaries stay single-threaded: only a pass (one row at a time) uses them.</para>
+/// <para><b>Why no stale read inside a request.</b> Nothing on the decision-commit path writes a <c>team</c> or
+/// <c>businessunit</c> row, a user's business unit or <c>SetBusinessSystemUser</c> (uac-r2 Q3); enforced by
+/// <c>DecisionCommitTeamWriteGuardTests</c>.</para>
+/// <para><b>Component justification (CLAUDE.md §11).</b> Existing: this type (one pass) and
+/// <c>CallerMetadataReadMemo.RequestScope</c> (the caller's schema reads per request). Extension: this IS the extension, a
+/// request-scoped instance of the pass cache with two more keys; no DI registration. Cost of doing nothing: the four-action
+/// decision reads the same business unit and teams 14 times (3 distinct), each about 90 ms live.</para>
+/// </remarks>
 public sealed class RecordOwnerLookupCache
 {
-    /// <summary>The Secure Record business unit, once read.</summary>
-    internal (Guid? Id, bool Ambiguous)? SecureBusinessUnit { get; set; }
+    /// <summary>A pass's cache (the reconciler, a cascade run).</summary>
+    public RecordOwnerLookupCache()
+        : this(requestScoped: false)
+    {
+    }
 
-    /// <summary>Each business unit's default owner team answer, once read.</summary>
-    internal Dictionary<Guid, RecordOwnerResolution> DefaultOwnerTeams { get; } = new();
+    private RecordOwnerLookupCache(bool requestScoped) => RequestScoped = requestScoped;
+
+    /// <summary>The <see cref="HttpContext.Items"/> key; a private object, so no other code can reach the request's instance.</summary>
+    private static readonly object ItemsKey = new();
+
+    /// <summary>
+    /// ISS-010 D1: the request's instance, created on first use; <see langword="null"/> without a request or once it has ended
+    /// (each owner question then reads as before). Called by <c>ChildRecordEndpoints.CreateAsync</c> and nowhere else
+    /// (<c>RequestOwnerLookupCacheCallerGuardTests</c>). Locks the request, then its <c>Items</c>, in the order
+    /// <c>CallerMetadataReadMemo.RequestScope.Of</c> does (#2851).
+    /// </summary>
+    internal static RecordOwnerLookupCache? ForRequest(HttpContext? request)
+    {
+        if (request is null)
+            return null;
+
+        try
+        {
+            lock (request)
+            {
+                var items = request.Items;
+                lock (items)
+                {
+                    if (items.TryGetValue(ItemsKey, out var known) && known is RecordOwnerLookupCache scope)
+                        return scope;
+                    var created = new RecordOwnerLookupCache(requestScoped: true);
+                    items[ItemsKey] = created;
+                    return created;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or NullReferenceException)
+        {
+            return null; // an ended request: no cache, every read asked as before
+        }
+    }
+
+    /// <summary>True for a request's instance (<see cref="ForRequest"/>): only the R1, R2 and R4 configuration reads are kept, by the
+    /// request rule; the acting user's own path (<c>ResolveFromUserAsync</c>) takes R1 and R4 from a request's instance only.</summary>
+    internal bool RequestScoped { get; }
+
+    private readonly ConcurrentDictionary<string, Lazy<Task<(Guid? Id, bool Ambiguous)>>> _secureBusinessUnits = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<Guid, Lazy<Task<RecordOwnerResolution>>> _defaultOwnerTeams = new();
+    private readonly ConcurrentDictionary<(string BusinessUnitName, string TeamName), Lazy<Task<(Guid? TeamId, string? Refusal)>>> _secureOwnerTeams = new();
+
+    /// <summary>R1: the Secure Record business unit named <paramref name="businessUnitName"/> (the configured value, read at use).
+    /// A request's instance keeps it only when exactly one unit was found; a pass keeps every answer that did not fault, "not
+    /// found" and "ambiguous" included, as it did before ISS-010 D1 (on the questions that took a pass's cache then: a parent's
+    /// and a record's, never the acting user's).</summary>
+    internal Task<(Guid? Id, bool Ambiguous)> SecureBusinessUnitAsync(string businessUnitName, Func<Task<(Guid? Id, bool Ambiguous)>> read) =>
+        OnceAsync(_secureBusinessUnits, businessUnitName, read, a => !RequestScoped || IsOneSecureBusinessUnit(a));
+
+    /// <summary>A pass that has just read the Secure Record business unit under <paramref name="businessUnitName"/> hands its
+    /// answer on (UAC task 194), "not found" included, replacing any earlier answer, as before ISS-010 D1. A request's instance
+    /// takes only a found unit.</summary>
+    internal void SeedSecureBusinessUnit(string businessUnitName, (Guid? Id, bool Ambiguous) answer)
+    {
+        if (!RequestScoped || IsOneSecureBusinessUnit(answer))
+            _secureBusinessUnits[businessUnitName] = new Lazy<Task<(Guid? Id, bool Ambiguous)>>(() => Task.FromResult(answer));
+    }
+
+    private static bool IsOneSecureBusinessUnit((Guid? Id, bool Ambiguous) answer) =>
+        answer.Id is { } id && id != Guid.Empty && !answer.Ambiguous;
+
+    /// <summary>R4: <paramref name="businessUnitId"/>'s default owner team. A request's instance keeps it only when it is owned (a
+    /// refusal is read again); a pass keeps every answer that did not fault, as before ISS-010 D1.</summary>
+    internal Task<RecordOwnerResolution> DefaultOwnerTeamAsync(Guid businessUnitId, Func<Task<RecordOwnerResolution>> read) =>
+        OnceAsync(_defaultOwnerTeams, businessUnitId, read,
+            a => !RequestScoped || (a.IsOwned && a.OwningTeamId is { } id && id != Guid.Empty));
+
+    /// <summary>R2: the Secure Record owner team under the configured unit and team names. Kept only when one team was found.
+    /// Only a request reaches it (the share synchronizer's readers take a request's instance only).</summary>
+    internal Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamAsync(
+        string businessUnitName, string teamName, Func<Task<(Guid? TeamId, string? Refusal)>> read) =>
+        OnceAsync(_secureOwnerTeams, (businessUnitName, teamName), read, a => a.TeamId is { } id && id != Guid.Empty && a.Refusal is null);
+
+
+    /// <summary>
+    /// The one read of <paramref name="key"/>: a concurrent first read shares the same call. An answer <paramref name="keep"/>
+    /// rejects, a fault and a cancellation remove that exact entry before this returns or rethrows, so the next read asks again.
+    /// </summary>
+    /// <remarks>
+    /// The <see cref="Lazy{T}"/> runs the FIRST caller's <paramref name="read"/>, so a concurrent caller of the same key waits on
+    /// a read made with the first caller's <see cref="CancellationToken"/>. That is safe only because a request's creates and share
+    /// syncs (the decision commit's steps) run one after another, so there is one caller at a time, and a cancelled read's entry is
+    /// removed, so the next caller reads with its own token. Revisit this if creates of one request ever run in parallel: a
+    /// second caller would then see the first one's cancellation.
+    /// </remarks>
+    private static async Task<T> OnceAsync<TKey, T>(
+        ConcurrentDictionary<TKey, Lazy<Task<T>>> store, TKey key, Func<Task<T>> read, Func<T, bool> keep)
+        where TKey : notnull
+    {
+        var entry = store.GetOrAdd(key, _ => new Lazy<Task<T>>(read, LazyThreadSafetyMode.ExecutionAndPublication));
+        T answer;
+        try
+        {
+            answer = await entry.Value.ConfigureAwait(false);
+        }
+        catch
+        {
+            store.TryRemove(new KeyValuePair<TKey, Lazy<Task<T>>>(key, entry));
+            throw;
+        }
+
+        if (!keep(answer))
+            store.TryRemove(new KeyValuePair<TKey, Lazy<Task<T>>>(key, entry));
+        return answer;
+    }
 
     /// <summary>R4b-2c: each answer business unit's restricted-content owner team outcome (the walk to the customer's top unit
     /// and the team there), once read.</summary>
@@ -5018,6 +5155,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private async Task<bool?> IsCommunicationFiledAsync(
         RecordOwnershipParent communication, RecordOwnerLookupCache? cache, CancellationToken ct)
     {
+        // ISS-010 D1: a request may write communications, so a request's cache never keeps a filing answer (a pass's only).
+        if (cache is { RequestScoped: true })
+            cache = null;
         if (cache is not null && cache.CommunicationFiled.TryGetValue(communication.RecordId, out var known))
             return known;
         var filed = await ReadCommunicationFiledAsync(communication, ct).ConfigureAwait(false);
@@ -5376,7 +5516,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // The user path should never meet the Secure Record BU (it holds no users; provisioning and the census job
         // refuse and report otherwise), but if it does, the answer is still the named team or a refusal — never the
         // default team task 144 retired.
-        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger).ConfigureAwait(false);
+        // ISS-010 D1 (review round 2): a request's cache only; a pass reads per question here, as before D1.
+        var requestCache = context.LookupCache is { RequestScoped: true } scoped ? scoped : null;
+        var secureBu = await SecureBusinessUnitAsync(requestCache, ct).ConfigureAwait(false);
         if (secureBu.Ambiguous)
         {
             return RecordOwnerResolution.Refused(
@@ -5387,7 +5529,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return secureBu.Id == businessUnitId
             ? await ResolveNamedSecureOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false)
             : await OrdinaryExitAsync(
-                await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false), businessUnitId.Value, context, ct)
+                await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct, requestCache).ConfigureAwait(false), businessUnitId.Value, context, ct)
                 .ConfigureAwait(false);
     }
 
@@ -5434,7 +5576,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private async Task<Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity> RestrictedContentOwnerTeamForAsync(
         Guid answerBusinessUnitId, RecordOwnerLookupCache? cache, CancellationToken ct)
     {
-        if (cache is not null && cache.RestrictedContentByAnswerBusinessUnit.TryGetValue(answerBusinessUnitId, out var known))
+        // ISS-010 D1: a request's cache keeps only the R1, R2 and R4 configuration reads; the restricted-content walk is a pass's only.
+        var passCache = cache is { RequestScoped: false } ? cache : null;
+        if (passCache is not null && passCache.RestrictedContentByAnswerBusinessUnit.TryGetValue(answerBusinessUnitId, out var known))
             return known;
 
         Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity identity;
@@ -5444,7 +5588,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         {
             identity = new(walk, null, null, 0);
         }
-        else if (cache is not null && cache.RestrictedContentByCustomerBusinessUnit.TryGetValue(customerBu, out var team))
+        else if (passCache is not null && passCache.RestrictedContentByCustomerBusinessUnit.TryGetValue(customerBu, out var team))
         {
             identity = team;
         }
@@ -5455,12 +5599,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 ? new(Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamStatus.SecureBusinessUnitAmbiguous, null, customerBu, 0)
                 : await Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam
                     .IdentifyAsync(_dataverse, _configuration, customerBu, secureBu.Id, ct).ConfigureAwait(false);
-            if (cache is not null)
-                cache.RestrictedContentByCustomerBusinessUnit[customerBu] = identity;
+            if (passCache is not null)
+                passCache.RestrictedContentByCustomerBusinessUnit[customerBu] = identity;
         }
 
-        if (cache is not null)
-            cache.RestrictedContentByAnswerBusinessUnit[answerBusinessUnitId] = identity;
+        if (passCache is not null)
+            passCache.RestrictedContentByAnswerBusinessUnit[answerBusinessUnitId] = identity;
         return identity;
     }
 
@@ -5503,29 +5647,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <summary>
     /// A business unit's DEFAULT OWNER team. Both predicates are load-bearing — see <see cref="OwnerTeamType"/>.
     /// </summary>
-    private async Task<RecordOwnerResolution> ResolveDefaultOwnerTeamAsync(
-        Guid businessUnitId, CancellationToken ct, RecordOwnerLookupCache? cache = null)
-    {
-        if (cache is not null && cache.DefaultOwnerTeams.TryGetValue(businessUnitId, out var known))
-            return known;
-        var answer = await ReadDefaultOwnerTeamAsync(businessUnitId, ct).ConfigureAwait(false);
-        if (cache is not null)
-            cache.DefaultOwnerTeams[businessUnitId] = answer;
-        return answer;
-    }
+    private Task<RecordOwnerResolution> ResolveDefaultOwnerTeamAsync(
+        Guid businessUnitId, CancellationToken ct, RecordOwnerLookupCache? cache = null) =>
+        cache is null
+            ? ReadDefaultOwnerTeamAsync(businessUnitId, ct)
+            : cache.DefaultOwnerTeamAsync(businessUnitId, () => ReadDefaultOwnerTeamAsync(businessUnitId, ct));
 
-    /// <summary>The Secure Record business unit: the pass's cached answer when it has one, else the one lookup
-    /// (<see cref="SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync"/>), kept for the pass.</summary>
-    private async Task<(Guid? Id, bool Ambiguous)> SecureBusinessUnitAsync(RecordOwnerLookupCache? cache, CancellationToken ct)
-    {
-        if (cache?.SecureBusinessUnit is { } known)
-            return known;
-        var answer = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger)
-            .ConfigureAwait(false);
-        if (cache is not null)
-            cache.SecureBusinessUnit = answer;
-        return answer;
-    }
+    /// <summary>The Secure Record business unit: the cache's answer when it has one (a pass's or, ISS-010 D1, a request's), else
+    /// the one lookup (<see cref="SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync"/>), kept by the cache when found.</summary>
+    private Task<(Guid? Id, bool Ambiguous)> SecureBusinessUnitAsync(RecordOwnerLookupCache? cache, CancellationToken ct) =>
+        SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger, cache);
 
     private async Task<RecordOwnerResolution> ReadDefaultOwnerTeamAsync(Guid businessUnitId, CancellationToken ct)
     {
