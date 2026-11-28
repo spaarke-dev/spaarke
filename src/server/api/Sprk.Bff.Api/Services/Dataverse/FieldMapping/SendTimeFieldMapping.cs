@@ -178,7 +178,7 @@ internal static class SendTimeFieldMapping
             // the caller can read), and each value copied past the caller's column view is logged by rule, source and target.
             if (sourceIsFilingParent && masked is not null)
             {
-                foreach (var accessModelTarget in AccessModelSourceColumns.TargetsOfRulesReadingOne(AnalysisTable, rules))
+                foreach (var accessModelTarget in AccessModelSourceColumns.TargetsOfRulesReadingOne(rules))
                 {
                     logger.LogWarning(
                         "[FIELD-MAPPING-SEND] {Warning} | CorrelationId: {CorrelationId}",

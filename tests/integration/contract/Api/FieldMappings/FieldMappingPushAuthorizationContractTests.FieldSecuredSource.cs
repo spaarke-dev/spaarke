@@ -155,6 +155,8 @@ public partial class FieldMappingPushAuthorizationContractTests
     [Theory]
     [InlineData("sprk_externalobjectid")]
     [InlineData("adx_identity_passwordhash")]
+    [InlineData("sprk_vendororg")]      // an invoice's firm
+    [InlineData("sprk_primarycontact")] // a user's own contact
     public async Task Push_OnAFilingEdge_ARuleReadingAnAccessModelColumn_IsNotReadAppOnly_AndIsNamed(string accessColumn)
     {
         await using var host = await PushHost.StartAsync();
@@ -181,29 +183,33 @@ public partial class FieldMappingPushAuthorizationContractTests
     }
 
     /// <summary>
-    /// Task 067 C3, must not fire: a column the access-column registry lists for another table (<c>name</c>, listed for team and
-    /// business unit) is an ordinary column of the matter. On a Filing edge it is read app-only and copied, with no warning.
-    /// MUTATION: matching registry names on every table keeps it at the caller's (empty) value and names it in a warning.
+    /// Task 067 (owner 2026-11-27), must not fire: an invoice amount (<c>sprk_totalamount</c>) is a business column, not an
+    /// access-model one, so on a Filing edge it is read app-only and copied though the caller cannot read it, with no warning.
+    /// The list matches by name on every table, so the source table here does not change the decision. MUTATION: putting
+    /// <c>sprk_totalamount</c> on the access-model list keeps it at the caller's (empty) value and names it in a warning.
     /// </summary>
-    [Fact]
-    public async Task Push_OnAFilingEdge_ARegistryNameOfAnotherTable_IsCopiedFromTheFilingParent()
+    [Theory]
+    [InlineData("sprk_totalamount")]
+    [InlineData("sprk_approvedtotal")]
+    public async Task Push_OnAFilingEdge_AnInvoiceAmountTheCallerCannotRead_IsCopiedFromTheFilingParent(string amountColumn)
     {
         await using var host = await PushHost.StartAsync();
         host.Probe.Rights = AccessRights.Read;
-        host.ExtraSourceAttributes.Add("name");
+        host.ExtraSourceAttributes.Add(amountColumn);
+        host.SourceColumnSecurity[amountColumn] = true;
         host.ArrangeHappyPathData(
             lookupsToSource: [FilingLookup],
-            rules: [PushHost.Rule("name", 0, "sprk_description", 0)],
-            extraSourceColumns: new() { ["name"] = System.Text.Json.JsonSerializer.SerializeToElement((string?)null) });
-        host.AppOnly.ExtraColumns["name"] = System.Text.Json.JsonSerializer.SerializeToElement("MATTER-NAME");
+            rules: [PushHost.Rule(amountColumn, 0, "sprk_description", 0)],
+            extraSourceColumns: new() { [amountColumn] = System.Text.Json.JsonSerializer.SerializeToElement((string?)null) });
+        host.AppOnly.ExtraColumns[amountColumn] = System.Text.Json.JsonSerializer.SerializeToElement("1250.00");
 
         var response = await host.SendAsync(Authenticated(PushBody()));
         var text = await response.Content.ReadAsStringAsync();
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, text);
-        host.AppOnly.Reads.Should().ContainSingle().Which.Query.Should().Contain("name");
-        host.Writes.Should().HaveCount(2).And.OnlyContain(w => (string?)w.Payload["sprk_description"] == "MATTER-NAME");
-        text.Should().NotContain("MATTER-NAME");
+        host.AppOnly.Reads.Should().ContainSingle().Which.Query.Should().Contain(amountColumn);
+        host.Writes.Should().HaveCount(2).And.OnlyContain(w => (string?)w.Payload["sprk_description"] == "1250.00");
+        text.Should().NotContain("1250.00", "the response returns no value the caller's own read did not");
         JsonNode.Parse(text)!["warnings"]!.AsArray().Should().BeEmpty();
     }
 

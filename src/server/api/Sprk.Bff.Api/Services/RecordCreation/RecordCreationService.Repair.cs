@@ -1416,14 +1416,14 @@ internal sealed partial class RecordCreationService
             return null;
         }
 
-        var notCopied = answer.Secured.Where(c => AccessModelSourceColumns.Contains(sourceTable, c)).ToArray();
-        var copiedSecured = answer.Secured.Where(c => !AccessModelSourceColumns.Contains(sourceTable, c)).ToArray();
+        var notCopied = answer.Secured.Where(AccessModelSourceColumns.Contains).ToArray();
+        var copiedSecured = answer.Secured.Where(c => !AccessModelSourceColumns.Contains(c)).ToArray();
         if (notCopied.Length > 0)
         {
             _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the field-secured source column(s) {Columns} of {Source} are not " +
                                    "copied", table, rowId, string.Join(", ", notCopied), sourceTable);
             var notCopiedSet = new HashSet<string>(notCopied, StringComparer.OrdinalIgnoreCase);
-            foreach (var target in AccessModelSourceColumns.TargetsOfRulesReadingOne(sourceTable,
+            foreach (var target in AccessModelSourceColumns.TargetsOfRulesReadingOne(
                          rules.Where(r => CreateTimeFieldMapping.CollectSourceColumns([r]).Any(notCopiedSet.Contains))))
             {
                 warnings.Add(AccessModelSourceColumns.NotCopiedByRepairWarning(target));
