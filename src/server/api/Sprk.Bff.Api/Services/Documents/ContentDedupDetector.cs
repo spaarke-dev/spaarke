@@ -161,12 +161,14 @@ public class ContentDedupDetector
                 return;
             }
 
+            // A duplicate notification names no other document (no regardingId, no link, no canonical name): it is a
+            // durable, asynchronous channel with no per-reader access check, and the caller may not be able to read
+            // the canonical document. The body carries only the caller's own file name.
             await _notificationService.CreateNotificationAsync(
                 userId: systemUserId.Value,
                 title: "Duplicate document detected",
                 body: $"\"{fileName}\" matches the content of an existing document, so it was not filed again. Open the existing document instead.",
                 category: "documents",
-                regardingId: canonicalId,
                 cancellationToken: ct);
         }
         catch (Exception ex)
@@ -202,12 +204,14 @@ public class ContentDedupDetector
                 return;
             }
 
+            // A duplicate notification names no other document (no regardingId, no link, no canonical name): it is a
+            // durable, asynchronous channel with no per-reader access check, and the caller may not be able to read
+            // the canonical document. The body carries only the caller's own file name.
             await _notificationService.CreateNotificationAsync(
                 userId: systemUserId.Value,
                 title: "Linked to an existing document",
                 body: $"\"{fileName}\" is currently identical to an existing document, so it was linked. It becomes its own document as soon as you edit it.",
                 category: "documents",
-                regardingId: canonicalId,
                 cancellationToken: ct);
         }
         catch (Exception ex)
