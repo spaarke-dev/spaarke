@@ -16,6 +16,9 @@ Coordination project for every Spaarke artifact in Microsoft 365 Copilot tenants
 - The Chat **Sources** switch does not stop tool calls (mcp-r1 T6b). The real off switches are disconnecting the connector or admin removal.
 - Package connectors work in Cowork; in Chat a package connector call failed before reaching the BFF (mcp-r1 T2/T13/T14, 2026-11-23).
 - Cowork shows the **plugin** name, not the connector name (T13).
+- In Cowork, a skills-only plugin reaches the tools only while the "Spaarke MCP" source is switched on (specialist G1 load check, 2026-11-28). Unlike the Chat Sources switch (T6b), this one did gate the tools.
+- Each declarative agent's MCP action asks every user to sign in to it separately ("Please sign in to Spaarke MCP G1c", demo@, 2026-11-28), even though all the actions use A1's OAuth reference id. Package connectors sharing a reference id did share one sign-in (T14). Plan a first-use sign-in per agent per user.
+- When an agent is asked to "list every tool", its first answer in a new chat may name none. It does name them after it has called a tool once in that chat, or on a retry in a new chat (G5, 2026-11-28). An empty first list does not mean the tools failed to load.
 - Two package connectors sharing one OAuth `referenceId` share one sign-in (T14).
 - An org-catalog **update** that changes a declarative agent's action takes the action offline for a while. In V1 (2026-11-24) it was still missing ~25 min after one upload, and it was back at ~40 min after another. Test an updated agent about 45 min after upload, not minutes after. This probably explains the five failed `802fd9cc` versions, each tested within minutes (not proven). Detail: specialist `notes/agent-package-identity-and-distribution.md` BR-3.
 - Skills in Word (accelerator WP-1/WP-5, 2026-11-25..27):
