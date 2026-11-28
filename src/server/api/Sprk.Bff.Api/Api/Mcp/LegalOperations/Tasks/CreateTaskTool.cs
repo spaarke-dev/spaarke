@@ -48,8 +48,10 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Tasks;
 /// route's own rules and texts, and makes the one create. Every refusal is an <c>isError</c> result with the REST route's
 /// <c>reasonCode</c> and writes nothing.</para>
 /// <para><b>Retry key.</b> <see cref="McpIdempotency"/>: per caller and key, a retry with the same inputs answers the first event's id and
-/// writes nothing; the same key with different inputs is refused; a different key is a new task. Only a create that succeeded is
-/// remembered, so a refused create can be retried with the same key.</para>
+/// writes nothing; the same key with different inputs is refused; a different key is a new task. A create that was refused wrote nothing and is
+/// not remembered, so it can be retried with the same key. A create that faulted (the row may exist) is remembered as "outcome unknown": a
+/// retry answers "may or may not have been created, check spaarke_list_tasks" and creates nothing. Once the arguments are valid the create runs
+/// with no caller token, so a caller who goes away cannot cancel it between the row and its audit write.</para>
 /// <para><b>Result.</b> <c>structuredContent</c> is <c>{ id, subject, dueDate, status, link, replayed }</c> (ADR-015: no description, owner
 /// or audit field). Logs carry the tool name, latency, outcome or reason code and correlation id only, never the subject or description.</para>
 /// </remarks>
@@ -85,6 +87,13 @@ internal sealed class CreateTaskTool : McpToolDefinition
 
     private const string FailedMessage = "The task could not be created. Nothing was saved. Try again shortly.";
 
+    /// <summary>
+    /// What a create whose outcome is unknown answers, now and on every retry with the same key: the row may already exist (the app-only
+    /// create can fault after it landed, and anything after it can throw), so neither "saved" nor "nothing was saved" is true.
+    /// </summary>
+    private const string OutcomeUnknownMessage =
+        "The task may or may not have been created. Check the matter's tasks with spaarke_list_tasks before creating it again.";
+
     private static readonly McpIdempotencyScope Scope = new(ToolName, RetryResource, LockResource);
 
     private static readonly string[] Arguments =
@@ -95,6 +104,10 @@ internal sealed class CreateTaskTool : McpToolDefinition
 
     internal static McpToolError Failed { get; } =
         new(CreateFailedReasonCode, FailedMessage, StatusCodes.Status500InternalServerError);
+
+    /// <summary>A create that faulted where a row may already exist: same code and status as <see cref="Failed"/>, text that claims nothing about what was saved.</summary>
+    internal static McpToolError OutcomeUnknown { get; } =
+        new(CreateFailedReasonCode, OutcomeUnknownMessage, StatusCodes.Status500InternalServerError);
 
     /// <summary>The description the model reads (at most 1,024 characters, "use for / not for").</summary>
     internal const string Description =
@@ -219,19 +232,28 @@ internal sealed class CreateTaskTool : McpToolDefinition
 
         return await McpIdempotency.RunOnceAsync<RetryEntry>(
             Scope, cache, http, input.IdempotencyKey, fingerprint,
-            replay: earlier => ResultOf(input.Request, earlier.EventId, consoleBaseUrl, replayed: true),
+            replay: earlier => earlier.OutcomeUnknown
+                ? TaskToolSupport.Failure(OutcomeUnknown, http)
+                : ResultOf(input.Request, earlier.EventId, consoleBaseUrl, replayed: true),
             run: async () =>
             {
+                // Once the arguments are valid and the create is about to run, a caller who goes away must not cancel it in flight: a create
+                // cancelled between the row and its audit write is a row with no answer (McpIdempotency.RememberAsync reasons the same way).
+                // A caller already gone before the create starts keeps the caller's token, so nothing is written for them.
+                var abandonedBeforeStart = cancellationToken.IsCancellationRequested;
+                var createToken = abandonedBeforeStart ? cancellationToken : CancellationToken.None;
+
                 EventCapabilityResult<CreateEventResponse> result;
                 try
                 {
-                    result = await events.CreateAsync(http, input.Request, cancellationToken);
+                    result = await events.CreateAsync(http, input.Request, createToken);
                 }
-                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                catch (Exception ex) when (!abandonedBeforeStart)
                 {
-                    // ADR-015: the exception type only (a Dataverse fault message can carry record text). A caller who has gone away rethrows.
+                    // ADR-015: the exception type only (a Dataverse fault message can carry record text). The create may have landed before
+                    // it threw, so the key is remembered as "outcome unknown".
                     logger.LogWarning("MCP tool {ToolName}: the capability faulted ({ExceptionType}).", ToolName, ex.GetType().Name);
-                    return (TaskToolSupport.Failure(Failed, http), null);
+                    return (TaskToolSupport.Failure(OutcomeUnknown, http), new RetryEntry(Guid.Empty, fingerprint, OutcomeUnknown: true));
                 }
 
                 if (result.Status == EventCapabilityStatus.Ok && result.Value is { } created)
@@ -246,11 +268,20 @@ internal sealed class CreateTaskTool : McpToolDefinition
                     catch (Exception ex)
                     {
                         logger.LogWarning("MCP tool {ToolName}: building the result faulted ({ExceptionType}).", ToolName, ex.GetType().Name);
-                        return (TaskToolSupport.Failure(Failed, http), entry);
+                        return (TaskToolSupport.Failure(OutcomeUnknown, http), entry);
                     }
                 }
 
-                // The capability answers a fault as a status; a call the caller abandoned is not a fault.
+                // Failed (a fault after which the row may exist) and an Ok with no value are not answers: remember the key as "outcome
+                // unknown" so a retry never creates a second task. Every other status (Refused, Forbidden, Invalid, ...) wrote nothing
+                // and stays unremembered, so the same key can be retried.
+                if (!abandonedBeforeStart && result.Status is (EventCapabilityStatus.Failed or EventCapabilityStatus.Ok))
+                {
+                    logger.LogWarning("MCP tool {ToolName}: the create's outcome is unknown ({Status}).", ToolName, result.Status);
+                    return (TaskToolSupport.Failure(OutcomeUnknown, http), new RetryEntry(Guid.Empty, fingerprint, OutcomeUnknown: true));
+                }
+
+                // A call the caller abandoned is not a refusal.
                 cancellationToken.ThrowIfCancellationRequested();
                 return (TaskToolSupport.Failure(ErrorOf(result), http), null);
             },
@@ -307,8 +338,12 @@ internal sealed class CreateTaskTool : McpToolDefinition
         return DecisionToolCall.Success(text, body);
     }
 
-    /// <summary>What the retry key keeps: the event it created and the fingerprint of the inputs (no key, no subject, no description).</summary>
-    internal sealed record RetryEntry(Guid EventId, string Fingerprint) : IMcpRetryEntry;
+    /// <summary>
+    /// What the retry key keeps: the event it created and the fingerprint of the inputs (no key, no subject, no description). When
+    /// <paramref name="OutcomeUnknown"/> the create faulted where the row may exist: there is no id, and a retry answers the fixed "may or
+    /// may not" text instead of creating a second task.
+    /// </summary>
+    internal sealed record RetryEntry(Guid EventId, string Fingerprint, bool OutcomeUnknown = false) : IMcpRetryEntry;
 
     /// <param name="Request">The create exactly as REST binds it.</param>
     internal sealed record CreateInput(ApiCreateEventRequest Request, string IdempotencyKey);
