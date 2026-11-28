@@ -33,7 +33,7 @@ import type {
   AuthenticatedFetchFn,
   IUserBuCascadeDefaults,
 } from '../../services/EntityCreationService';
-import type { AuthenticatedFetchFn as ThrowingFetchFn } from '../../utils/fetchTypes';
+import type { ResponseFetchFn } from '../../utils/fetchTypes';
 import { createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWriteAdapter';
 import { cleanGuid, discoverNavProps, toNavPropMap } from '../../services/PolymorphicResolverService';
 import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
@@ -563,33 +563,47 @@ export interface StreamAiSummaryCallbacks {
   onProgress?: (stepId: string) => void;
 }
 
+/** Which record the shared AI-draft endpoint writes a description for. */
+export type AiDraftRecordKind = 'matter' | 'project';
+
+/** The fields the draft is written from. For a matter `name`/`type` are the matter's; for a project, the project's. */
+export interface IAiDraftRequest {
+  kind: AiDraftRecordKind;
+  name: string;
+  type: string;
+  practiceArea: string;
+}
+
 /**
- * Streams the BFF AI endpoint to generate a draft matter summary (SSE).
+ * Streams the BFF AI endpoint to generate a draft description for a matter or a project (SSE).
+ * One helper serves both Create wizards (the endpoint is POST /api/workspace/matters/ai-summary;
+ * a project adds `recordKind: 'project'`, a matter's body is unchanged from before task 239).
  * Fires onProgress callbacks as the backend emits progress events.
  * Returns a fallback response if the endpoint is unavailable (graceful degradation).
  *
- * @param matterName - Name of the matter
- * @param matterType - Type of the matter
- * @param practiceArea - Practice area
+ * @param request - The record kind and the fields to draft from
  * @param callbacks - SSE progress callbacks
  * @param signal - Optional abort signal
  * @param authenticatedFetch - Authenticated fetch function for BFF API calls
  * @param bffBaseUrl - BFF API base URL
  */
-export async function streamAiDraftSummary(
-  matterName: string,
-  matterType: string,
-  practiceArea: string,
+export async function streamAiDraftDescription(
+  request: IAiDraftRequest,
   callbacks: StreamAiSummaryCallbacks = {},
   signal?: AbortSignal,
-  authenticatedFetch?: ThrowingFetchFn,
+  authenticatedFetch?: ResponseFetchFn,
   bffBaseUrl?: string
 ): Promise<IAiDraftSummaryResponse> {
   const { onProgress } = callbacks;
+  const { kind, name, type, practiceArea } = request;
+  const fallback = () =>
+    kind === 'project'
+      ? buildFallbackProjectDescription(name, type, practiceArea)
+      : buildFallbackSummary(name, type, practiceArea);
 
   // If no authenticatedFetch is provided, return fallback
   if (!authenticatedFetch || !bffBaseUrl) {
-    return buildFallbackSummary(matterName, matterType, practiceArea);
+    return fallback();
   }
 
   try {
@@ -604,7 +618,10 @@ export async function streamAiDraftSummary(
 
     await readSseStream({
       url: `${bffBaseUrl}/api/workspace/matters/ai-summary`,
-      body: { matterName, matterType, practiceArea },
+      body:
+        kind === 'project'
+          ? { recordKind: 'project', projectName: name, projectType: type, practiceArea }
+          : { matterName: name, matterType: type, practiceArea },
       fetchImpl: (url, init) => authenticatedFetch(url, init),
       signal,
       onLine: (line: string) => {
@@ -631,10 +648,40 @@ export async function streamAiDraftSummary(
       },
     });
 
-    return resultSummary ? { summary: resultSummary } : buildFallbackSummary(matterName, matterType, practiceArea);
+    return resultSummary ? { summary: resultSummary } : fallback();
   } catch {
-    return buildFallbackSummary(matterName, matterType, practiceArea);
+    return fallback();
   }
+}
+
+/**
+ * Streams the BFF AI endpoint to generate a draft matter summary (SSE) — the matter form of
+ * {@link streamAiDraftDescription}.
+ *
+ * @param matterName - Name of the matter
+ * @param matterType - Type of the matter
+ * @param practiceArea - Practice area
+ * @param callbacks - SSE progress callbacks
+ * @param signal - Optional abort signal
+ * @param authenticatedFetch - Authenticated fetch function for BFF API calls
+ * @param bffBaseUrl - BFF API base URL
+ */
+export async function streamAiDraftSummary(
+  matterName: string,
+  matterType: string,
+  practiceArea: string,
+  callbacks: StreamAiSummaryCallbacks = {},
+  signal?: AbortSignal,
+  authenticatedFetch?: ResponseFetchFn,
+  bffBaseUrl?: string
+): Promise<IAiDraftSummaryResponse> {
+  return streamAiDraftDescription(
+    { kind: 'matter', name: matterName, type: matterType, practiceArea },
+    callbacks,
+    signal,
+    authenticatedFetch,
+    bffBaseUrl
+  );
 }
 
 /**
@@ -651,7 +698,7 @@ export async function fetchAiDraftSummary(
   matterName: string,
   matterType: string,
   practiceArea: string,
-  authenticatedFetch?: ThrowingFetchFn,
+  authenticatedFetch?: ResponseFetchFn,
   bffBaseUrl?: string
 ): Promise<IAiDraftSummaryResponse> {
   return streamAiDraftSummary(matterName, matterType, practiceArea, {}, undefined, authenticatedFetch, bffBaseUrl);
@@ -711,5 +758,19 @@ function buildFallbackSummary(matterName: string, matterType: string, practiceAr
       `Key stakeholders have been identified and initial documentation has been uploaded for review. ` +
       `Next steps include counsel assignment and matter planning. ` +
       `Please review and update this summary with specific matter objectives and timeline.`,
+  };
+}
+
+function buildFallbackProjectDescription(
+  projectName: string,
+  projectType: string,
+  practiceArea: string
+): IAiDraftSummaryResponse {
+  const type = projectType ? `${projectType.toLowerCase()} ` : '';
+  const area = practiceArea || 'legal services';
+  return {
+    summary:
+      `This ${type}project, "${projectName}", is being set up in the ${area} practice area. ` +
+      `Please review and update this description with the project's objectives, scope and timeline.`,
   };
 }

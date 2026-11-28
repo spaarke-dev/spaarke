@@ -3726,8 +3726,8 @@ public partial class RouteAuthorizationGuardTests
             "Analyses the uploaded files in memory (MatterPreFillService.cs:308); writes nothing to storage (task "
             + "227f retired the staging upload). Reads no record by id."),
         Permanent("POST /api/workspace/matters/ai-summary", PermanentBasis.CallerSuppliedContentOnly, "167",
-            "Summarises the matter fields the client sends (prompt from the request, "
-            + "WorkspaceMatterEndpoints.cs:235); loads no matter by id."),
+            "Summarises the matter (or, with recordKind project, project) fields the client sends "
+            + "(prompt from the request, WorkspaceMatterEndpoints.cs:308); loads no record by id."),
         Permanent("POST /api/workspace/projects/pre-fill", PermanentBasis.CallerSuppliedContentOnly, "167",
             "Analyses the uploaded files (AnalyzeFilesAsync(files), WorkspaceProjectEndpoints.cs:100) in memory, "
             + "like the matter pre-fill; writes nothing to storage and reads no record by id."),

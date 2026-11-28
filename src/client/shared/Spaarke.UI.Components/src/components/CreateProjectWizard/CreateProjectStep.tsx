@@ -21,8 +21,12 @@
  *   Required: Project Name (non-empty after trim)
  *   -> `onValidChange(true)` emitted when projectName has a value
  *
+ * "Generate with AI" (task 239, owner UAT round 4 A1): mirrors Create Matter's button — enabled once the
+ * Project Name is entered, drafts the description through the shared streamAiDraftDescription helper
+ * (POST /api/workspace/matters/ai-summary with recordKind "project"), the user edits the result.
+ *
  * Constraints:
- *   - Fluent v9 only: Input, Textarea, Field, Text, Skeleton, Badge
+ *   - Fluent v9 only: Input, Textarea, Field, Text, Skeleton, Badge, Button, Spinner
  *   - makeStyles with semantic tokens — ZERO hardcoded colours
  *   - Supports light, dark, and high-contrast modes
  */
@@ -30,17 +34,21 @@
 import * as React from 'react';
 import {
   Badge,
+  Button,
   Field,
   Input,
   Skeleton,
   SkeletonItem,
+  Spinner,
   Text,
   Textarea,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
+import { SparkleRegular } from '@fluentui/react-icons';
 import { ICreateProjectFormState, EMPTY_PROJECT_FORM } from './projectFormTypes';
 import { ProjectService } from './projectService';
+import { streamAiDraftDescription } from '../CreateMatterWizard/matterService';
 import { DataverseLookupField } from '../LookupField';
 import { AiFieldTag } from '../AiFieldTag';
 import { SecureProjectSection } from './SecureProjectSection';
@@ -156,6 +164,19 @@ const useStyles = makeStyles({
     gridColumn: '1 / -1',
   },
 
+  // ── Description header: label on the left, "Generate with AI" on the right (mirrors Create Matter) ──
+  descriptionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalM,
+  },
+  labelRow: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+  },
+
   // ── Skeleton items ────────────────────────────────────────────────────────
   skeletonField: {
     display: 'flex',
@@ -224,6 +245,9 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
   const [formState, setFormState] = React.useState<ICreateProjectFormState>(() =>
     hasInitialValues ? { ...initialFormValues } : { ...EMPTY_PROJECT_FORM }
   );
+
+  // ── AI draft description (task 239) ─────────────────────────────────────
+  const [isGeneratingDescription, setIsGeneratingDescription] = React.useState(false);
 
   // ── AI pre-fill state ───────────────────────────────────────────────────
   const [aiState, setAiState] = React.useState<IAiPrefillState>({
@@ -362,6 +386,29 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
     setFormState(prev => ({ ...prev, description: e.target.value }));
   }, []);
 
+  // "Generate with AI": drafts the description from the name, type and practice area; the user edits the result.
+  // Any failure inside the shared helper degrades to its project fallback text, as Create Matter's button does.
+  const handleGenerateDescription = React.useCallback(async () => {
+    setIsGeneratingDescription(true);
+    try {
+      const result = await streamAiDraftDescription(
+        {
+          kind: 'project',
+          name: formState.projectName,
+          type: formState.projectTypeName,
+          practiceArea: formState.practiceAreaName,
+        },
+        {},
+        undefined,
+        authFetch,
+        bffBaseUrl
+      );
+      setFormState(prev => ({ ...prev, description: result.summary }));
+    } finally {
+      setIsGeneratingDescription(false);
+    }
+  }, [formState.projectName, formState.projectTypeName, formState.practiceAreaName, authFetch, bffBaseUrl]);
+
   const handleSecureChange = React.useCallback((value: boolean) => {
     setFormState(prev => ({ ...prev, isSecure: value }));
   }, []);
@@ -483,15 +530,23 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
 
           {/* ── Row 3: Project Description (full width, optional) ── */}
 
-          <Field
-            className={styles.fullWidth}
-            label={
-              <span>
+          <div className={styles.fullWidth}>
+            <div className={styles.descriptionHeader}>
+              <span className={styles.labelRow}>
                 Project Description
                 {isAiField('description') && <AiFieldTag />}
               </span>
-            }
-          >
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={isGeneratingDescription ? <Spinner size="extra-tiny" /> : <SparkleRegular />}
+                onClick={handleGenerateDescription}
+                disabled={isGeneratingDescription || !formState.projectName.trim()}
+                aria-label="Generate description with AI"
+              >
+                {isGeneratingDescription ? 'Generating\u2026' : 'Generate with AI'}
+              </Button>
+            </div>
             <Textarea
               value={formState.description}
               onChange={handleDescriptionChange}
@@ -499,9 +554,9 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
               rows={11}
               resize="vertical"
               aria-label="Project Description"
-              style={{ width: '100%' }}
+              style={{ marginTop: tokens.spacingVerticalXS, width: '100%' }}
             />
-          </Field>
+          </div>
         </div>
       )}
     </div>

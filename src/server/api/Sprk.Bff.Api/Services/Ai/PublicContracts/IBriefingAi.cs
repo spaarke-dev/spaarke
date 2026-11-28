@@ -20,7 +20,7 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// <para>
 /// Current consumers (Phase 1 inventory, 2026-05-24):
 /// - <c>Services/Workspace/BriefingService.cs</c> — optional AI narrative for the portfolio briefing card
-/// - <c>Api/Workspace/WorkspaceMatterEndpoints.cs</c> — SSE matter-summary endpoint
+/// - <c>Api/Workspace/WorkspaceMatterEndpoints.cs</c> — SSE matter/project summary endpoint
 /// </para>
 /// </remarks>
 public interface IBriefingAi
