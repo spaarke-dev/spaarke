@@ -40,9 +40,9 @@ public class FieldSecuredSourceRuleGuardTests
         ["Api/FieldMappings/FieldMappingPushLookups.cs"] = ["FieldSecuredSourceRule.CountsAsSecured("],
         ["Services/Dataverse/FieldMapping/SendTimeFieldMapping.cs"] =
             [".ApplyOrLiftForFilingParentAsync(sourceIsFilingParent,", "AccessModelSourceColumns.TargetsOfRulesReadingOne("],
-        ["Services/Dataverse/FieldMapping/MappingSourceCallerMask.cs"] = ["mappedColumns.Where(AccessModelSourceColumns.Contains)"],
+        ["Services/Dataverse/FieldMapping/MappingSourceCallerMask.cs"] = ["mappedColumns.Where(c => AccessModelSourceColumns.Contains(sourceEntityLogicalName, c))"],
         ["Services/RecordCreation/RecordCreationService.Repair.cs"] =
-            ["answer.Secured.Where(AccessModelSourceColumns.Contains)", "AccessModelSourceColumns.NotCopiedByRepairWarning("],
+            ["answer.Secured.Where(c => AccessModelSourceColumns.Contains(sourceTable, c))", "AccessModelSourceColumns.NotCopiedByRepairWarning("],
     };
 
     /// <summary>Task 067 (C3): the access-model list's own definition; no other field-mapping source spells one of its columns.</summary>

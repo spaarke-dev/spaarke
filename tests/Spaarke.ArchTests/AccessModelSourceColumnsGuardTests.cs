@@ -33,7 +33,10 @@ public class AccessModelSourceColumnsGuardTests
     {
         ["sprk_invoice.sprk_matter"] = "the invoice's matter (a filing lookup; the target side keeps its own rules)",
         ["sprk_invoice.sprk_project"] = "the invoice's project (a filing lookup; the target side keeps its own rules)",
+        ["sprk_invoice.sprk_regardingworkassignment"] = "the invoice's work assignment (a filing lookup; the target side keeps its own rules)",
         ["sprk_invoice.sprk_supersedesinvoice"] = "the invoice this one supersedes (a business lookup)",
+        ["sprk_project.sprk_regardingrecordid"] = "the regarding pair's id (text; the target side is copy-invariant)",
+        ["sprk_project.sprk_regardingrecordtype"] = "the regarding pair's type (the target side is copy-invariant)",
         ["sprk_invoice.sprk_createdbyperson"] = "the creator's person (descriptive; the target side is copy-invariant)",
         ["sprk_matter.sprk_createdbyperson"] = "the creator's person (descriptive; the target side is copy-invariant)",
         ["sprk_project.sprk_createdbyperson"] = "the creator's person (descriptive; the target side is copy-invariant)",
@@ -113,7 +116,7 @@ public class AccessModelSourceColumnsGuardTests
     internal static IReadOnlyList<string> Unclassified(
         IEnumerable<SecuredColumn> secured, IReadOnlyDictionary<string, string> business) =>
         secured
-            .Where(c => !AccessModelSourceColumns.Contains(c.Column) && !business.ContainsKey($"{c.Table}.{c.Column}"))
+            .Where(c => !AccessModelSourceColumns.Contains(c.Table, c.Column) && !business.ContainsKey($"{c.Table}.{c.Column}"))
             .Select(c => $"{c.Table}.{c.Column} ({c.File})")
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
@@ -125,7 +128,7 @@ public class AccessModelSourceColumnsGuardTests
     {
         var present = secured.Select(c => $"{c.Table}.{c.Column}").ToHashSet(StringComparer.Ordinal);
         return business
-            .Where(e => !present.Contains(e.Key) || AccessModelSourceColumns.Contains(e.Key[(e.Key.IndexOf('.') + 1)..])
+            .Where(e => !present.Contains(e.Key) || AccessModelSourceColumns.Contains(e.Key[..e.Key.IndexOf('.')], e.Key[(e.Key.IndexOf('.') + 1)..])
                         || string.IsNullOrWhiteSpace(e.Value))
             .Select(e => e.Key)
             .Order(StringComparer.Ordinal)
@@ -166,24 +169,34 @@ public class AccessModelSourceColumnsGuardTests
         Assert.Equal(PinnedAccessModelColumns, AccessModelSourceColumns.Exact.Select(c => c.ToLowerInvariant()).Order(StringComparer.Ordinal));
         Assert.Equal("sprk_identitycollision", AccessModelSourceColumns.IdentityCollisionPrefix);
 
-        // Must fire: the two C3 names on every table, spelled any way, and the prefix.
-        Assert.True(AccessModelSourceColumns.Contains("adx_identity_passwordhash"));
-        Assert.True(AccessModelSourceColumns.Contains(" SPRK_IsSecure "));
-        Assert.True(AccessModelSourceColumns.Contains("sprk_identitycollisionreason"));
+        // Must fire: the exact names and the prefix on every table (any table, none at all), spelled any way.
+        Assert.True(AccessModelSourceColumns.Contains("contact", "adx_identity_passwordhash"));
+        Assert.True(AccessModelSourceColumns.Contains("sprk_matter", " SPRK_IsSecure "));
+        Assert.True(AccessModelSourceColumns.Contains(null, "sprk_identitycollisionreason"));
+        Assert.True(AccessModelSourceColumns.Contains("account", "sprk_graphdriveid"));
+        Assert.True(AccessModelSourceColumns.Contains("sprk_document", " SPRK_RestrictedBySubmission "));
 
-        // Must fire: a document's file binding, and a column the access-column registry names (any table, any spelling).
-        Assert.True(AccessModelSourceColumns.Contains("sprk_graphdriveid"));
-        Assert.True(AccessModelSourceColumns.Contains(" SPRK_RestrictedBySubmission "));
-        Assert.True(AccessModelSourceColumns.Contains(" ParentSystemUserId "));
-        Assert.All(
-            Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.AccessColumns.Values.SelectMany(c => c),
-            column => Assert.True(AccessModelSourceColumns.Contains(column), column + " is in the access-column registry but not denied"));
+        // Must fire: a column the access-column registry lists, on the table it lists it for (any spelling of either), and
+        // every registry entry on its own table.
+        Assert.True(AccessModelSourceColumns.Contains("team", "name"));
+        Assert.True(AccessModelSourceColumns.Contains(" BusinessUnit ", " Name "));
+        Assert.True(AccessModelSourceColumns.Contains("systemuser", " ParentSystemUserId "));
+        foreach (var (table, columns) in Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.AccessColumns)
+        {
+            Assert.All(columns, column => Assert.True(AccessModelSourceColumns.Contains(table, column),
+                $"{table}.{column} is in the access-column registry but not denied"));
+        }
 
-        // Must not fire: a business column, a name that only contains an access-model name, nothing.
-        Assert.False(AccessModelSourceColumns.Contains("sprk_clientname"));
-        Assert.False(AccessModelSourceColumns.Contains("sprk_issecurebackup_x"));
-        Assert.False(AccessModelSourceColumns.Contains("x_sprk_identitycollision"));
-        Assert.False(AccessModelSourceColumns.Contains(null));
+        // Must not fire: a registry name on a table the registry does not list it for (the filing parent's own columns are
+        // copied), or with no table; a business column; a name that only contains an access-model name; nothing.
+        Assert.False(AccessModelSourceColumns.Contains("sprk_matter", "name"));
+        Assert.False(AccessModelSourceColumns.Contains("account", "name"));
+        Assert.False(AccessModelSourceColumns.Contains("sprk_event", "sprk_regardingmatter"));
+        Assert.False(AccessModelSourceColumns.Contains(null, "parentsystemuserid"));
+        Assert.False(AccessModelSourceColumns.Contains("sprk_matter", "sprk_clientname"));
+        Assert.False(AccessModelSourceColumns.Contains("sprk_matter", "sprk_issecurebackup_x"));
+        Assert.False(AccessModelSourceColumns.Contains("contact", "x_sprk_identitycollision"));
+        Assert.False(AccessModelSourceColumns.Contains("contact", null));
     }
 
     private static string EntityXml(string table, params (string Column, bool Secured)[] attributes) =>
@@ -200,6 +213,8 @@ public class AccessModelSourceColumnsGuardTests
         { "an unclassified secured column on a table that carries sprk_issecure",
             EntityXml("sprk_Matter", ("sprk_issecure", false), ("sprk_newsecret", true)) },
         { "an unclassified secured column on sprk_document", EntityXml("sprk_Document", ("sprk_newsecret", true)) },
+        { "a registry name on a table the registry does not list it for",
+            EntityXml("sprk_Matter", ("sprk_issecure", false), ("name", true)) },
         { "an unclassified secured column on sprk_communication", EntityXml("sprk_Communication", ("sprk_newsecret", true)) },
     };
 

@@ -726,7 +726,7 @@ public static class FieldMappingEndpoints
             var liftedFields = new HashSet<string>(StringComparer.Ordinal);
             if (filedUnderTheSource)
             {
-                var accessModelTargets = AccessModelSourceColumns.TargetsOfRulesReadingOne(selection.Rules);
+                var accessModelTargets = AccessModelSourceColumns.TargetsOfRulesReadingOne(request.SourceEntity, selection.Rules);
                 if (accessModelTargets.Count > 0)
                     sourceRuleWarnings = [.. sourceRuleWarnings, .. accessModelTargets.Select(AccessModelSourceColumns.ReadAsTheCallerWarning)];
 
@@ -1176,7 +1176,7 @@ public static class FieldMappingEndpoints
         string[] fields,
         CancellationToken ct)
     {
-        var lifted = fields.Where(f => !AccessModelSourceColumns.Contains(f)).ToArray();
+        var lifted = fields.Where(f => !AccessModelSourceColumns.Contains(sourceEntity, f)).ToArray();
         var select = FieldMappingPushLookups.SourceSelectColumns(lifted, callerRead.Attributes);
         if (select.Length == 0)
         {

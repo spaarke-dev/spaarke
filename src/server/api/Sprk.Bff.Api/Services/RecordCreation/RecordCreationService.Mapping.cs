@@ -438,7 +438,7 @@ internal sealed partial class RecordCreationService
         // logged by rule, source and target column (never the value).
         if (sourceIsFilingRecord && masked is not null)
         {
-            foreach (var accessModelTarget in AccessModelSourceColumns.TargetsOfRulesReadingOne(copyable))
+            foreach (var accessModelTarget in AccessModelSourceColumns.TargetsOfRulesReadingOne(source.EntityLogicalName, copyable))
             {
                 warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingRuleSkippedCode, accessModelTarget,
                     AccessModelSourceColumns.ReadAsTheCallerWarning(accessModelTarget)));
