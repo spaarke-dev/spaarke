@@ -127,6 +127,18 @@ public class FeatureRolePrivilegeGuardTests
         "prvAppendTosprk_analysis", "prvAppendTosprk_Organization", "prvAppendToAccount", "prvAppendToContact",
     ];
 
+    /// <summary>Read on every regarding table a communication task can be filed under (the twelve of
+    /// <see cref="CommunicationRegardingAppendTo"/>): the create-task routes ask Read with AppendTo (#3317).</summary>
+    private static readonly string[] CommunicationRegardingRead =
+    [
+        "prvReadsprk_Matter", "prvReadsprk_Project", "prvReadsprk_Invoice", "prvReadsprk_ServiceRequest",
+        "prvReadsprk_WorkAssignment", "prvReadsprk_Event", "prvReadsprk_Budget", "prvReadsprk_ReportCard",
+        "prvReadsprk_analysis", "prvReadsprk_Organization", "prvReadAccount", "prvReadContact",
+    ];
+
+    private const string CommCreateTaskRegarding = Bff + "Api/Filters/CommunicationRecordAuthorizationFilter.cs:720-733; "
+        + Bff + "Services/Ai/Nodes/ActionCore/TaskActionCore.cs:225,397-410";
+
     private const string CommSendRegarding = Bff + "Api/Filters/CommunicationRecordAuthorizationFilter.cs:650-706,779-787; "
         + Bff + "Services/Communication/Engine/RegardingFieldMap.cs:14-27; " + Bff + "Services/Communication/RegardingNameFields.cs:70-85";
 
@@ -351,6 +363,13 @@ public class FeatureRolePrivilegeGuardTests
         .. For("Communication re-file (Basic User)", [Basic], "Deep", CommRefileOwn, "prvWritesprk_Communication", "prvReadsprk_Communication"),
         .. For("Communication re-file (Basic User)", [Basic], "Deep", CommRefileRegarding, CommunicationRegardingAppendTo),
         .. For("Communication re-file (Basic User)", [Basic], "Deep", CommRefileAppend, "prvAppendsprk_Communication"),
+
+        // Communication create-task (POST /api/communications/{id}/create-task and .../proposals/{reviewLogId}/create-task/apply):
+        // the filter asks Read AND AppendTo on the regarding record as the caller (#3317, the owner's D-3181 rule: the create copies
+        // the record's name onto the task app-only), then Create on sprk_event. Regarding records are team-owned (I-6): Deep.
+        .. For("Communication create-task", [Core], "Deep", CommCreateTaskRegarding, CommunicationRegardingRead),
+        .. For("Communication create-task", [Core], "Deep", CommCreateTaskRegarding, CommunicationRegardingAppendTo),
+        .. For("Communication create-task", [Core], "Basic", Bff + "Api/Filters/CommunicationRecordAuthorizationFilter.cs:732", "prvCreatesprk_Event"),
 
         // Summarize Files, an unfiled document (POST /api/v1/documents, unified-access-control-r2 PR #2577): the endpoint asks Create on
         // sprk_document as the caller before the app-only write. The new row is owned by the caller's business-unit team, and Core User

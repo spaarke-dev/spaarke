@@ -362,7 +362,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
     }
 
     // =============================================================================================
-    // POST /{communicationId}/create-task — visibility, AppendTo, Create (+ Assign) on sprk_event
+    // POST /{communicationId}/create-task — visibility, Read + AppendTo (#3317), Create (+ Assign) on sprk_event
     // =============================================================================================
 
     [Fact]
@@ -385,6 +385,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
 
     [Theory]
     [InlineData("no AppendTo")]
+    [InlineData("no Read (#3317)")]
     [InlineData("non-existent regarding")]
     [InlineData("type with no entity set")]
     [InlineData("no Create privilege")]
@@ -401,7 +402,8 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
             case "no AppendTo": _host.Probe.Grant(MatterSet, matter, AccessRights.Read); break;
             case "non-existent regarding": body = AdHocBody(Guid.NewGuid()); break;
             case "type with no entity set": body = AdHocBody(matter, regardingEntity: "sprk_recordtype_ref"); break;
-            case "no Create privilege": _host.Probe.Reset(); _host.Probe.Grant(MatterSet, matter, AccessRights.AppendTo); break;
+            case "no Read (#3317)": _host.Probe.Grant(MatterSet, matter, AccessRights.AppendTo); break;
+            case "no Create privilege": _host.Probe.Reset(); _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo); break;
             case "assigned to someone else without Assign": body = AdHocBody(matter, assignedTo: Guid.NewGuid()); break;
         }
 
@@ -426,6 +428,25 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         var unknown = await _host.SendAsync(Request(HttpMethod.Post, $"/api/communications/{id}/create-task", AdHocBody(Guid.NewGuid())));
 
         (await NormalizedBodyAsync(unknown)).Should().Be(await NormalizedBodyAsync(denied));
+    }
+
+    // #3317 (the owner's D-3181 rule extended): the create copies the regarding record's name onto the task app-only, so a caller who
+    // may attach to the record but not read it is refused, with the answer a record that does not exist gets, and nothing is created.
+    [Fact]
+    public async Task CreateAdHocTask_AppendToWithoutRead_Is403_ByteIdenticalToANonExistentRegarding_AndNothingIsCreated()
+    {
+        var id = Guid.NewGuid();
+        VisibleCommunication(id);
+        var matter = Guid.NewGuid();
+        GrantTaskRights(matter);
+        _host.Probe.Grant(MatterSet, matter, AccessRights.AppendTo); // denied: no Read
+
+        var denied = await _host.SendAsync(Request(HttpMethod.Post, $"/api/communications/{id}/create-task", AdHocBody(matter)));
+        var unknown = await _host.SendAsync(Request(HttpMethod.Post, $"/api/communications/{id}/create-task", AdHocBody(Guid.NewGuid())));
+
+        denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await NormalizedBodyAsync(unknown)).Should().Be(await NormalizedBodyAsync(denied));
+        AssertNoCreate("sprk_event");
     }
 
     // Task 066 F2-A: an old client still sends the retired `status` (deprecated 0-7 vocabulary, whose 1 and 2 are valid
@@ -553,6 +574,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
 
     [Theory]
     [InlineData("no AppendTo on the target")]
+    [InlineData("no Read on the target (#3317)")]
     [InlineData("no Create privilege")]
     [InlineData("assigned to someone else without Assign")]
     public async Task ProposalCreateTaskApply_VisibleButMissingARight_Is403_AndNothingIsCreated(string missing)
@@ -567,7 +589,8 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         switch (missing)
         {
             case "no AppendTo on the target": _host.Probe.Grant(MatterSet, matter, AccessRights.Read); break;
-            case "no Create privilege": _host.Probe.Reset(); _host.Probe.Grant(MatterSet, matter, AccessRights.AppendTo); break;
+            case "no Read on the target (#3317)": _host.Probe.Grant(MatterSet, matter, AccessRights.AppendTo); break;
+            case "no Create privilege": _host.Probe.Reset(); _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo); break;
             case "assigned to someone else without Assign": body = new { assignedTo = Guid.NewGuid() }; break;
         }
 
