@@ -191,6 +191,18 @@ Which option to take is for uac-r2 and field-mapping-r1 to weigh in on, then the
 | Data cleanup | Backfill lookups on existing email documents (R9 sequencing) | Clear own lookups on Office-saved email documents (same sequencing) |
 | D-218 | Superseded | Superseded |
 
+### uac-r2 follow-up: A is acceptable with the mirror inside `ReparentAsync` (peers now agree on A)
+
+With the mirror inside `RecordOwnershipResolver.ReparentAsync`, under its lock and before `AfterRefileAsync`, it is the one ownership writer, not a second one. Conditions, on top of R1/R4/R5/R7/R10 and field-mapping-r1's refusal of email-document lookups as mapping targets:
+
+1. **All or nothing.** A failed mirror write leaves C's re-file unfinished and retryable (as a failed share sync does today). Never C moved while its documents stay behind unrecorded.
+2. **Lock order.** Document writes go through the document re-file core (R7) and take each document's own lock, always C then its documents, never the reverse. A test shows a concurrent document re-file cannot deadlock with it.
+3. **Paths outside `ReparentAsync`.** Creates copy C's filing in the same write; direct Dataverse edits and anything missed are caught by the safety-net pass comparing C to its documents.
+4. **Contact plane.** An email document carrying `sprk_matter = M` must not become visible to M's contacts when C is Restricted, No Access or secure-suppressed for them: the document narrowing applies C's veto, so `sprk_relatedcommunication` is stamped on every child, parent-only Office children included (R9). Must-fire test: a Restricted C under M, a contact granted M, the email document hidden.
+5. **R1.** Every reader that trusts a document's own slot Read-checks a mirrored slot as derived.
+
+uac-r2 gates the code. **Recommendation to the owner: A, hooked in `ReparentAsync`, with both peers' conditions.**
+
 Both peers agree on: D-218 superseded by name; no lookups written from a Suggested filing under A; E-1 mirrors C's own regarding, not the thread's; `sprk_relatedcommunication` on every child; the C re-file's refusal must not reveal C's filing.
 
 ## 6. Owner questions
@@ -200,6 +212,6 @@ Both peers agree on: D-218 superseded by name; no lookups written from a Suggest
 - **Q3 — Outlook save to a different record.** Keep C where it is and tell the user (with a Change action), rather than move it on save. Recommendation: yes; moving stays an explicit action.
 - **Q4 — Re-filing an email document directly** (Documents tab, "File to record"): delegate to the Communication re-file, or refuse with a pointer to it? Recommendation: delegate.
 - **Q5 — Documents a user linked to a communication by hand** (not archives or attachments): do they follow too? Recommendation: no; only archives and attachments are email documents.
-- **Q0 — A or B** (§5b). Peers split: uac-r2 B, field-mapping-r1 A.
+- **Q0 — A or B** (§5b). Both peers now accept A with the mirror inside `ReparentAsync` (uac-r2 under five conditions). Recommendation: A.
 - **Q6 — Re-map on re-file (A only, raised by field-mapping-r1).** When an email document follows C to a new record, do values mapped from the old record get re-mapped from the new one, or stay (today's behaviour for every re-file; Repair is fill-only)?
 - **Q1 revised by both peers:** under A, a Suggested filing writes no lookups; under B it already gives the documents C's access.
