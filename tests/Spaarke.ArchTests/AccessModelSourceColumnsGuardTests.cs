@@ -37,7 +37,7 @@ public class AccessModelSourceColumnsGuardTests
         ["sprk_invoice.sprk_invoiceadjustmentstotal"] = "an invoice amount",
         ["sprk_invoice.sprk_lineadjustmentstotal"] = "an invoice amount",
         ["sprk_invoice.sprk_totalamount"] = "an invoice amount",
-        ["sprk_invoice.sprk_matter"] ="the invoice's matter (a filing lookup; the target side keeps its own rules)",
+        ["sprk_invoice.sprk_matter"] = "the invoice's matter (a filing lookup; the target side keeps its own rules)",
         ["sprk_invoice.sprk_project"] = "the invoice's project (a filing lookup; the target side keeps its own rules)",
         ["sprk_invoice.sprk_regardingworkassignment"] = "the invoice's work assignment (a filing lookup; the target side keeps its own rules)",
         ["sprk_invoice.sprk_supersedesinvoice"] = "the invoice this one supersedes (a business lookup)",
