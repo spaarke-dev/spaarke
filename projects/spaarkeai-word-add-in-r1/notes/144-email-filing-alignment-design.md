@@ -157,6 +157,42 @@ Most of R1, R4, R7 and R10 exist because the design stores the same fact twice. 
 
 Which option to take is for uac-r2 and field-mapping-r1 to weigh in on, then the owner.
 
+## 5b. Peer reviews of A vs B (2026-11-27, on 63e036b5dd) — they disagree
+
+### uac-r2 (access, re-file): B, with conditions
+
+- A stores an access-bearing fact twice. A document's own record lookups are lineage parents (`SecureChildLineage`, `DocumentLinkFields.All`), outrank the communication as ownership parent, feed `RecordContainerResolver.DocumentPointer`, and writing one is a document re-file (R7). A mirror is a second writer on that fact; every gap becomes wrong owner, container or sharees. Today those follow C through one path (`SecureChildReconciler`).
+- B makes E-1 true by construction; R1, R4, R7, R10 disappear for email documents.
+- **Conditions for B:** (1) a write-time guard that an email document carries no record lookup, in every BFF document write path (child-records PATCH, `PUT /api/v1/documents/{id}`, AI update tool/node, field-mapping push, Office save) — delegate to the C re-file (preferred) or refuse — backed by an ArchTest/source-scan guard with must-fire controls; discriminate by `sprk_isemailarchive`, `sprk_relatedcommunication`, or a `sprk_parentdocument` whose root is an email archive; direct Dataverse edits stay a known limit caught by the safety net. (2) An owner-run one-time cleanup of own lookups on existing Office-saved email documents, dry run first, sequenced with uac-r2's container migration verify and the strict flip, relocator in the same pass. (3) Stamp `sprk_relatedcommunication` on every child, including parent-only Office children (R9). (4) Every BFF "a record's documents" list that adds the via-communication branch takes access from the evaluator over C; Restricted, No Access and secure apply through C exactly; nothing inferred from "the record is readable"; the external portal gets the external-access owner's OK first. (5) Retire D-218 under B, recorded as superseded by name.
+- **If A is chosen,** the §5a changes for R1, R4, R5, R7 and R10 are mandatory.
+- **Corrections:** the delegated C re-file needs Write on C, AppendTo on the target and F3 to leave a secure record; a caller who reached the document but cannot write C gets the route's own refusal, which must not reveal C's filing. R6: E-1 mirrors C's OWN regarding, not the thread's effective filing; the thread re-anchor stays a separate path. Q1: under B a Suggested C already gives its documents C's access (no new exposure); under A, do not write lookups from an engine guess.
+
+### field-mapping-r1 (field mapping, Office create paths): A, with the mirror inside the re-parent core
+
+- **Field mapping keys on the row's own filing lookup.** Create's mapping source is the record the row is filed under (065/067 decide the lift from that lookup); the push reaches children only through listed filing edges (matter→document via `sprk_matter`); Repair maps from the filing parent. Under B every matter→document rule stops reaching email documents on all three surfaces; restoring it needs a new two-hop "via `sprk_relatedcommunication`" filing-edge kind in create, push and Repair, which reopens 065/067's filing-parent decision on all four surfaces.
+- **Hook point (corrects §3.3 and R5):** the field-mapping push does not use `OwnedChildWrite.RefileAsync`; it calls `ReparentAsync` then `AfterRefileAsync` (skipped when `ParentsUnchanged`). Put `AlignAsync` inside `ReparentAsync`'s write closure / under its lock right after the write — one call site, and it meets R4.
+- **Field mapping must not re-file an email document:** on email documents the mirrored lookups become refused mapping targets on create, push and Repair (warning names the target; only the mirror writes them); the same for `sprk_relatedcommunication` and `sprk_parentdocument` on every document. A push writing C's own regarding stays allowed (that is a re-file of C; the mirror follows).
+- **Office save ordering:** container and owner are decided before the row (SPE upload to the picked record's container; owner team from the pick). Under A, resolve C's filing first, then container, then owner, then upload — otherwise the file lands in Y's container. **Acceptance criterion:** the create's mapping source = the record actually written, not the pick.
+- **Gap in A not named:** a mirror re-file does not re-run mapping; values mapped from the old record stay, and Repair is fill-only (true of every re-file today) → owner question Q6.
+- D-218: one mapping function shared by `StageArchiveRecordLink` and the mirror, owning only derivable columns; send-time attachments use it; D-218 superseded by name. field-mapping-r1 offers to take task 2's field-mapping parts under A.
+
+### Main-session check of the hook point (grep, master tree)
+
+`IRecordOwnershipResolver.ReparentAsync` callers: `OwnedChildWrite` (generic child-records PATCH and the C re-file), `DataverseDocumentsEndpoints` (document re-file), `FieldMappingEndpoints` (push), `UpdateRecordActionCore` (shared by the chat `DataverseUpdateRecordHandler` and the playbook `UpdateRecordNodeExecutor`), `IncomingAssociationResolver` (inbound association and `ApplyToExistingRecordAsync`, which `ReconciledEmailFiling` uses), `ThreadResolver` (thread join), `DataverseUpdateHandler`. So every BFF writer R5 names re-parents through one method. Not through it: creates (C or a document created already filed), `MarkFiledBySender` (status only), and direct Dataverse edits. Grep-level; confirm each caller writes C's regarding through the closure before relying on it.
+
+### Where this leaves the choice
+
+| | A — copy, hooked in `ReparentAsync` | B — derive through C |
+|---|---|---|
+| Writers to keep in sync | One call site for every BFF re-parent; creates copy at create; direct Dataverse edits caught by the safety net | None — a guard keeps email documents lookup-free |
+| Access / owner / container | Mirror writes must run inside the re-parent lock, before the after-refile step (R4), version-checked (R10); mirrored slots Read-checked by readers (R1) | Already follow C today; unchanged |
+| Field mapping | Unchanged (keys on the own lookup); email-document lookups become refused mapping targets | matter→document rules stop reaching email documents unless a new two-hop edge kind is built in create, push and Repair (reopens 065/067) |
+| Record Documents lists, external portal, search | Unchanged | Every list adds an "or via communication" branch with access from the evaluator over C; portal needs its owner's OK |
+| Data cleanup | Backfill lookups on existing email documents (R9 sequencing) | Clear own lookups on Office-saved email documents (same sequencing) |
+| D-218 | Superseded | Superseded |
+
+Both peers agree on: D-218 superseded by name; no lookups written from a Suggested filing under A; E-1 mirrors C's own regarding, not the thread's; `sprk_relatedcommunication` on every child; the C re-file's refusal must not reveal C's filing.
+
 ## 6. Owner questions
 
 - **Q1 — Suggested.** Does an engine-suggested (unconfirmed) filing also file the documents? Recommendation: yes, so the record's documents and communications always agree; confirming changes only the status.
@@ -164,3 +200,6 @@ Which option to take is for uac-r2 and field-mapping-r1 to weigh in on, then the
 - **Q3 — Outlook save to a different record.** Keep C where it is and tell the user (with a Change action), rather than move it on save. Recommendation: yes; moving stays an explicit action.
 - **Q4 — Re-filing an email document directly** (Documents tab, "File to record"): delegate to the Communication re-file, or refuse with a pointer to it? Recommendation: delegate.
 - **Q5 — Documents a user linked to a communication by hand** (not archives or attachments): do they follow too? Recommendation: no; only archives and attachments are email documents.
+- **Q0 — A or B** (§5b). Peers split: uac-r2 B, field-mapping-r1 A.
+- **Q6 — Re-map on re-file (A only, raised by field-mapping-r1).** When an email document follows C to a new record, do values mapped from the old record get re-mapped from the new one, or stay (today's behaviour for every re-file; Repair is fill-only)?
+- **Q1 revised by both peers:** under A, a Suggested filing writes no lookups; under B it already gives the documents C's access.
