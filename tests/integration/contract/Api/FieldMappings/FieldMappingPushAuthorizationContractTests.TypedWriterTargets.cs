@@ -95,6 +95,8 @@ public partial class FieldMappingPushAuthorizationContractTests
         var body = JsonNode.Parse(text)!;
         foreach (var column in columns)
             ShouldNameTheRefusedTarget(body, column, refusedRules: 3);
+        text.Should().NotContain("None of this profile's rules is set to be pushed",
+            "every rule was set to push; the refusal warnings say why none was applied");
     }
 
     /// <summary>The predicate is the one the create's mapping asks for a mapping target (no list of its own).</summary>

@@ -595,7 +595,8 @@ public static class FieldMappingEndpoints
                     UpdatedCount = 0,
                     FailedCount = 0,
                     SkippedCount = 0,
-                    Warnings = ["None of this profile's rules is set to be pushed.", .. selection.Warnings],
+                    // DI-053: when rules were refused, their warnings say why; the generic sentence is only for a profile with nothing set to push.
+                    Warnings = selection.Warnings.Count == 0 ? ["None of this profile's rules is set to be pushed."] : [.. selection.Warnings],
                     SkippedRuleCount = selection.SkippedCount,
                     Preview = request.Preview ? true : null,
                     Changes = request.Preview ? [] : null,
