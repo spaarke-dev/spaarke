@@ -14,6 +14,11 @@ SPEC_KEYS = {"name", "description", "license", "compatibility", "metadata", "all
 NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 MAX_COMPANIONS, MAX_FILE, MAX_TOTAL = 20, 5 * 1024 * 1024, 10 * 1024 * 1024
 MAX_PLUGIN_SKILLS = 20
+# Microsoft: SKILL.md under 20,000 characters (required for declarative-agent skills, recommended for Copilot Chat;
+# not listed in the Cowork plugin validation rules). Kept as a precaution: whether the admin-center upload enforces it
+# is unconfirmed (it refused probe v0.6 too, whose SKILL.md files were all under 20,000; the 0.x version is the
+# likelier cause, 2026-11-27).
+MAX_SKILL_MD_CHARS = 20_000
 # Legal for Cowork / Word legal plugin skill names we must not collide with (design §5.7-1)
 RESERVED_NAMES = {"review-contract", "edit-contract", "draft-new-contract", "summarize-redlines", "create-playbook",
                   "extract-obligations-and-deadlines", "legal-reasoning", "triage-nda", "legal-research"}
@@ -84,6 +89,9 @@ def lint_skill(folder, topic_ids):
     desc = str(fm.get("description", ""))
     if not desc or len(desc) > 1024:
         add("description-length", f"description is {len(desc)} chars (1..1024)")
+    md_chars = len(_read(skill_md))
+    if md_chars > MAX_SKILL_MD_CHARS:
+        add("skill-md-size", f"SKILL.md is {md_chars:,} chars (<= {MAX_SKILL_MD_CHARS:,}); move detail to references/")
     if not re.search(r"\bUse (for|when)\b", desc):
         add("description-triggers", "description has no 'Use for ...' trigger phrases")
     if "Do NOT use for" not in desc:
