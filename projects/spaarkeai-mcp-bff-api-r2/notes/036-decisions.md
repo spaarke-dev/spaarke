@@ -62,3 +62,22 @@ Not tested through the wire (known limit, K-036-1): the tools are driven through
 2. ArchTest "ADR-010: Services should be concrete unless seam required": the 1:1 interface count is 174 against a limit of 173 (before this task's code; no interface was added here).
 
 rework: none task 036
+
+## Review (two opus passes)
+
+### F1 (fixed): a create whose outcome is unknown was forgotten, so a host retry created a second task
+`IEventsCapability.CreateAsync` answers `Failed` where the `sprk_event` row may already exist: the app-only create faulting after Dataverse stored the row (`RecordCreationService`: "a create that faulted may have landed... it propagates"), or anything after the row throwing, including a cancellation out of `WriteCreatedAuditLogAsync` (`EventsCapability.CreateCoreAsync`'s catch-all turns it into `Failed`). The tool answered "Nothing was saved. Try again shortly." and kept no entry; a cancelled caller rethrew and kept nothing. A retry with the same `idempotencyKey` then created a second task, on exactly the timeout path the key exists for.
+
+Fix, in `CreateTaskTool.cs` only (`EventsCapability` and `McpIdempotency` unchanged):
+1. `Refused` (and every other non-Ok, non-Failed status) is guaranteed to have written nothing: still not remembered, REST reason codes kept. `Failed`, an `Ok` with no value, and an exception out of the capability are an unknown outcome: the tool remembers a `RetryEntry(Guid.Empty, fingerprint, OutcomeUnknown: true)` under the key and answers `events.create_failed` (500) with "The task may or may not have been created. Check the matter's tasks with spaarke_list_tasks before creating it again." A retry with the same key and inputs replays that same text and creates nothing; the same key with other inputs is still `KeyReused`. "Nothing was saved" stays only where it is true (a refusal REST gives no code).
+2. Once the arguments are valid and the create is about to run, `CreateAsync` is called with `CancellationToken.None`, so a caller going away cannot cancel it in flight (the reasoning `McpIdempotency.RememberAsync` documents). A caller already cancelled before the create starts keeps today's behaviour: the caller's token goes through, nothing is remembered, the call throws.
+3. `CompleteTaskTool` has the same shape (a status write that landed, then a later fault answered "could not be completed", nothing remembered) but the reviewer classed it K and the fix is not the same two lines: the next call heals it (`alreadyCompleted: true`), and "unknown" there needs a different replay answer. Left unchanged; see K4.
+
+Tests (`TaskWriteToolsTests`): must-fire, the app-only create double records the create then throws, and a retry performs no second create and answers the "may or may not" text; must-fire, the audit write cancels the caller's token after the row exists, the call still answers and a retry replays the id with one create; must-not-fire, a `Refused` create (the regarding-stamp refusal) writes nothing, answers its own reason code twice and never the "may or may not" text. Run against the previous `CreateTaskTool`, the first two fail (two rows created), the third passes; against this change all pass.
+
+### Known limits (not fixed, on purpose)
+- **K1** Two calls with the same key inside one cache round trip can both pass the get-then-set lock and both write (D-031-1, #3231). Belongs to `ITenantCache` (needs an atomic set-if-absent), not to a tool.
+- **K2** Neither write tool has a 30 s `CancelAfter`, on purpose: cancelling a write mid-flight worsens F1. A host retry during a slow write is answered `KeyInProgress` by the 2-minute lock.
+- **K3** The tool trims `subject`; REST does not. The parity test sends already-trimmed input.
+- **K4** A complete replay says Completed even if the task was reopened since. A status write that landed followed by a later fault reports "could not be completed" until the next call heals it (`alreadyCompleted: true`).
+- **K5** A replay is answered from the cache for 24 hours without re-checking access. It returns only the caller's own inputs and the task id, so nothing is disclosed.

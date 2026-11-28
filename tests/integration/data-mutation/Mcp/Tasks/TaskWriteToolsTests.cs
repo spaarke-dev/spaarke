@@ -292,6 +292,102 @@ public sealed class TaskWriteToolsTests
         creates.Should().BeEmpty();
     }
 
+    // ---- create: a create whose outcome is unknown (review F1) --------------------------------------------------------------------------
+
+    private const string UnknownText = "may or may not have been created";
+
+    [Fact]
+    public async Task Create_WhenTheAppOnlyCreateFaultsAfterTheRowLanded_RemembersTheKey_AndARetryCreatesNothing()
+    {
+        // The app-only create can fault AFTER Dataverse stored the row (RecordCreationService: "a create that faulted may have landed"). The
+        // capability answers Failed; "Nothing was saved" would be false, and forgetting the key makes the host's retry create a second task.
+        await using var host = await EventsAuthHost.StartAsync();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.CaptureCreates();
+        host.AppOnly.Setup(a => a.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) => host.AppOnlyCreates.Add((table, id, fields)))
+            .ThrowsAsync(new HttpRequestException("The request timed out after the row was stored."));
+        var (capability, request) = CapabilityOver(host);
+        var cache = new InMemoryTenantCache();
+        var arguments = new { subject = "Call the client", idempotencyKey = "k-landed" };
+
+        var first = await Create(capability, request(OidOne), cache, arguments);
+        var retry = await Create(capability, request(OidOne), cache, arguments);
+
+        host.AppOnlyCreates.Should().ContainSingle("the row landed once; the retry with the same key must not create a second task");
+        foreach (var answer in new[] { first, retry })
+        {
+            ReasonOf(answer).Should().Be(CreateTaskTool.CreateFailedReasonCode);
+            Body(answer).GetProperty("message").GetString().Should().Contain(UnknownText).And.Contain("spaarke_list_tasks").And.NotContain("Nothing was saved");
+        }
+    }
+
+    [Fact]
+    public async Task Create_WhenTheCallerCancelsAfterTheRowLanded_StillAnswersItsId_AndARetryCreatesNothing()
+    {
+        // The caller goes away while the audit row is being written (a timeout on the host's side). The row exists. The create must not
+        // be cancelled in flight, and the key must be left behind so the host's retry replays the id.
+        await using var host = await EventsAuthHost.StartAsync();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.CaptureCreates();
+        using var caller = new CancellationTokenSource();
+        host.Events.Setup(e => e.CreateEventLogAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => caller.Cancel())
+            .ThrowsAsync(new OperationCanceledException());
+        var (capability, request) = CapabilityOver(host);
+        var cache = new InMemoryTenantCache();
+        var arguments = new { subject = "Call the client", idempotencyKey = "k-cancelled" };
+
+        ModelContextProtocol.Protocol.CallToolResult? first = null;
+        try
+        {
+            first = await CreateTaskTool.RunAsync(Args(arguments), request(OidOne), cache, capability, ConsoleUrl, NullLogger.Instance, caller.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The old behaviour: the call threw and left no key.
+        }
+
+        var retry = await Create(capability, request(OidOne), cache, arguments);
+
+        host.AppOnlyCreates.Should().ContainSingle("a retry after a caller who went away must not create a second task");
+        first.Should().NotBeNull("the create was not cancelled in flight, so it answers");
+        first!.IsError.Should().NotBe(true, first.StructuredContent?.ToString());
+        retry.IsError.Should().NotBe(true, retry.StructuredContent?.ToString());
+        Body(retry).GetProperty("replayed").GetBoolean().Should().BeTrue();
+        Body(retry).GetProperty("id").GetString().Should().Be(Body(first).GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task Create_ACreateThatWasRefusedWritesNothing_AndIsNotRemembered_SoItAnswersTheRefusalAgain()
+    {
+        // Must-not-fire: a Refused create is guaranteed to have written nothing, so it is NOT the "may or may not" answer and the key stays free.
+        await using var host = await EventsAuthHost.StartAsync();
+        var analysis = Guid.NewGuid();
+        const string analysesSet = "sprk_analysises";
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant(analysesSet, analysis, AccessRights.Read | AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(analysesSet);
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);
+        host.ColumnProbe = (_, _) => throw new InvalidOperationException("metadata unavailable");
+        host.CaptureCreates();
+        var (capability, request) = CapabilityOver(host);
+        var cache = new InMemoryTenantCache();
+        var arguments = new { subject = "Review", regardingRecordType = 3, regardingRecordId = analysis, idempotencyKey = "k-refused" };
+
+        var first = await Create(capability, request(OidOne), cache, arguments);
+        var again = await Create(capability, request(OidOne), cache, arguments);
+
+        foreach (var answer in new[] { first, again })
+        {
+            ReasonOf(answer).Should().Be("events.regarding_stamp_failed");
+            Body(answer).GetProperty("message").GetString().Should().NotContain(UnknownText);
+        }
+
+        host.AppOnlyCreates.Should().BeEmpty("a refused create writes nothing");
+    }
+
     // ---- complete ---------------------------------------------------------------------------------------------------------------------
 
     /// <summary>An event the caller may write, whose live status is <paramref name="initial"/> and follows what the capability writes.</summary>

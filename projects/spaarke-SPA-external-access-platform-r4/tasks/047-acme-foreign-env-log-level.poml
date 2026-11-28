@@ -4,7 +4,7 @@
     <title>Foreign-environment readability 403 logs at Warning (or skips with a cooldown); own environment stays fail-closed (FR-31 c, #2578)</title>
     <phase>4 Access, sign-in, carry-overs, Teams</phase>
     <gate>after 038 (P3 deploy)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tag bff-api; modifies an existing scheduled job (.cs) under Services/</rigor-reason>
     <model-tier>sonnet</model-tier>
