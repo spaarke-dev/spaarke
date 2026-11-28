@@ -98,6 +98,9 @@ import type {
   IEmailComposerProps,
   IComposerAttachmentSource,
   IPickedRecord,
+  IRecipient,
+  IRecipientLookupResult,
+  IRecipientLookupSkip,
   IEmailTemplateSummary,
   IEmailAiDraftAction,
   IValidationResult,
@@ -708,6 +711,49 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       ),
     [returnFocus]
   );
+
+  // Recipient picks the host could not turn into an address (a deleted or inaccessible record, a record with no email
+  // address): the host reports them on the lookup result's `skipped` list and the composer shows each as one warning
+  // line, instead of dropping the pick silently. A settled pick replaces the notice (an empty list clears it); a
+  // cancel leaves it; any later edit of To/Cc/Bcc clears it. The pick's own `onChange` runs in microtasks right after
+  // the lookup settles, so `recipientPickRef` holds the "this change is the pick" flag until the next macrotask.
+  // A lookup that itself failed (the platform pane did not open, the host threw) shows one line of its own; the
+  // RecipientField still logs the error. It clears the same way the skipped-pick lines do.
+  const [recipientNotice, setRecipientNotice] = React.useState<IRecipientLookupSkip[]>([]);
+  const [recipientLookupFailed, setRecipientLookupFailed] = React.useState(false);
+  const recipientPickRef = React.useRef(false);
+  const onLookupRecipients = props.onLookupRecipients;
+  const lookupRecipients = React.useCallback(
+    (field: 'to' | 'cc' | 'bcc') => async (): Promise<IRecipient[] | null> => {
+      let result: IRecipient[] | null;
+      try {
+        result = await onLookupRecipients!(field);
+      } catch (err) {
+        if (mountedRef.current) {
+          setRecipientNotice([]);
+          setRecipientLookupFailed(true);
+        }
+        throw err;
+      }
+      if (result && mountedRef.current) {
+        setRecipientLookupFailed(false);
+        setRecipientNotice((result as IRecipientLookupResult).skipped ?? []);
+        recipientPickRef.current = true;
+        window.setTimeout(() => {
+          recipientPickRef.current = false;
+        }, 0);
+      }
+      return result;
+    },
+    [onLookupRecipients]
+  );
+  const changeRecipients = React.useCallback((field: 'to' | 'cc' | 'bcc', value: IRecipient[]) => {
+    if (!recipientPickRef.current) {
+      setRecipientNotice(prev => (prev.length > 0 ? [] : prev));
+      setRecipientLookupFailed(false);
+    }
+    dispatch({ type: 'SET_RECIPIENTS', field, value });
+  }, []);
 
   // "Link another record" → pick a record via the host polymorphic picker and APPEND it to the
   // in-memory "Related to" list (owner UAT 2026-07-31). No record exists yet in compose/reply/
@@ -1551,12 +1597,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           required
           disabled={state.readOnly}
           value={state.to}
-          onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'to', value: recipients })}
+          onChange={recipients => changeRecipients('to', recipients)}
           onSearch={props.onSearchRecipients}
           onLookup={
-            props.onLookupRecipients
-              ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('to'))
-              : undefined
+            props.onLookupRecipients ? trigger => withLookupFocusReturn(trigger, lookupRecipients('to')) : undefined
           }
           errorMessage={fieldErrors.to}
         />
@@ -1564,12 +1608,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           label="Cc"
           disabled={state.readOnly}
           value={state.cc}
-          onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'cc', value: recipients })}
+          onChange={recipients => changeRecipients('cc', recipients)}
           onSearch={props.onSearchRecipients}
           onLookup={
-            props.onLookupRecipients
-              ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('cc'))
-              : undefined
+            props.onLookupRecipients ? trigger => withLookupFocusReturn(trigger, lookupRecipients('cc')) : undefined
           }
         />
         {bccVisible ? (
@@ -1577,12 +1619,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             label="Bcc"
             disabled={state.readOnly}
             value={state.bcc}
-            onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'bcc', value: recipients })}
+            onChange={recipients => changeRecipients('bcc', recipients)}
             onSearch={props.onSearchRecipients}
             onLookup={
-              props.onLookupRecipients
-                ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('bcc'))
-                : undefined
+              props.onLookupRecipients ? trigger => withLookupFocusReturn(trigger, lookupRecipients('bcc')) : undefined
             }
           />
         ) : (
@@ -1595,6 +1635,19 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           )
         )}
       </div>
+
+      {(recipientNotice.length > 0 || recipientLookupFailed) && (
+        <MessageBar intent="warning" role="status" data-testid="recipient-lookup-notice">
+          <MessageBarBody>
+            {recipientLookupFailed && <div>The lookup could not be opened. Try again.</div>}
+            {recipientNotice.map((skip, i) => (
+              <div key={`${skip.name}-${i}`}>
+                Could not add {skip.name}: {skip.reason}
+              </div>
+            ))}
+          </MessageBarBody>
+        </MessageBar>
+      )}
 
       <div className={mergeClasses(styles.section, styles.subjectSpacer)} role="region" aria-label="Subject">
         <Input

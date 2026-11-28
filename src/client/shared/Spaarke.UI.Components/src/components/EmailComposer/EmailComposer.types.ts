@@ -257,6 +257,24 @@ export interface IRecipient {
   entityType?: 'contact' | 'systemuser';
 }
 
+/**
+ * One advanced-lookup pick that could not be turned into a recipient: the record's display name and a short,
+ * user-facing reason ("the record could not be read ...", "it has no email address on file").
+ */
+export interface IRecipientLookupSkip {
+  /** The picked record's display name (a generic label when the picker gave none). */
+  name: string;
+  /** Why it was not added, as a clause that follows "Could not add {name}: ". */
+  reason: string;
+}
+
+/**
+ * What `onLookupRecipients` may return: the recipients to append, optionally carrying `skipped` - the picks that
+ * could not be resolved. It IS an `IRecipient[]`, so a host that declares the narrower `Promise<IRecipient[] | null>`
+ * still compiles; only the composer reads `skipped` and shows it, instead of dropping a pick silently.
+ */
+export type IRecipientLookupResult = IRecipient[] & { skipped?: IRecipientLookupSkip[] };
+
 // ---------------------------------------------------------------------------
 // Validation contract (design §5.8)
 // ---------------------------------------------------------------------------
@@ -553,7 +571,7 @@ export interface IEmailComposerProps {
    * and resolves the picked record(s) to email address(es). Additive to the typeahead — the
    * user can still type. Returns the recipients to append (or empty/null if cancelled).
    */
-  onLookupRecipients?: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipient[] | null>;
+  onLookupRecipients?: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipient[] | IRecipientLookupResult | null>;
 
   /**
    * Record-lookup targets for the attachments "look up a record" tool (owner UAT round 5).

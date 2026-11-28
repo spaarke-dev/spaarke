@@ -23,7 +23,7 @@ export type { ISmartTodoKanbanProps } from './SmartTodoKanban';
 
 // ── Shared top-bar (hoisted from the SmartTodo Code Page, R5 follow-up
 //    2026-08-17) so the Code Page AND SmartTodoWidget render the IDENTICAL
-//    Header (Filter · + New Task · overflow) + inline SearchFilter — a code page
+//    Header (Filter · New To Do · overflow) + inline SearchFilter — a code page
 //    and its widget must compose the same shared-lib components. ──────────────
 export { Header } from './Header';
 export type { HeaderProps } from './Header';

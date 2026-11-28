@@ -118,7 +118,7 @@ import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
 import type { IKanbanDataverseService } from '../../types/kanban';
 import { SmartTodoKanban } from '../../components/SmartTodoKanban';
-// SHARED Header — the SAME top-bar the Code Page renders (Filter · + New Task ·
+// SHARED Header — the SAME top-bar the Code Page renders (Filter · New To Do ·
 // overflow + inline SearchFilter), hoisted into this package so both surfaces
 // compose one component (smart-todo-r5 follow-up 2026-08-17). Relative import
 // (not the package root) to avoid a self-referential barrel cycle.
@@ -963,7 +963,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
             REPLACED by the SAME `<Header>` the Code Page renders — hoisted into
             `@spaarke/smart-todo-components`. A code page and its widget must
             compose the same shared-lib components (§11), so the widget's
-            toolbar now IS the Code Page's: Filter · + New Task · overflow
+            toolbar now IS the Code Page's: Filter · New To Do · overflow
             (Layout/Refresh) + the inline `<SearchFilter>`. Wired to the widget's
             own state/callbacks. Header owns the title row (the LegalWorkspace
             section sets `hideTitle`, so it isn't duplicated). ── */}

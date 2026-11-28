@@ -25,6 +25,8 @@ import type {
   IRecordLookupTarget,
   IPickedRecord,
   IRecipient,
+  IRecipientLookupResult,
+  IRecipientLookupSkip,
   IEmailTemplateSummary,
   IEmailTemplateRenderResult,
   IEmailAiDraftRequest,
@@ -66,9 +68,107 @@ const RECIPIENT_EMAIL_FIELD: Record<string, string> = {
   systemuser: 'internalemailaddress',
 };
 
+/** A pick from `Xrm.Utility.lookupObjects` (the fields the recipient resolution reads). */
+export interface IRecipientPick {
+  id: string;
+  name?: string;
+  entityType: string;
+}
+
+/** Reads a record's email column (`Xrm.WebApi.retrieveRecord` / the PCF's `context.webAPI.retrieveRecord`). */
+export type RetrieveRecipientRecord = (
+  entityType: string,
+  id: string,
+  options: string
+) => Promise<Record<string, unknown> | undefined>;
+
+// Dataverse error codes (and HTTP statuses) that mean "the record is not there / you may not read it".
+const DV_OBJECT_DOES_NOT_EXIST = 0x80040217;
+const DV_ACCESS_DENIED = 0x80040220;
+
+/** Reads a numeric Dataverse error code or HTTP status off an Xrm / PCF WebApi error, in either of its shapes. */
+function numericField(err: unknown, key: string): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const v = (err as Record<string, unknown>)[key];
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string' && /^(0x[0-9a-f]+|-?\d+)$/i.test(v.trim())) return Number(v.trim());
+  return undefined;
+}
+
+/**
+ * True when a failed `retrieveRecord` means the record is gone or not readable by this user (error code
+ * "does not exist" / "access denied", or HTTP 401/403/404); anything else (network, throttling, 5xx, unknown) is
+ * treated as possibly transient. The error's own text is never shown to the user.
+ */
+export function isRecordNotFoundOrDenied(err: unknown): boolean {
+  for (const key of ['errorCode', 'code']) {
+    const n = numericField(err, key);
+    if (n !== undefined && (n >>> 0 === DV_OBJECT_DOES_NOT_EXIST || n >>> 0 === DV_ACCESS_DENIED)) return true;
+  }
+  for (const key of ['status', 'statusCode', 'httpStatus']) {
+    const n = numericField(err, key);
+    if (n === 401 || n === 403 || n === 404) return true;
+  }
+  return false;
+}
+
+/**
+ * Turn people-picker picks into recipient chips, and say WHY any pick could not become one (the composer shows
+ * "Could not add {name}: {reason}" instead of dropping it silently). A pick is skipped when it is not a contact or a
+ * user, when its record cannot be read (deleted or no access - the Recent list can hold either - or a transient
+ * read failure, each with its own wording), or when the record has no email address. Picks that resolve are always returned. Shared by `createXrmEmailComposeHandlers` and the
+ * CommunicationActions PCF, which used to carry its own copy of this loop.
+ *
+ * Returns `null` when there is nothing to report (no picks, or none resolved and none skipped); otherwise the
+ * recipients - possibly none - with `skipped` set when anything was skipped.
+ */
+export async function resolveRecipientPicks(
+  picks: IRecipientPick[] | null | undefined,
+  retrieveRecord: RetrieveRecipientRecord,
+  logPrefix: string = '[EmailCompose]'
+): Promise<IRecipientLookupResult | null> {
+  if (!picks || picks.length === 0) return null;
+  const recipients: IRecipientLookupResult = [];
+  const skipped: IRecipientLookupSkip[] = [];
+  for (const p of picks) {
+    const name = (p.name ?? '').trim() || 'That record';
+    const field = RECIPIENT_EMAIL_FIELD[p.entityType];
+    if (!field) {
+      skipped.push({ name, reason: 'only contacts and users can be added as recipients.' });
+      continue;
+    }
+    const id = cleanGuid(p.id);
+    try {
+      const rec = await retrieveRecord(p.entityType, id, `?$select=${field}`);
+      const email = rec?.[field];
+      if (typeof email === 'string' && email.includes('@')) {
+        recipients.push({
+          email,
+          displayName: p.name,
+          resolved: true,
+          sourceId: id,
+          entityType: p.entityType as 'contact' | 'systemuser',
+        });
+      } else {
+        skipped.push({ name, reason: 'it has no email address on file.' });
+      }
+    } catch (err) {
+      console.warn(`${logPrefix} recipient email resolve failed:`, err);
+      skipped.push({
+        name,
+        reason: isRecordNotFoundOrDenied(err)
+          ? 'the record could not be read. It may have been deleted, or you may not have access to it.'
+          : 'the record could not be read right now. Try again.',
+      });
+    }
+  }
+  if (skipped.length > 0) recipients.skipped = skipped;
+  return recipients.length > 0 || skipped.length > 0 ? recipients : null;
+}
+
 export interface XrmEmailComposeHandlers {
   recordLookupCatalog: IRecordLookupTarget[];
-  onLookupRecipients: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipient[] | null>;
+  onLookupRecipients: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipientLookupResult | null>;
   onLookupRecord: (entityType: string) => Promise<IPickedRecord | null>;
   onAddRelationship: () => Promise<IPickedRecord | null>;
   /**
@@ -209,37 +309,16 @@ export function createXrmEmailComposeHandlers(options?: {
   };
 
   // Advanced recipient lookup: the OOB people picker over contact + systemuser;
-  // the picked record's primary email is resolved into a chip. Multi-select.
-  const onLookupRecipients = async (_field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
+  // the picked record's primary email is resolved into a chip. Multi-select. A pick that cannot be resolved
+  // is reported on the result's `skipped` list (the composer shows it), never dropped silently.
+  const onLookupRecipients = async (_field: 'to' | 'cc' | 'bcc'): Promise<IRecipientLookupResult | null> => {
     const xrm = getXrm(['webApi', 'lookupObjects']);
     if (!xrm?.Utility?.lookupObjects) return null;
     const results = await xrm.Utility.lookupObjects({
       entityTypes: ['contact', 'systemuser'],
       allowMultiSelect: true,
     });
-    if (!results || results.length === 0) return null;
-    const recipients: IRecipient[] = [];
-    for (const p of results) {
-      const field = RECIPIENT_EMAIL_FIELD[p.entityType as string];
-      if (!field) continue;
-      const id = cleanGuid(p.id);
-      try {
-        const rec = await xrm.WebApi.retrieveRecord(p.entityType, id, `?$select=${field}`);
-        const email = rec?.[field];
-        if (typeof email === 'string' && email.includes('@')) {
-          recipients.push({
-            email,
-            displayName: p.name,
-            resolved: true,
-            sourceId: id,
-            entityType: p.entityType as 'contact' | 'systemuser',
-          });
-        }
-      } catch (err) {
-        console.warn('[EmailCompose] recipient email resolve failed:', err);
-      }
-    }
-    return recipients.length > 0 ? recipients : null;
+    return resolveRecipientPicks(results, (entityType, id, opts) => xrm.WebApi.retrieveRecord(entityType, id, opts));
   };
 
   // Connector toolbar icon → add a relationship. Runs the OOB lookup across the

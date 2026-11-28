@@ -1,5 +1,5 @@
 /**
- * SmartTodoApp — "+ New Task" unit tests (task 030, spec FR-10).
+ * SmartTodoApp — "New To Do" unit tests (task 030, spec FR-10).
  *
  * Covers the closed acceptance set from
  * `projects/smart-todo-r5/tasks/030-new-task-oob-mainform-modal.poml` step 6:
@@ -175,7 +175,7 @@ describe('buildNewTaskDefaultValues', () => {
   it('prefers the openTodos regardingFilter over createTodo initialRegarding when somehow both are present in a single context object', () => {
     // Not a real production shape (the union is exclusive), but exercises the
     // precedence logic directly against the openTodos branch, which is what
-    // production code actually reaches for a mid-session "+ New Task" click.
+    // production code actually reaches for a mid-session "New To Do" click.
     const launchContext: ILaunchContext = {
       action: 'openTodos',
       regardingFilter: { entityType: 'sprk_matter', recordId: 'guid-3', recordName: 'Matter C' },

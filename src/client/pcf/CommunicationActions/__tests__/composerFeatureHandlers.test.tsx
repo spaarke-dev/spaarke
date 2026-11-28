@@ -21,6 +21,7 @@ const HANDLERS = {
   onUploadLocalAttachment: jest.fn(),
 };
 const mockCreateHandlers = jest.fn((_options?: unknown) => HANDLERS);
+const mockResolvePicks = jest.fn();
 let mockComposerProps: Record<string, unknown> | undefined;
 
 jest.mock('@spaarke/ui-components', () => ({
@@ -32,6 +33,7 @@ jest.mock('@spaarke/ui-components', () => ({
   searchUsersAndContacts: jest.fn().mockResolvedValue([]),
   createXrmDataService: () => ({}),
   createXrmEmailComposeHandlers: (options?: unknown) => mockCreateHandlers(options),
+  resolveRecipientPicks: (...args: unknown[]) => mockResolvePicks(...args),
   resolveInitialInvoiceRecord: () => undefined,
   cleanGuid: (id: string) => id.replace(/[{}]/g, '').toLowerCase(),
   getXrm: () => (global as unknown as { Xrm?: unknown }).Xrm,
@@ -124,5 +126,35 @@ describe('CommunicationActions - composer feature handlers (task 188)', () => {
     };
     expect(last.bffBaseUrl).toBe('https://bff.example');
     expect(last.authenticatedFetch).toBeDefined();
+  });
+  // Task 238 (b): the PCF's people-picker handler used to carry its own copy of the resolve loop that dropped an
+  // unresolvable pick silently. It now runs the shared resolver and returns its result, `skipped` list included.
+  it('the recipient lookup runs the shared resolver over the picks and returns its result with the skipped list', async () => {
+    const picks = [{ id: '{AAAAAAAA-1111-2222-3333-444444444444}', name: 'Jane Smith', entityType: 'systemuser' }];
+    (global as unknown as { Xrm?: unknown }).Xrm = { Utility: { lookupObjects: jest.fn().mockResolvedValue(picks) } };
+    const resolved = Object.assign([], { skipped: [{ name: 'Jane Smith', reason: 'the record could not be read.' }] });
+    mockResolvePicks.mockResolvedValue(resolved);
+    const context = makeContext();
+    try {
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <CommunicationActionsApp context={context} readOnly={false} version="1.3.21" />
+        </FluentProvider>
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'New' }));
+      await waitFor(() => expect(mockComposerProps).toBeDefined());
+
+      const lookup = mockComposerProps!.onLookupRecipients as (field: 'to') => Promise<unknown>;
+      const result = await lookup('to');
+
+      expect(result).toBe(resolved);
+      expect(mockResolvePicks).toHaveBeenCalledWith(picks, expect.any(Function), '[CommunicationActions]');
+      // the reader it was given is the control's own Web API
+      const reader = mockResolvePicks.mock.calls[0][1] as (e: string, id: string, o: string) => Promise<unknown>;
+      await reader('systemuser', 'x', '?$select=internalemailaddress');
+      expect(context.webAPI.retrieveRecord).toHaveBeenCalledWith('systemuser', 'x', '?$select=internalemailaddress');
+    } finally {
+      delete (global as unknown as { Xrm?: unknown }).Xrm;
+    }
   });
 });

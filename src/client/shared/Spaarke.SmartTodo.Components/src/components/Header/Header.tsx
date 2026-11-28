@@ -6,7 +6,7 @@
  * minimal chrome per `projects/smart-todo-r5/to-do-header-revision.jpg`:
  *
  *   ┌─────────────────────────────────────────────────────────────────────┐
- *   │  [icon] Smart To Do                    [Filter] [+ New Task] [⋮]   │
+ *   │  [icon] Smart To Do                    [Filter] [New To Do] [⋮]   │
  *   │     ── OR (when selectedCount > 0) ──                              │
  *   │  [icon] Smart To Do          [N selected][Open][Delete][Email][Pin] │
  *   │                                                          [Filter]   │
@@ -20,7 +20,7 @@
  * Filter pane was REPLACED by this search per the smart-todo-r5 UAT
  * 2026-08-17 decision; NO filter-predicate logic lives in this file, only
  * the mounted `<SearchFilter>` + its toggle),
- * a primary "+ New Task" button (stubbed until task 030 wires the OOB
+ * a primary "New To Do" button (stubbed until task 030 wires the OOB
  * main-form create modal per FR-10), and a "⋮" overflow menu holding exactly
  * Settings / Layout / Refresh (owner-decided mapping, U-3, 2026-08-15).
  *
@@ -40,7 +40,7 @@
  * overflow Menu. Selection-aware actions (Open/Delete/Email/Pin via
  * `<SelectionAwareToolbar>`) are untouched. Per the pre-existing precedent
  * (QuickAdd/+Wizard were already suppressed during an active selection),
- * the overflow menu and "+ New Task" are likewise suppressed when
+ * the overflow menu and "New To Do" are likewise suppressed when
  * `selectedCount > 0` — only the Filter entry point remains available
  * alongside the selection-aware toolbar.
  *
@@ -53,7 +53,7 @@
  * reference for task 021's new filter pane Assigned-To category.
  *
  * **A11y (NFR-07 / WCAG 2.1 AA)**:
- *   - Tab order: Title (non-focusable) → Filter → + New Task → ⋮ trigger →
+ *   - Tab order: Title (non-focusable) → Filter → New To Do → ⋮ trigger →
  *     menu items (Settings, Layout, Refresh) when the menu is open.
  *   - The Filter pill uses `aria-expanded` (disclosure semantics — it opens
  *     a pane, task 021) rather than `aria-pressed` (binary toggle).
@@ -121,7 +121,7 @@ export interface HeaderProps {
 
   /**
    * Number of items currently selected. Drives the selection-aware action
-   * cluster: when 0, the Filter / + New Task / ⋮ overflow cluster renders;
+   * cluster: when 0, the Filter / New To Do / ⋮ overflow cluster renders;
    * when ≥1, the `<SelectionAwareToolbar>` renders (Open/Delete/Email/Pin)
    * alongside the Filter pill (matches the pre-existing precedent that
    * creation + settings/layout/refresh controls are suppressed during an
@@ -171,7 +171,7 @@ export interface HeaderProps {
   onSearchQueryChange: (next: string) => void;
 
   /**
-   * Called when the user clicks "+ New Task". Until task 030 (FR-10) lands,
+   * Called when the user clicks "New To Do". Until task 030 (FR-10) lands,
    * the parent wires a documented no-op stub — the button stays visible and
    * clickable (never hidden, never throws). When omitted entirely, the
    * button is hidden (matches the optional-prop convention used elsewhere
@@ -214,7 +214,7 @@ export const Header: React.FC<HeaderProps> = ({
     <div className={styles.headerColumn}>
       {/* ── smart-todo-r5 UAT 2026-08-17 (item #4): title + actions consolidated
             onto a SINGLE row (reverses the 2026-06-19 two-row split), matching
-            the original mockup: [icon] Smart To Do … [Filter] [+ New Task] [⋮].
+            the original mockup: [icon] Smart To Do … [Filter] [New To Do] [⋮].
             The brand cluster is the leading toolbar child; the flex spacer
             pushes the right cluster to the trailing edge. ── */}
       <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
@@ -226,8 +226,8 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
         <div className={styles.spacer} />
 
-        {/* ── Right cluster: selection-aware actions OR Filter / + New Task
-              / ⋮ overflow, per mockup order (Filter · + New Task · ⋮). ── */}
+        {/* ── Right cluster: selection-aware actions OR Filter / New To Do
+              / ⋮ overflow, per mockup order (Filter · New To Do · ⋮). ── */}
         {hasSelection ? (
           <div className={styles.rightGroup}>
             <SelectionAwareToolbar selectedCount={selectedCount} actions={toolbarActions} />
@@ -251,7 +251,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className={styles.rightGroup}>
             {/* ── smart-todo-r5 UAT pass 2 (2026-08-17) — inline expanding
                   search, immediately to the LEFT of the Filter pill, on the
-                  same toolbar row as "+ New Task" / ⋮. Stays mounted across
+                  same toolbar row as "New To Do" / ⋮. Stays mounted across
                   open/close (CSS display toggle) — see SearchFilter.tsx
                   module doc. ── */}
             <SearchFilter isOpen={isFilterPaneOpen} value={searchQuery} onChange={onSearchQueryChange} />
@@ -273,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={onNewTask}
                 className={styles.newTaskButton}
               >
-                New Task
+                New To Do
               </Button>
             )}
             <Menu>
