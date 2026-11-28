@@ -246,9 +246,9 @@ Deployed by uac-r2 on your go in its session: `sprk_invoicereviewpage` live 12:1
 - [ ] **Read-only otherwise:** on an invoice that already has a firm, or as a user who can't edit the invoice, the firm is plain text, not a dropdown.
 - [ ] **Pages still open after the shared-code move (#2965), only if convenient:** carried over from Y; AP Export, Invoice Files and Rule Review are not in this deploy either.
 
-## AA. Invoice Review in the Console's own modal, with browse (task 195): NOT READY, needs the master merge and two deploys
+## AA. Invoice Review in the Console's own modal, with browse (task 195): READY on dev
 
-Waits for: the master PR merge, then a Console deploy (`sprk_spaarkeai`, for the modal and browse) and an Invoice Review page deploy (for the compact cards and the unsaved-work answer). Both are your gos; the page deploy is uac-r2's, with you naming the SHA in its session. Hard-refresh (Ctrl+F5) before testing.
+Merged to master 2026-11-27 21:28Z (#3274, merge commit c55b9812d8). Both parts are on dev from that commit: the Console (`sprk_spaarkeai`, the modal and browse) since 21:33Z, deployed automatically by the Deploy SpaarkeAi workflow on the master push; the Invoice Review page (`sprk_invoicereviewpage`, the compact cards and the unsaved-work answer) since 21:44Z, deployed by uac-r2 on your go, read-back hash equal to the build. Hard-refresh (Ctrl+F5) before testing.
 
 - [ ] **Opens in the Console, not the platform dialog:** in the Console, open a billing item in the Worklist. Invoice Review opens in Spaarke's own modal: the title bar says "Invoice Review" in the Console's style (dark when the Console is dark), not the grey Dataverse dialog bar.
 - [ ] **Dark mode with no stored choice:** with the Console in dark mode and no theme picked in Spaarke's own theme menu, the page inside the modal is dark too.
@@ -257,5 +257,6 @@ Waits for: the master PR merge, then a Console deploy (`sprk_spaarkeai`, for the
 - [ ] **Back button:** after a few next presses, the browser Back button does not change the invoice inside the modal while the count stays put.
 - [ ] **Keyboard at the ends:** using Tab and Enter on next until the last invoice, focus stays on a header button (previous, or close) instead of jumping out of the dialog.
 - [ ] **Closing refreshes the lanes:** close the modal with ×; the Worklist lanes reload (an invoice you decided moves or drops out).
+- [ ] **Nothing stuck after closing:** after closing, the Console responds to clicks and keys as normal (nothing stays greyed or unreachable). Open a different billing item next: the modal opens fresh on that one ("3 of 3", say), not on the one you closed.
 - [ ] **Count cards on one row:** at 1280 px wide or more, the five cards (All lines, Processing, To decide, Clean, Decided) sit on one row as shorter cards; count, label and the "done today" line stay readable.
 - [ ] **Navigator still there:** the Navigator side pane still registers on the page inside the modal, as it did in the old dialog.

@@ -21,8 +21,8 @@ using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
-using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 using Commit = Sprk.Bff.Api.Tests.Integration.DataMutation.Signals.DecisionCommitServiceTests;
+using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
@@ -73,7 +73,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// <param name="withoutAccessWindow">The request drops the commit's access window as it is opened (its <c>Items</c> refuse it), so
     /// every caller-access question goes to the wire, as before ISS-010 part C. Nothing else changes.</param>
     /// <param name="windowSwitch">The commit's <c>Signals:DecisionAccessWindow:Enabled</c> setting (ISS-010 C off switch); null leaves it unset (on).</param>
-    private FourActionWorld BuildFourActionWorld(bool staged = false, bool withoutAccessWindow = false, string? windowSwitch = null)
+    /// <param name="withoutOwnerLookups">The request refuses its business-unit and team configuration cache (ISS-010 D1), so every
+    /// create reads them as before D1. Nothing else changes.</param>
+    private FourActionWorld BuildFourActionWorld(
+        bool staged = false, bool withoutAccessWindow = false, string? windowSwitch = null, bool withoutOwnerLookups = false)
     {
         var profile = new DecisionCommitCallProfile();
         _world.WithUser(Commit.Caller, Commit.CallerOid, Directory.ChildBu); // the commit rig's caller, in the child business unit
@@ -112,6 +115,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var http = Commit.Http();
         if (withoutAccessWindow)
             http.Items = new NoAccessWindowItems();
+        if (withoutOwnerLookups)
+            http.Items = new NoOwnerLookupsItems();
         ((ClaimsIdentity)http.User.Identity!).AddClaim(
             new Claim("http://schemas.microsoft.com/identity/claims/objectidentifier", Commit.CallerOid.ToString()));
         http.RequestServices = services.BuildServiceProvider();

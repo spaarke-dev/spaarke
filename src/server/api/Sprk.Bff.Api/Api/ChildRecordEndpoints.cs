@@ -320,6 +320,8 @@ public static class ChildRecordEndpoints
                     SecureFromCreation = secureIntent,
                     // ISS-010 (#3184): every create of this request shares its table-metadata answers (the decision commit runs four).
                     MetadataReads = CallerMetadataReadMemo.RequestScope.Of(httpContext),
+                    // ISS-010 D1: and its business-unit and team configuration answers (one read each per request).
+                    OwnerConfigurationReads = RecordOwnerLookupCache.ForRequest(httpContext),
                 },
                 // ISS-010 C: inside a decision commit's access window, the caller's client answers its access GETs from the window.
                 RecordCreationPrincipal.ForCaller(DecisionAccessWindow.Of(httpContext)?.CallerClient(user) ?? user, CallerObjectId(httpContext)),

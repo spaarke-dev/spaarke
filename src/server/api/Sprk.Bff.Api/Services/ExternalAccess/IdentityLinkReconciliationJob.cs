@@ -323,7 +323,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         {
             using var scope = _scopeFactory.CreateScope();
             var binder = scope.ServiceProvider.GetRequiredService<ContactIdentityBinder>();
-            await ReconcileEnvironmentAsync(binder, own, writes, mode, context, cancellationToken).ConfigureAwait(false);
+            await ReconcileEnvironmentAsync(binder, own, writes, mode, context, foreignEnvironment: false, cancellationToken)
+                .ConfigureAwait(false);
             await RunRemovalSweepAsync(scope.ServiceProvider, binder.Store, own, sweep, context, cancellationToken)
                 .ConfigureAwait(false);
             await ReconcileProvisioningTargetsAsync(scope.ServiceProvider, targets, writes, mode, context, cancellationToken)
@@ -446,9 +447,16 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             _timeProvider, _logger);
     }
 
-    /// <summary>Probe, pass 1, pass 2 — for one environment.</summary>
+    /// <summary>
+    /// Probe, pass 1, pass 2 — for one environment.
+    /// <paramref name="foreignEnvironment"/> is stated by the caller (never derived from a URL): false for this BFF's own
+    /// environment, true for a provisioning target. It changes ONE thing, the log level of one probe failure (#2578): a
+    /// foreign environment that refuses this identity's membership (<see cref="IContactIdentityStore.IsEnvironmentMembershipRefusedAsync"/>)
+    /// logs at Warning. The abort, the report and every other failure are the same for both.
+    /// </summary>
     private async Task ReconcileEnvironmentAsync(
-        ContactIdentityBinder binder, RunReport report, bool writes, string mode, JobRunContext context, CancellationToken ct)
+        ContactIdentityBinder binder, RunReport report, bool writes, string mode, JobRunContext context,
+        bool foreignEnvironment, CancellationToken ct)
     {
         var readability = await binder.Store.ProbeBindingReadabilityAsync(ct).ConfigureAwait(false);
         report.Readability = readability.ToString();
@@ -456,6 +464,23 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         {
             // Under masking every bound contact reads as unbound; deciding anything would be deciding blind.
             report.ProbeBlocked = true;
+
+            // #2578 (FR-31 c): the registry names an environment this BFF's application user has no seat in (dev: spaarke-acme).
+            // That is the registry row or the application user needing attention, not a read fault of an environment this BFF
+            // runs on, and it repeats every run. Foreign, Failed and the exact membership answer only: this BFF's own
+            // environment, a Masked column (a real configuration fault) and every other failure keep the Error.
+            if (foreignEnvironment
+                && readability == BindingReadability.Failed
+                && await binder.Store.IsEnvironmentMembershipRefusedAsync(ct).ConfigureAwait(false))
+            {
+                _logger.LogWarning(
+                    "[ID-LINK-RECON] {Environment}: the environment refuses this identity's membership "
+                    + "(HTTP 403, {ErrorCode}) — environment aborted before any decision. Check the registry row and the "
+                    + "BFF application user there. correlationId={CorrelationId}",
+                    report.Environment, DataverseContactIdentityStore.NotAMemberErrorCode, context.CorrelationId);
+                return;
+            }
+
             _logger.LogError(
                 "[ID-LINK-RECON] {Environment}: binding column {Readability} — environment aborted before any decision. "
                 + "correlationId={CorrelationId}",
@@ -556,7 +581,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             targets.Environments.Add(report);
             try
             {
-                await ReconcileEnvironmentAsync(registration.ContactBinderFor(url), report, writes, mode, context, ct)
+                await ReconcileEnvironmentAsync(
+                        registration.ContactBinderFor(url), report, writes, mode, context, foreignEnvironment: true, ct)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
