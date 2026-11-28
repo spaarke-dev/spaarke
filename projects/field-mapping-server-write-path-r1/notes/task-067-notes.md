@@ -72,6 +72,13 @@ Kept (owner kept all three on 2026-11-27):
 
 Placement: all new code sits in the existing field-mapping and record-creation services and the push endpoint (`Services/Dataverse/FieldMapping/`, `Services/RecordCreation/`, `Api/FieldMappings/`). One new file, `AccessModelSourceColumns.cs` (a static closed list; no DI registration, no package, no endpoint). Existing: `MappingSourceCallerMask` / `FieldSecuredSourceRule`. Extension: the lift is a named method on the mask, the list a static it consults. Cost of doing nothing: the owner's rule (a mapping rule maps regardless of the caller's privileges) is not met on any of the four surfaces.
 
+## 7a. Known limits (K-class, no fix)
+
+- The push preview understates what the apply copies for a lifted column (the preview is the caller's own view; no lifted value appears in any response).
+- A push `FieldResult` reads Mapped or Skipped for a lifted, non-access-model column. That says whether the filing parent's column holds a value, never the value. It follows from the owner's decision to copy past the column view, and the copied value is then in the child's column anyway. The access-control review listed this as K-class on 2026-11-28.
+
+The access-control review approved #3328 on 2026-11-28 after checking the code. It holds two conditions: 067 enters a dev candidate only with #3329 (#3326) merged beside it, and it gets both merge SHAs.
+
 ## 8. Follow-ups
 
 - #3326 (DI-053): the push refuses typed-writer target columns (same predicate as create and Repair). `task/fm-068`, approved by the access-control review; its own PR right after 067; deployed to dev together with 067.
