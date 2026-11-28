@@ -75,6 +75,13 @@ public static class SystemCacheKeys
     public const string RecordSyncWatermark = "recordsync-watermark";
 
     /// <summary>
+    /// Per-entity-type time of the last completed deleted-record pass of RecordSyncJob (GitHub #3321).
+    /// Site: <c>Services/Jobs/RecordSyncJob.cs</c>. Raw key: <c>recordsync:sweep:{entityType}</c>.
+    /// Justification: like <see cref="RecordSyncWatermark"/>, a system-wide bookmark of the job, not of a tenant.
+    /// </summary>
+    public const string RecordSyncSweep = "recordsync-sweep";
+
+    /// <summary>
     /// Scheduled-job dispatch lease (cross-instance mutual exclusion — ADR-036 A1 rule 1, unified-access-control-r2
     /// task 103). Site: <c>Infrastructure/Scheduling/RedisScheduledJobLease.cs</c>. Raw key:
     /// <c>{InstanceName}scheduler:lease:{jobId}</c>.

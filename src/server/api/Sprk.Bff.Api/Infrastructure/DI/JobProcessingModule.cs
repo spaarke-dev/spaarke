@@ -107,10 +107,16 @@ public static class JobProcessingModule
             configuration.GetSection(Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingOptions.SectionName));
         services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingService>();
 
-        // RecordSyncJob — incremental Dataverse to AI Search record sync (AIPU2-041)
-        services.Configure<Sprk.Bff.Api.Services.Jobs.RecordSyncOptions>(
-            configuration.GetSection(Sprk.Bff.Api.Services.Jobs.RecordSyncOptions.SectionName));
-        services.AddHostedService<Sprk.Bff.Api.Services.Jobs.RecordSyncJob>();
+        // RecordSyncJob — Dataverse to records-index sync (AIPU2-041). GitHub #3321: an ADR-036 scheduled job (ADR-052: the hand-rolled
+        // timer migrated when its behaviour changed), so one instance runs each tick under the host's lease. Enabled and
+        // IntervalMinutes are read at startup; the admin job endpoints enable or disable it at run time.
+        var recordSync = configuration.GetSection(Sprk.Bff.Api.Services.Jobs.RecordSyncOptions.SectionName);
+        services.Configure<Sprk.Bff.Api.Services.Jobs.RecordSyncOptions>(recordSync);
+        Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton(services, TimeProvider.System);
+        Spaarke.Scheduling.ScheduledJobServiceCollectionExtensions.AddScheduledJob<Sprk.Bff.Api.Services.Jobs.RecordSyncJob>(
+            services,
+            Sprk.Bff.Api.Services.Jobs.RecordSyncJob.CronFor(recordSync.GetValue("IntervalMinutes", 30)),
+            enabled: recordSync.GetValue("Enabled", false));
 
         services.Configure<ReindexingOptions>(
             configuration.GetSection(ReindexingOptions.SectionName));

@@ -66,7 +66,6 @@ public class WorkloadPlacementGuardTests
     private static readonly IReadOnlyDictionary<string, string> ExistingTimerServices = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["ScheduledRagIndexingService"] = "PeriodicTimer RAG re-index loop. Migrates to IScheduledJob when next touched (ADR-052 §1, ADR-036).",
-        ["RecordSyncJob"] = "PeriodicTimer record-sync loop. Migrates to IScheduledJob when next touched (ADR-052 §1, ADR-036).",
         ["SessionFileRetentionJob"] = "PeriodicTimer (TimeProvider) session-file retention loop. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["SessionFilesCleanupJob"] = "PeriodicTimer session-files cleanup loop. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["MembershipReconcileSweepService"] = "Task.Delay sweep loop for communication membership. Migrates when next touched (ADR-052 §1, ADR-036).",
