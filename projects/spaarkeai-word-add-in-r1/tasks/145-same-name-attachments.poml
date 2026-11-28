@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="145" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Two different attachments with the same name in one email: store both, select either, mark each correctly</title>
+    <phase>Phase 7: fixes before close (owner 2026-11-28, task 144 Q7)</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Two data-loss fixes in BFF upload paths, an additive change to the save and identity contracts, pane marks; many tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting contract change over server, worker and pane, in files other projects coordinate (fm W3; inbound is communications code).</model-tier-reason>
+    <effort>high</effort>
+    <deps>143</deps>
+    <tags>office-addins, react, bff-api, data-mutation, testing</tags>
+  </metadata>
+
+  <prompt>Owner, 2026-11-28, on same-name files: "the issue we will run in to is that there will be files of the same name"; on task 144 Q7: "Yes its own task and ensure you thoroughly research code to ensure no code conflict; evaluate if this requires a more significant change to the architecture or build".
+
+Read `notes/145-attachment-identity-assessment.md` first: it holds the code map (D1-D6 with file:line), the options weighed and rejected (name + size; stored Office ids), the recommended shape and the coordination list. Re-locate every line by name; the map was made on master + PR #3330 (task 143).</prompt>
+
+  <goal>An email with two different files of the same name (for example two `image001.png`) can be saved in Outlook with either or both ticked, every file ticked becomes its own document with its own bytes, re-saves add only the one not yet saved, and the pane marks each correctly. The same holds for mail captured from a mailbox.</goal>
+
+  <constraints>
+    <constraint source="owner 2026-11-28">Storage first (D1, D2). Each attachment of one email gets a stored name that is stable for that attachment (a retry writes the same name), differs from every other attachment of the same email, and never equals an existing child's (an add to an existing `.eml` included). Reuse the outbound rule `CommunicationService.UniqueArchivePath` by moving it to the shared `SpeUploadPath` helper (or extending it there); do not write a third rule. `sprk_documentname` stays the attachment's own name. Prove both data-loss defects with must-fail-before tests before fixing them.</constraint>
+    <constraint source="coordination">D2 is in `IncomingCommunicationProcessor` (communications code). The main session gets the owner's go for it before this task starts; if the go is not recorded in the task notes, fix D1 only and STOP with D2 reported. The worker (`UploadFinalizationWorker`) is field-mapping-r1-coordinated (fm W3): the main session tells field-mapping-r1 the scope before starting; change only the attachment naming, selection and skip code there. `Api/FileAccessEndpoints.cs` is being refactored by spaarkeai-mcp-bff-api-r2 (task 023, not on master on 2026-11-28): the main session tells them before starting; keep the change there to the one response field, and rebase on their merge if it lands first.</constraint>
+    <constraint source="assessment §3">Selection (D3). Within one email save, select attachments by their identity in that request (the Office attachment id, which the request's `email.attachments` also carry), turned by the server into the `.eml` part positions the worker uses. An add to an existing `.eml` names ticked attachments by name plus a content hash (SHA-256 of the bytes the pane reads for the ticked files only); the server compares against the MIME parts. Never persist the Office attachment id as a key (valid only within a session on web and mobile).</constraint>
+    <constraint source="assessment §3">Skip rule (D4). A name present once in the `.eml` keeps today's name rule (`IsAlreadySaved`). A name present more than once is already saved only when a child of that name holds the same bytes: compare against the stored child with the existing byte comparison (`OfficeStorageUploader.ItemHoldsContentAsync`); a read fault answers "not saved" for the skip rule only if creating a second copy is the safe direction, otherwise report it — decide and say which in the notes.</constraint>
+    <constraint source="assessment §3">Marks (D5). The identity answer adds per-name saved counts (additive; `savedAttachmentNames` keeps its meaning for old panes; same Read check and failure rule as task 141: a fault omits the field). The pane marks by count: count ≥ attachments of that name → saved; 0 → unsaved; in between → all of that name stay tickable with a one-line note ("1 of 2 files named … is already saved"). D6: key the attachment-only failure counter by attachment id, not name.</constraint>
+    <constraint source="contract">Every new request or response field is additive and optional. `SelectedAttachmentFileNames = []` from ebilling (`FromEmailSubmissionService`, `OfficeSubmissionEmailSave`) keeps meaning "none". Update the ADR-008 A1 row and `RouteAuthorizationGuardTests.Ledger.cs` only if what the identity route reveals changes (counts of the caller-readable documents it already lists do not reveal more; say so).</constraint>
+    <constraint source="CLAUDE.md §11">No new service, Dataverse column, package, route or build step. If the work seems to need one, STOP and report.</constraint>
+    <constraint source="project">Do not edit TASK-INDEX.md, current-task.md, any CLAUDE.md, `.claude/` or ci-gated-suites.txt; list new suites for the main session. Run server tests by exact class name with the IDENTITY env vars; never a broad filter.</constraint>
+    <constraint source="BFF hygiene (§10)">Publish-size delta against a fresh master build; `dotnet list package --vulnerable`; no new package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/145-attachment-identity-assessment.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/EmailAttachmentAddPlanner.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/DocumentEmailIdentityFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Documents/DocumentUrlIdentityResolution.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Office/SaveRequest.cs</file>
+      <file>src/client/office-addins/shared/taskpane/services/savedEmailAttachments.ts</file>
+      <file>src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file>src/client/office-addins/shared/taskpane/services/emailContentCapture.ts</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Write the must-fail-before tests for D1 (worker: two same-name parts with different bytes → today one document holds the wrong bytes) and D2 (inbound, if the go is recorded). Run them and record the failures.</step>
+    <step>Fix storage naming (shared helper from `UniqueArchivePath`), D1 then D2.</step>
+    <step>Selection: request identity within a save; content hash for an add; server mapping to part positions; worker selects by position.</step>
+    <step>Skip rule for repeated names by byte comparison.</step>
+    <step>Identity: per-name saved counts; pane marks by count; failure counter by id.</step>
+    <step>Gates: affected server classes by exact name, ArchTests, BFF build 0 warnings, publish delta, CVE check; pane jest, tsc baseline (68), prod webpack, eslint on touched files.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>An Outlook save of an email with two different `image001.png`, both ticked, creates two documents, each named `image001.png`, each holding its own bytes (test reads back both).</criterion>
+    <criterion>Only the second ticked: exactly one document, holding the second file's bytes.</criterion>
+    <criterion>After one is saved, a re-save adding the other creates exactly one more document with the other's bytes; adding the saved one again creates nothing.</criterion>
+    <criterion>The pane shows "1 of 2 files named image001.png is already saved" and keeps both tickable when one is saved; both saved → both marked saved; none saved → both unsaved.</criterion>
+    <criterion>Inbound mail with two same-name attachments stores two files with their own bytes (only with the recorded go; otherwise reported).</criterion>
+    <criterion>Negative: a name present once behaves exactly as before (existing tests unchanged and green); an old pane that reads only `savedAttachmentNames` behaves as before; ebilling's empty selection still selects none.</criterion>
+    <criterion>Negative: a retry of the same save writes the same stored names (no third file, no orphan).</criterion>
+    <criterion>No new service, column, package or route; publish delta reported.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The fix needs a new Dataverse column, service, package or route; or the D2 go is missing; or field-mapping-r1 objects to the worker change; or a byte comparison cannot be made for an existing child.</trigger>
+  </escalation>
+</task>
