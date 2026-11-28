@@ -16,11 +16,13 @@ Owner tests WP-0 to WP-2 and WP-5 (tier-test-script.md, "Word plugin tests"). Th
   the runner's own form (`async function main(context) { ... }`, seen in WP-5 run 3):
   spaarke-word-probe-edits   Copilot fills ONE data line (`const EDITS = [...]`) from the prompt; the fixed code
                              checks each edit, applies it as a tracked change with a hashed comment (WX-5).
-  spaarke-word-probe-error   writes nothing; logs one hash and throws an error carrying another, to learn whether
-                             errors or console output reach Copilot (WX-6).
-  spaarke-word-probe-size-*  the same small job padded with data to about 5, 10 and 17 KB of code (17 KB is the
-                             most a SKILL.md under 20,000 characters can carry; the upload refused 22k and 63k), to find the
-                             runner's size limit (WX-4).
+  spaarke-word-probe-size-*  the same small job padded with data (WX-4). WP-6 passed 5, 10 and 17 KB.
+  WP-7 (v0.8): WP-6 found two runners in Word (Office.js via a sub-agent; an HTML-document runner where Copilot
+  wrapped our code in a stand-in API). Every JavaScript skill except the v0.4 one now carries a rule to use Office.js
+  and never a stand-in, and its code checks for the real Office.js objects first (a hashed "runner check" error if
+  missing). The size paragraph gets a Word comment (the HTML runner can't make one). New:
+  spaarke-word-probe-office-error  adds a paragraph with a comment, logs one hash and throws another: does an error
+                             on the Office.js runner reach Copilot? (WP-6's error probe ran on the HTML runner.)
 The expected outputs are printed by this build and written to EXPECTED.txt beside the zip (not in it).
 Stdlib only; no network, no model calls.
 """
@@ -39,7 +41,7 @@ import gates  # noqa: E402
 from build_accelerator import make_icons, write, zip_dir  # noqa: E402
 
 PACKAGE = "spaarke-word-probe"
-VERSION = "0.7.0"   # the probe's label (zip name). v0.5 and v0.6 were refused by the admin-center upload
+VERSION = "0.8.0"   # the probe's label (zip name). WP-7. v0.5-v0.7 were refused by the admin center (reused app id)
 # The manifest version must not start with "0": Microsoft's validation rules refuse it (atk validate, 2026-11-27), and
 # the admin-center upload refused v0.5/v0.6 (0.x) while admin-deployed spaarke-decisions (1.0.0) installed.
 MANIFEST_VERSION = "1." + VERSION.split(".")[1] + ".0"
@@ -50,10 +52,11 @@ JS_FORBIDDEN = ("toString", "padStart", "eval", "Function", "constructor", "prot
 INSTRUCTION_CODE = "WPI-1112-A"
 SCRIPT_CODE = "WPS-1112-A"
 JS_CODE = "WPJ-1126-A"
-EDITS_CODE = "WPE-1127-A"
-ERROR_CODE = "WPX-1127-A"
-SIZE_CODE = "WPZ-1127-A"
-SIZES_KB = (5, 10, 17)   # 17 KB: the most code a SKILL.md under 20,000 characters can carry
+EDITS_CODE = "WPE-1127-B"
+OFFICE_ERROR_CODE = "WPO-1127-A"
+SIZE_CODE = "WPZ-1127-B"
+# WP-6 passed 5, 10 and 17 KB. WP-7 re-runs 10k, which Word ran on its HTML runner in WP-6.
+SIZES_KB = (10,)
 GUARDRAILS = os.path.join(ROOT, "core", "shared-references", "guardrails.md")
 
 BASE, EXPONENT, MODULUS = 7, 1_112_202_611, 1_000_000_007
@@ -118,16 +121,34 @@ JS_FNV = """  function fnv(s) {
     return hex;
   }"""
 
+
+# WP-7: WP-6 found two runners in Word: Office.js (via a sub-agent) and an HTML-document runner, where Copilot wrote
+# a stand-in `context` that turned insertParagraph into HTML. Each piece of code now checks first that it has the
+# real Office.js objects and stops with a hashed line if not, so every run shows which runner it got.
+def js_guard(code):
+    return f"""  if (typeof Word === "undefined" || !Word.ChangeTrackingMode || !context || !context.document ||
+      typeof context.document.load !== "function" || typeof context.sync !== "function") {{
+    throw new Error("Spaarke runner check {code}: no Office.js " + fnv("{code} runner"));
+  }}"""
+
+
+def guard_line(code):
+    return f"Spaarke runner check {code}: no Office.js {fnv1a32(code + ' runner')}"
+
+
 # WX-5: the one line Copilot fills; everything else is fixed. A real Word edition would work the same way: the
 # model decides the edits, fixed code checks and applies them.
 EDITS_LINE = "  const EDITS = [];"
 EDITS_TEXT = "The term is two (2) years. Governing law is Delaware. Notice is 30 days."
 EXPECTED_EDITS = (("two (2) years", "three (3) years"), ("Delaware", "New York"), ("30 days", "60 days"))
+# WP-7 run with an edit that is not in the paragraph, so the Office.js runner has to report an error.
+BAD_EDITS = (("two (2) years", "three (3) years"), ("Delaware", "New York"), ("45 days", "60 days"))
 
 JS_EDITS = f"""async function main(context) {{
 {EDITS_LINE}
   // Everything below stays exactly as written.
 {JS_FNV}
+{js_guard(EDITS_CODE)}
   const tag = "{EDITS_CODE}";
   const doc = context.document;
   doc.load("changeTrackingMode");
@@ -139,7 +160,7 @@ JS_EDITS = f"""async function main(context) {{
   const fail = async (why) => {{
     doc.changeTrackingMode = before;
     await context.sync();
-    throw new Error("Spaarke edit probe " + tag + ": " + why);
+    throw new Error("Spaarke edit probe " + tag + ": " + why + " " + fnv(tag + ": " + why));
   }};
   if (!Array.isArray(EDITS) || EDITS.length === 0) {{ await fail("EDITS is empty"); }}
   const found = [];
@@ -176,18 +197,31 @@ def edit_hashes(edits=EXPECTED_EDITS):
     return per, f"{EDITS_CODE} {len(edits)} {fnv1a32(EDITS_CODE + ''.join('|' + h for h in per))}"
 
 
-# WX-6: writes nothing. Two different hashes, one per channel, so the reply shows which channel reached Copilot.
-JS_ERROR = f"""async function main(context) {{
+def edit_error_line(why):
+    """The error JS_EDITS throws when a check fails, e.g. why = "edit 3 matched 0 times"."""
+    return f"Spaarke edit probe {EDITS_CODE}: {why} {fnv1a32(EDITS_CODE + ': ' + why)}"
+
+
+# WX-6 on the Office.js runner (WP-7). WP-6's error probe wrote nothing, so Word ran it on the HTML runner. This one
+# adds a paragraph with a Word comment first (the HTML runner can't make a Word comment, so the comment in the
+# document proves Office.js ran), then logs one hash and throws another.
+JS_OFFICE_ERROR = f"""async function main(context) {{
 {JS_FNV}
-  const tag = "{ERROR_CODE}";
+{js_guard(OFFICE_ERROR_CODE)}
+  const tag = "{OFFICE_ERROR_CODE}";
+  const p = context.document.body.insertParagraph("Spaarke Office.js error probe: " + tag, "End");
+  p.getRange("Whole").insertComment("Spaarke runner comment " + tag + " " + fnv(tag + " comment"));
+  await context.sync();
   console.log("Spaarke probe log " + tag + " " + fnv(tag + " log"));
   throw new Error("Spaarke probe error " + tag + " " + fnv(tag + " error"));
 }}"""
 
 
-def error_lines():
-    return (f"Spaarke probe error {ERROR_CODE} {fnv1a32(ERROR_CODE + ' error')}",
-            f"Spaarke probe log {ERROR_CODE} {fnv1a32(ERROR_CODE + ' log')}")
+def office_error_lines():
+    """(error, console log, comment) that JS_OFFICE_ERROR produces."""
+    c = OFFICE_ERROR_CODE
+    return (f"Spaarke probe error {c} {fnv1a32(c + ' error')}", f"Spaarke probe log {c} {fnv1a32(c + ' log')}",
+            f"Spaarke runner comment {c} {fnv1a32(c + ' comment')}")
 
 
 # WX-4: the same small job behind a data list sized to about 5, 20 or 60 KB. The checksum is order-sensitive, so
@@ -210,11 +244,13 @@ def js_size(kb):
 {rows}
   ];
 {JS_FNV}
+{js_guard(SIZE_CODE)}
   let s = 0;
   for (const n of PAD) {{ s = (s * 31 + n) % 1000000007; }}
   const tag = "{SIZE_CODE}";
   const mark = tag + " {kb}k " + PAD.length + " " + fnv(tag + " " + PAD.length + " " + s);
-  context.document.body.insertParagraph("Spaarke size probe: " + mark, "End");
+  const p = context.document.body.insertParagraph("Spaarke size probe: " + mark, "End");
+  p.getRange("Whole").insertComment("Spaarke size comment " + mark);
   await context.sync();
   return "Spaarke size probe ran: " + mark;
 }}"""
@@ -227,10 +263,24 @@ def size_mark(kb):
     return f"{SIZE_CODE} {kb}k {len(nums)} {fnv1a32(f'{SIZE_CODE} {len(nums)} {s}')}"
 
 
-WRAPPER_RULE = ("Run the code below on the open document **exactly as written**: do not change, shorten, reformat "
-                "or rewrite any part of it, and do not run any other code before or after it. One exception: if "
-                "your code runner needs a different outer form, you may change **only the first line and the last "
-                "line** to fit it, and then quote both changed lines exactly.")
+def runner_rule(name, code):
+    """WP-7: the rule a real Word skill would need. In WP-6 the 'first and last line only' rule let Copilot wrap our
+    code in a stand-in API on the HTML runner; this rule asks for Office.js and forbids stand-ins."""
+    return f"""**Which runner.** This code needs Word's own JavaScript API (Office.js): the `context` your Word code
+   runner provides, with `context.document`, and the global `Word`. Run it only with a runner that provides those.
+   Never write a stand-in, wrapper object or substitute for `context`, `Word` or any part of them, and never convert
+   the code to HTML or any other API. If no runner here gives you Office.js (for example your only runner works on
+   the document's HTML), run nothing: reply exactly `Spaarke {name} · Office.js runner not available · {code}` and
+   name the runners you have.
+   **How to run it.** Run the code below on the open document **exactly as written**: do not change, shorten,
+   reformat or rewrite any part of it, and do not run any other code before or after it. One exception: if the
+   Office.js runner needs a different outer form, you may change **only the first line and the last line** to fit
+   it, and then quote both changed lines exactly."""
+
+
+def runner_report():
+    return ("Say which runner ran the code (Office.js, HTML or other) and whether a sub-agent ran it for you. If the "
+            "code stops with `Spaarke runner check`, quote that error exactly and do not try another way.")
 
 PROBE_SCRIPT = f'''"""Print the Spaarke Word probe line. Built-ins only; reads and writes nothing."""
 import platform
@@ -319,10 +369,11 @@ When the user asks to run the Spaarke edit probe with a list of edits:
 1. Fill in the `EDITS` line, and nothing else. Replace `const EDITS = [];` with
    `const EDITS = [{{ find: "...", replace: "..." }}, ...];`: one entry per edit, in the user's order, with the
    text copied exactly as the user wrote it (no added or changed quotes, spaces or punctuation).
-2. {WRAPPER_RULE} Filling in the `EDITS` line is the only other change allowed.
+2. {runner_rule("edit probe", EDITS_CODE)} Filling in the `EDITS` line is the only other change allowed.
 3. Reply with the line the code returns, exactly, in a code block. If nothing comes back, quote the last paragraph
    of the document instead. If the code stops with an error, quote the error message exactly; do not fix the code
    or run it again. Also quote the `EDITS` line you used, and say whether you changed anything else.
+   {runner_report()}
 4. If you cannot run JavaScript here, reply with exactly `Spaarke edit probe · code not run · {EDITS_CODE}` and
    say why. Never make the edits, comments or the returned line any other way: that fails the test.
 5. Then say which app you are running in (Word, Cowork, Copilot Chat or other).
@@ -333,31 +384,32 @@ When the user asks to run the Spaarke edit probe with a list of edits:
 
 Do not create files or search the web.
 """),
-    "spaarke-word-probe-error": (
-        "Test probe for Spaarke. Answers \"run the Spaarke error probe\" by running fixed Word JavaScript that "
-        "writes nothing, prints one line and then stops with a deliberate error, and reporting exactly what came "
-        "back. Use for \"run the Spaarke error probe\". Do NOT use for reviewing, editing or drafting any "
-        "document, or for any other request.",
-        f"""# Spaarke error probe (fixed Word JavaScript that fails on purpose)
+    "spaarke-word-probe-office-error": (
+        "Test probe for Spaarke. Answers \"run the Spaarke Office.js error probe\" by running fixed Word JavaScript "
+        "that adds one test paragraph with a comment, prints one line and then stops with a deliberate error, and "
+        "reporting exactly what came back. Use for \"run the Spaarke Office.js error probe\". Do NOT use for "
+        "reviewing, editing or drafting any document, or for any other request.",
+        f"""# Spaarke Office.js error probe (fixed Word JavaScript that fails on purpose)
 
-A test of what this host passes back to you from code it runs: errors, printed output, return values. The code
-changes nothing in the document. This is not legal advice. Guardrails: `references/guardrails.md`.
+A test of what Word's Office.js runner passes back to you from code it runs: errors, printed output, return values.
+The code adds one test paragraph with one comment at the end of the open document, then fails on purpose. Run it
+only in a blank test document. This is not legal advice. Guardrails: `references/guardrails.md`.
 
-When the user asks to run the Spaarke error probe:
-1. {WRAPPER_RULE}
+When the user asks to run the Spaarke Office.js error probe:
+1. {runner_rule("Office.js error probe", OFFICE_ERROR_CODE)}
 2. The code is meant to fail. Do not fix it, change it or run it again.
 3. Reply with these three things, each exactly as you received it, each in its own code block:
    - the error message;
    - any printed (console) output;
    - any return value.
-   For any of them you did not receive, write "not received". Never write any of them yourself: a made-up value
-   fails the test.
-4. If you cannot run JavaScript here, reply with exactly `Spaarke error probe · code not run · {ERROR_CODE}` and
-   say why.
+   For any of them you did not receive, write "not received". Never write any of them yourself, and never read
+   them from the document or the code: a made-up value fails the test. {runner_report()}
+4. If you cannot run JavaScript here, reply with exactly `Spaarke Office.js error probe · code not run ·
+   {OFFICE_ERROR_CODE}` and say why.
 5. Then say which app you are running in (Word, Cowork, Copilot Chat or other).
 
 ```javascript
-{JS_ERROR}
+{JS_OFFICE_ERROR}
 ```
 
 Do not create files or search the web.
@@ -372,13 +424,14 @@ for _kb in SIZES_KB:
         f"""# Spaarke size probe, about {_kb} KB of fixed Word JavaScript
 
 A test of how much code this host will run from a third-party skill. The code is long on purpose: a list of
-numbers, then a few lines that add one test paragraph at the end of the open document. Run it only in a blank test
-document. This is not legal advice. Guardrails: `references/guardrails.md`.
+numbers, then a few lines that add one test paragraph with one comment at the end of the open document. Run it only
+in a blank test document. This is not legal advice. Guardrails: `references/guardrails.md`.
 
 When the user asks to run the Spaarke size probe {_kb}k:
-1. {WRAPPER_RULE} Do not shorten the list of numbers: every number counts.
+1. {runner_rule(f"size probe {_kb}k", SIZE_CODE)} Do not shorten the list of numbers: every number counts.
 2. Reply with the line the code returns, exactly, in a code block. If nothing comes back, quote the last paragraph
    of the document instead. If the runner refuses the code or it fails, quote the message exactly.
+   {runner_report()}
 3. If you cannot run JavaScript here, reply with exactly `Spaarke size probe · code not run · {SIZE_CODE} {_kb}k`
    and say why. Never write the returned line or the paragraph yourself: that fails the test.
 4. Then say which app you are running in (Word, Cowork, Copilot Chat or other).
@@ -396,8 +449,10 @@ def expected_line():
 
 
 def build(out, without_script=False, fresh_id=False):
-    """without_script leaves out the Python skill: a diagnostic for the admin-center upload, which refused v0.5-v0.7
-    while admin-deployed spaarke-decisions (no scripts) installed. WP-6 needs no script skill."""
+    """without_script leaves out the Python skill (WP-6 and WP-7 need none). fresh_id (True, or an id suffix string)
+    gives a new app id: the admin center refuses an id already uploaded through Cowork (2026-11-27). True gives the
+    id the admin center accepted for v0.7 (9248c601-...)."""
+    suffix = "admin-test" if fresh_id is True else fresh_id
     skills = {n: v for n, v in SKILLS.items() if not (without_script and n.endswith("-script"))}
     stage = os.path.join(out, "plugin")
     if os.path.exists(stage):
@@ -420,7 +475,7 @@ def build(out, without_script=False, fresh_id=False):
         "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
         "manifestVersion": "1.30",
         "version": MANIFEST_VERSION,
-        "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"https://spaarke.com/accelerators/{PACKAGE}" + ("/admin-test" if fresh_id else ""))),
+        "id": app_id(suffix),
         "developer": {"name": "Spaarke", "websiteUrl": "https://spaarke.com", "privacyUrl": "https://spaarke.com",
                       "termsOfUseUrl": "https://spaarke.com"},
         "name": {"short": "Spaarke Word Probe", "full": "Spaarke Word Probe (test only)"},
@@ -438,33 +493,47 @@ def build(out, without_script=False, fresh_id=False):
     problems = gates.lint_plugin(os.path.join(stage, "manifest.json"))
     if problems:
         raise SystemExit("plugin gate: " + "; ".join(f"{r}: {m}" for r, m in problems))
-    label = ("" if not without_script else " no script") + ("" if not fresh_id else " new id")
+    label = ("" if not without_script else " no script") + \
+        ("" if not suffix else " new id" if suffix == "admin-test" else f" id {suffix}")
     z = zip_dir(stage, os.path.join(out, f"Spaarke Word probe plugin v{VERSION[:3]}{label}.zip"))
     per, mark = edit_hashes()
     edits = "; ".join(f"'{f}' -> '{r}'" for f, r in EXPECTED_EDITS)
-    err, log = error_lines()
+    err, log, comment = office_error_lines()
     write(os.path.join(out, "EXPECTED.txt"),
+          f"App id: {manifest['id']} (version {MANIFEST_VERSION})\n"
           f"Instructions probe: {INSTRUCTION_CODE}\nScript probe (starts with): {expected_line()}\n"
           f"JavaScript probe returns: Spaarke JS probe ran: {js_marker()}\n"
           f"JavaScript probe document: last paragraph 'Spaarke JavaScript probe: alpha [bravo deleted][charlie "
           f"inserted] delta. {js_marker()}', one comment on 'charlie': 'Spaarke JS probe comment {js_marker()}'\n"
-          f"\nWP-6 (v{VERSION[:3]})\n"
+          f"\nWP-7 (v{VERSION[:3]}). Any run that ends '{guard_line('<code>').rsplit(' ', 1)[0]} <hash>' did not "
+          f"get Office.js: edits {guard_line(EDITS_CODE)!r}; Office.js error {guard_line(OFFICE_ERROR_CODE)!r}; "
+          f"size {guard_line(SIZE_CODE)!r}\n"
+          f"Office.js error probe: paragraph 'Spaarke Office.js error probe: {OFFICE_ERROR_CODE}' with comment "
+          f"'{comment}'; error '{err}'; console '{log}'\n"
+          f"Edit probe, bad edit {BAD_EDITS[-1][0]!r}: error '{edit_error_line(f'edit {len(BAD_EDITS)} matched 0 times')}'; "
+          f"paragraph without a [mark], no tracked change, no comment; Track Changes as before\n"
           f"Edit probe, prompt edits: {edits}\n"
           f"  returns / paragraph ends: [{mark}]\n"
           + "".join(f"  comment {i}: 'Spaarke edit {i}/3 {EDITS_CODE} {h}' on '{r}'\n"
                     for i, (h, (_, r)) in enumerate(zip(per, EXPECTED_EDITS), 1))
-          + f"Error probe: error message '{err}'; console '{log}'; no document change\n"
           + "".join(f"Size probe {kb}k ({len(js_size(kb)):,} chars of code): paragraph 'Spaarke size probe: "
-                    f"{size_mark(kb)}'\n" for kb in SIZES_KB))
+                    f"{size_mark(kb)}' with comment 'Spaarke size comment {size_mark(kb)}'\n" for kb in SIZES_KB))
     return z
+
+
+def app_id(suffix=None):
+    """uuid5 of the package URL. The plain id was used by the Cowork uploads v0.1-v0.4; the admin center refuses it."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"https://spaarke.com/accelerators/{PACKAGE}" +
+                          (f"/{suffix}" if suffix else "")))
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", default=os.path.join(BUILD, "out", "word-probe"))
     ap.add_argument("--without-script", action="store_true", help="leave out the Python skill (admin-upload diagnostic)")
-    ap.add_argument("--fresh-id", action="store_true",
-                    help="use a new app id (the refused admin uploads reused the id of the Cowork uploads v0.1-v0.4)")
+    ap.add_argument("--fresh-id", nargs="?", const=True, default=False, metavar="SUFFIX",
+                    help="use a new app id: the admin center refuses the id of the Cowork uploads v0.1-v0.4. With no "
+                         "SUFFIX, the id the admin center accepted for v0.7; with one, another new id")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     z = build(a.out, a.without_script, a.fresh_id)

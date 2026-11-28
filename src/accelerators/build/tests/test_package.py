@@ -342,14 +342,16 @@ globalThis.Word = { ChangeTrackingMode: { off: 'Off', trackAll: 'TrackAll' },
     # ---- WP-6 (v0.5) ------------------------------------------------------------------------------------
     def wp6_codes(self):
         import build_word_probe as wp
-        return {"spaarke-word-probe-edits": wp.JS_EDITS, "spaarke-word-probe-error": wp.JS_ERROR,
+        return {"spaarke-word-probe-edits": wp.JS_EDITS, "spaarke-word-probe-office-error": wp.JS_OFFICE_ERROR,
                 **{f"spaarke-word-probe-size-{kb}k": wp.js_size(kb) for kb in wp.SIZES_KB}}
 
     def test_wp6_skills_carry_their_code_in_the_runner_form_and_store_no_expected_hash(self):
         import build_word_probe as wp
         per, mark = wp.edit_hashes()
-        secrets = per + [mark.split()[-1]] + [line.split()[-1] for line in wp.error_lines()] + \
-            [wp.size_mark(kb).split()[-1] for kb in wp.SIZES_KB]
+        codes = (wp.EDITS_CODE, wp.OFFICE_ERROR_CODE, wp.SIZE_CODE)
+        secrets = per + [mark.split()[-1]] + [line.split()[-1] for line in wp.office_error_lines()] + \
+            [wp.size_mark(kb).split()[-1] for kb in wp.SIZES_KB] + [wp.guard_line(c).split()[-1] for c in codes] + \
+            [wp.edit_error_line(f"edit {len(wp.BAD_EDITS)} matched 0 times").split()[-1]]
         with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(wp.build(tmp)) as z:
             names = z.namelist()
             for skill, code in self.wp6_codes().items():
@@ -358,6 +360,11 @@ globalThis.Word = { ChangeTrackingMode: { off: 'Off', trackAll: 'TrackAll' },
                 self.assertTrue(code.startswith("async function main(context) {"),
                                 f"{skill}: the runner's own form (WP-5 run 3), so no wrapper change is needed")
                 self.assertEqual([w for w in wp.JS_FORBIDDEN if re.search(rf"\b{re.escape(w)}\b", code)], [], skill)
+                body = z.read(f"skills/{skill}/SKILL.md").decode("utf-8")
+                self.assertIn("Never write a stand-in", body, f"{skill}: WP-7 Office.js-only rule")
+                self.assertIn("Office.js runner not available", body, skill)
+                self.assertIn("Spaarke runner check", code, f"{skill}: checks for Office.js first")
+            self.assertNotIn("skills/spaarke-word-probe-error/SKILL.md", names, "WP-6's HTML-runnable error probe is gone")
             text = "".join(z.read(n).decode("utf-8", "ignore") for n in names)
             self.assertEqual([s for s in secrets if s in text], [],
                              "expected hashes must be computed by the code, never stored in the plugin")
@@ -369,11 +376,23 @@ globalThis.Word = { ChangeTrackingMode: { off: 'Off', trackAll: 'TrackAll' },
         for kb in wp.SIZES_KB:
             self.assertLess(abs(len(wp.js_size(kb)) - kb * 1024), kb * 1024 * 0.1, f"{kb}k probe size")
 
-    def run_main(self, code, substitute=None):
+    # The stand-in `context` Copilot wrote on Word's HTML runner in WP-6 (6c/6d), as it quoted it: no `Word`, no load.
+    HTML_SHIM = """
+const calls = [], logs = [];
+console.log = (m) => logs.push(m);
+const context = { document: { body: { insertParagraph: (t) => { calls.push(['html', t]); } } }, sync: async () => {} };
+%s
+main(context).then((r) => process.stdout.write(JSON.stringify({ r, calls, logs })),
+  (e) => process.stdout.write(JSON.stringify({ error: e.message, calls, logs })));
+"""
+
+    def run_main(self, code, substitute=None, harness=None, tracking="Off"):
         """Run a WP-6 main(context) under Node against a Word stub that really searches and replaces text."""
         if substitute:
             code = code.replace(*substitute)
-        harness = """
+        if harness:
+            return self.run_node(harness % code)
+        harness = ("""
 const calls = [];
 const para = { text: '' };
 const rng = (label) => ({
@@ -385,6 +404,7 @@ const doc = { changeTrackingMode: 'Off', load: () => {},
   body: { insertParagraph: (t, loc) => { calls.push(['insertParagraph', t, loc, doc.changeTrackingMode]);
     para.text = t;
     return { insertText: (x, l) => { calls.push(['appendText', x, l, doc.changeTrackingMode]); para.text += x; },
+      getRange: (w) => ({ insertComment: (c) => { calls.push(['insertComment', 'paragraph:' + w, c]); } }),
       search: (w, o) => { const n = para.text.split(w).length - 1;
         return { load: () => {}, items: Array.from({ length: n }, () => rng(w)) }; } }; } } };
 const context = { document: doc, sync: async () => { calls.push(['sync', doc.changeTrackingMode]); } };
@@ -393,11 +413,14 @@ const logs = []; console.log = (m) => logs.push(m);
 %s
 main(context).then((r) => process.stdout.write(JSON.stringify({ r, calls, logs, text: para.text, end: doc.changeTrackingMode })),
   (e) => process.stdout.write(JSON.stringify({ error: e.message, calls, logs, text: para.text, end: doc.changeTrackingMode })));
-""" % code
+""" % code).replace("changeTrackingMode: 'Off'", f"changeTrackingMode: '{tracking}'", 1)
+        return self.run_node(harness)
+
+    def run_node(self, script):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "probe.js")
             with open(path, "w", encoding="utf-8") as f:
-                f.write(harness)
+                f.write(script)
             out = subprocess.run(["node", path], capture_output=True, text=True, timeout=60)
         self.assertEqual(out.returncode, 0, out.stderr)
         return json.loads(out.stdout)
@@ -425,21 +448,43 @@ main(context).then((r) => process.stdout.write(JSON.stringify({ r, calls, logs, 
         import build_word_probe as wp
         bad = (("two (2) years", "three (3) years"), ("Texas", "New York"))
         res = self.run_main(wp.JS_EDITS, (wp.EDITS_LINE, self.edits_line(bad)))
-        self.assertEqual(res.get("error"), f"Spaarke edit probe {wp.EDITS_CODE}: edit 2 matched 0 times", res)
+        self.assertEqual(res.get("error"), wp.edit_error_line("edit 2 matched 0 times"), res)
         self.assertFalse([c for c in res["calls"] if c[0] in ("insertText", "insertComment")],
                          "no edit is applied when any edit fails its check")
         self.assertEqual(res["end"], "Off")
         empty = self.run_main(wp.JS_EDITS)
-        self.assertEqual(empty.get("error"), f"Spaarke edit probe {wp.EDITS_CODE}: EDITS is empty", empty)
+        self.assertEqual(empty.get("error"), wp.edit_error_line("EDITS is empty"), empty)
+        # the WP-7 run: the bad edit is the last one; Track Changes on before the run is on again after it fails
+        res = self.run_main(wp.JS_EDITS, (wp.EDITS_LINE, self.edits_line(wp.BAD_EDITS)), tracking="TrackAll")
+        self.assertEqual(res.get("error"), wp.edit_error_line(f"edit {len(wp.BAD_EDITS)} matched 0 times"), res)
+        self.assertEqual(next(c for c in res["calls"] if c[0] == "insertParagraph")[3], "Off")
+        self.assertEqual(res["end"], "TrackAll", "Track Changes on before the run stays on after a failed run")
 
     @unittest.skipUnless(shutil.which("node"), "needs Node.js")
-    def test_wp6_error_probe_logs_one_hash_and_throws_the_other_without_touching_the_document(self):
+    def test_wp7_office_error_probe_comments_then_logs_one_hash_and_throws_the_other(self):
         import build_word_probe as wp
-        res = self.run_main(wp.JS_ERROR)
-        err, log = wp.error_lines()
+        res = self.run_main(wp.JS_OFFICE_ERROR)
+        err, log, comment = wp.office_error_lines()
         self.assertEqual(res.get("error"), err)
         self.assertEqual(res["logs"], [log])
-        self.assertEqual(res["calls"], [], "the error probe writes nothing")
+        self.assertIn(["insertComment", "paragraph:Whole", comment], res["calls"],
+                      "a Word comment proves the Office.js runner ran it (the HTML runner can't make one)")
+
+    @unittest.skipUnless(shutil.which("node"), "needs Node.js")
+    def test_wp7_runner_check_stops_every_probe_without_office_js_and_passes_with_it(self):
+        import build_word_probe as wp
+        codes = {wp.EDITS_CODE: wp.JS_EDITS.replace(wp.EDITS_LINE, self.edits_line(wp.EXPECTED_EDITS)),
+                 wp.OFFICE_ERROR_CODE: wp.JS_OFFICE_ERROR, wp.SIZE_CODE: wp.js_size(wp.SIZES_KB[0])}
+        for code, js in codes.items():
+            # must fire: Copilot's WP-6 HTML stand-in, and the real stub with the Word global removed
+            shim = self.run_main(js, harness=self.HTML_SHIM)
+            self.assertEqual(shim.get("error"), wp.guard_line(code), code)
+            self.assertEqual(shim["calls"], [], f"{code}: nothing written before the check")
+            no_word = self.run_main(js.replace("typeof Word", "typeof NoWordHere"))
+            self.assertEqual(no_word.get("error"), wp.guard_line(code), code)
+            # must not fire: the Office.js stub
+            ok = self.run_main(js)
+            self.assertNotIn("runner check", ok.get("error") or "", code)
 
     @unittest.skipUnless(shutil.which("node"), "needs Node.js")
     def test_wp6_size_probes_return_the_python_mark_and_a_shortened_list_does_not(self):
@@ -447,9 +492,12 @@ main(context).then((r) => process.stdout.write(JSON.stringify({ r, calls, logs, 
         for kb in wp.SIZES_KB:
             res = self.run_main(wp.js_size(kb))
             self.assertEqual(res.get("r"), f"Spaarke size probe ran: {wp.size_mark(kb)}", kb)
-        nums = wp.pad_numbers(5)
-        cut = self.run_main(wp.js_size(5), (f", {nums[-1]}\n", "\n"))
-        self.assertNotEqual(cut.get("r"), f"Spaarke size probe ran: {wp.size_mark(5)}",
+            self.assertIn(["insertComment", "paragraph:Whole", f"Spaarke size comment {wp.size_mark(kb)}"],
+                          res["calls"], f"{kb}k: WP-7 comment shows the Office.js runner ran it")
+        kb = wp.SIZES_KB[0]
+        nums = wp.pad_numbers(kb)
+        cut = self.run_main(wp.js_size(kb), (f", {nums[-1]}\n", "\n"))
+        self.assertNotEqual(cut.get("r"), f"Spaarke size probe ran: {wp.size_mark(kb)}",
                             "a list Copilot shortened must not reproduce the expected hash")
 
 
