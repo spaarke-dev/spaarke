@@ -323,6 +323,15 @@ public sealed class IntakeRunJobHandler : IJobHandler
             CorrelationId = d.Job.CorrelationId,
         };
 
+        // A step finished outside this loop (an engine completion, IntakeRunStore.RecordExternalStepResultAsync) stores its result but
+        // cannot mark its stage: the stage's steps are the harness's. Every stage whose steps are all stored is marked before they are
+        // skipped below, so a stage whose last step is external (the NDA harness's Build) is recorded as completed.
+        var reconciled = UnmarkedCompletedStages(state, harness);
+        if (reconciled.Count > 0)
+        {
+            state = await WriteAsync(d, reconciled[^1], s => MarkCompletedStages(s, harness), ct).ConfigureAwait(false);
+        }
+
         // 5–6. Analyse and Build, one harness step at a time; each result stored before the next step runs.
         foreach (var step in harness.Steps)
         {
@@ -353,6 +362,8 @@ public sealed class IntakeRunJobHandler : IJobHandler
                 {
                     s.Awaiting = new IntakeAwaitingStep(step.Name, _time.GetUtcNow());
                 }
+
+                MarkCompletedStages(s, harness); // a result recorded meanwhile may have completed its stage
             }, ct).ConfigureAwait(false);
             if (state.Steps.ContainsKey(step.Name))
             {
@@ -368,10 +379,7 @@ public sealed class IntakeRunJobHandler : IJobHandler
                     {
                         s.Steps[step.Name] = outcome.Result;
                         s.Awaiting = null;
-                        if (harness.Steps.Where(x => x.Stage == step.Stage).All(x => s.Steps.ContainsKey(x.Name)))
-                        {
-                            s.MarkCompleted(stage);
-                        }
+                        MarkCompletedStages(s, harness);
                     }, ct).ConfigureAwait(false);
                     break;
 
@@ -685,6 +693,28 @@ public sealed class IntakeRunJobHandler : IJobHandler
 
     private static IntakeRunStage StageOf(IntakeRunSnapshot? run) =>
         run?.CurrentStage is { } name && Enum.TryParse<IntakeRunStage>(name, out var stage) ? stage : IntakeRunStage.Receive;
+
+    /// <summary>
+    /// The harness stages, in step order, whose steps all have a stored result but which are not yet marked completed. A step's result
+    /// can be stored by an engine completion (<see cref="IntakeRunStore.RecordExternalStepResultAsync"/>), which does not know the stage.
+    /// </summary>
+    private static List<IntakeRunStage> UnmarkedCompletedStages(IntakeRunState state, IIntakeHarness harness) =>
+        harness.Steps
+            .Select(x => x.Stage)
+            .Distinct()
+            .Where(stage => harness.Steps.Where(x => x.Stage == stage).All(x => state.Steps.ContainsKey(x.Name)))
+            .Select(stage => (IntakeRunStage)(int)stage)
+            .Where(stage => !state.IsCompleted(stage))
+            .ToList();
+
+    /// <summary>Marks every stage of <see cref="UnmarkedCompletedStages"/> completed, in step order.</summary>
+    private static void MarkCompletedStages(IntakeRunState state, IIntakeHarness harness)
+    {
+        foreach (var stage in UnmarkedCompletedStages(state, harness))
+        {
+            state.MarkCompleted(stage);
+        }
+    }
 
     private static bool HasValidSteps(IIntakeHarness harness)
     {

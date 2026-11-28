@@ -115,6 +115,29 @@ public sealed class IntakeRunResumeTests
     }
 
     [Fact]
+    public async Task ProcessAsync_StageWhoseLastStepCompletesExternally_IsMarkedCompletedOnResume()
+    {
+        // The NDA shape: Build's only step (redline) is an engine step, so its result is stored by the engine completion, not by the
+        // loop that marks stages. On resume the stored step is skipped; Build must still be recorded as completed (Codex P2, PR #3253).
+        var bed = new IntakeRunTestBed { Harness = new RecordingHarness("nda", externalEngineSteps: true) };
+        var runId = await bed.CreateRunAsync();
+        await bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId), CancellationToken.None); // segment dispatched
+        (await bed.Store.RecordExternalStepResultAsync(runId, "segment", RecordingHarness.Reference("segment", runId), CancellationToken.None))
+            .Should().BeTrue();
+        await bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId), CancellationToken.None); // edit-plan runs, redline dispatched
+        bed.Run(runId).State.Completed.Should().Contain(nameof(IntakeRunStage.Analyse)).And.NotContain(nameof(IntakeRunStage.Build));
+
+        (await bed.Store.RecordExternalStepResultAsync(runId, "redline", RecordingHarness.Reference("redline", runId), CancellationToken.None))
+            .Should().BeTrue();
+        var resumed = await bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId), CancellationToken.None);
+
+        resumed.Status.Should().Be(JobStatus.Completed);
+        bed.Run(runId).State.Completed.Should().Equal("Receive", "Store", "Classify", "Route", "Analyse", "Build", "Persist");
+        bed.Harness.StepCalls.Should().BeEquivalentTo(new Dictionary<string, int> { ["segment"] = 1, ["edit-plan"] = 1, ["redline"] = 1 },
+            "a stored engine step is never run again");
+    }
+
+    [Fact]
     public async Task ProcessAsync_EngineResultRecordedBetweenTheClaimAndTheAwaitingMark_IsNeverDispatchedAgain()
     {
         var bed = new IntakeRunTestBed { Harness = new RecordingHarness("nda", externalEngineSteps: true) };
