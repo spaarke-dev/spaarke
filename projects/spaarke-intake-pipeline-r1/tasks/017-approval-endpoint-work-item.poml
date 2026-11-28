@@ -1,141 +1,155 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="017" project="spaarke-intake-pipeline-r1">
   <metadata>
-    <title>FR-11: Approval: team Work Item, claim, one approve/reject endpoint, Decision Record for both, approved SPE version, resume from AwaitingApproval</title>
+    <title>FR-11: Approval on the Decide lane: intake approval Signal, claim, approve-intake / reject-intake plan actions, review Decision Record, approved SPE versions, resume from AwaitingApproval</title>
     <phase>1 Pipeline core and first doors</phase>
-    <gate>after:013,010</gate>
+    <gate>after:013,010,014</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Tags bff-api and auth; new endpoint, service and authorization filter.</rigor-reason>
+    <rigor-reason>Tags bff-api and auth; changes the Signals subject set, the decision commit route's guards and Signal/Decision Record readers; new claim write and executors.</rigor-reason>
     <model-tier>opus</model-tier>
-    <model-tier-reason>Auth-sensitive: fail-closed authorization on the endpoint that releases AI output (ADR-003/008/034, NFR-02); idempotent approve.</model-tier-reason>
+    <model-tier-reason>Auth-sensitive and cross-project: fail-closed authorization on the step that releases AI output (NFR-02), plus ontology-owned Services/Signals code reviewed by ontology-r1 (D-115) and access reviewed by uac-r2.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>P1-C</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>file-overlap with 023 and 024 on EndpointMappingExtensions.cs and the intake DI module.</parallel-reason>
-    <deps>013, 010</deps>
-    <tags>bff-api, endpoints, auth, authorization, dataverse</tags>
-    <estimated-effort>4-6 hours</estimated-effort>
+    <parallel-reason>file-overlap with 023 and 024 on EndpointMappingExtensions.cs; with 014 on JobProcessingModule.cs (014 is merged first).</parallel-reason>
+    <deps>013, 010, 014</deps>
+    <tags>bff-api, endpoints, auth, authorization, dataverse, signals</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
   </metadata>
 
-  <prompt>Implement intake approval: the Approve stage creates ONE team Work Item (`IActionSeam.CreateTaskAsync`) owned by the request's owning team and parks the run in AwaitingApproval. Add ONE endpoint, `POST /api/intake/runs/{runId:guid}/decision`, body `{ "action": "claim" | "approve" | "reject", "reason"?: string }`: claim sets the assigned attorney; approve writes the Decision Record, captures SPE versions, sets the run Approved and enqueues Return; reject writes the Decision Record, closes the run and returns the request to "In review". Authorization fails closed.</prompt>
-  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, endpoint-filter authorization, Dataverse write paths and ADR-004 idempotency. Follow ADRs strictly.</role>
-  <goal>An Approve stage creating one Work Item per run, and an endpoint + filter + service implementing claim/approve/reject with the status-code contract below, Decision Records and approved versions recorded for Return; tests for every case.</goal>
+  <prompt>Implement intake approval on the existing Decide lane (owner decision 2026-11-28, notes/decisions.md rows "Intake approval runs on the Decide lane" and "Decide-lane approval: conditions agreed"). When a run reaches Approve, the request's stage becomes Awaiting approval and the orchestrator raises an intake Signal-evaluation trigger. An intake approval policy (Decide lane, subject `sprk_servicerequest`, rule: the intake stage is Awaiting approval, scoped to intake rows) then raises ONE Decide-lane Signal, the Work Item, through the existing evaluate-plan-write path. Its plan offers two catalog actions, `approve-intake` and `reject-intake`, committed through `DecisionCommitService`, which writes the review-kind Decision Record. Claim is intake's own action: it sets the assigned attorney through the existing Assigned-To write path. Approve records each output's current SPE version, moves the run to Approved and enqueues Return. Reject ends the run (not Failed) and returns the request to In review. Authorization fails closed at every step. Do NOT add a new DecisionRecordWriter kind and do NOT use `IActionSeam.CreateTaskAsync`.</prompt>
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, endpoint-filter authorization, Dataverse write paths, ADR-004 idempotency and the ontology Signals / decision-commit model. Follow ADRs and the agreed conditions literally.</role>
+  <goal>An intake approval appears as one Decide-lane Work Item per run, visible only to callers who can read the request. It can be claimed by one owning-team member and approved or rejected by the claimer through the decision commit route. The Decision Record is written for both outcomes. Return is enqueued exactly once on approve. Every agreed guard has must-fire and must-not-fire tests.</goal>
 
   <context>
-    <background>Spec FR-11, NFR-01/02/08; owner: team queue then claim; the Console (019) and MDA form (018) both call this one endpoint (ADR-002). Run-state API, Return job type and intake DI module come from 013; request columns from 010.</background>
+    <background>Spec FR-11, NFR-01/02/08. Owner decisions 2026-11-28 (notes/decisions.md): Decide lane over a To Do; authorization "Team, then claimer"; self-approval ALLOWED (the requester may claim and approve if they pass the checks, so there is no separation-of-duties bar, and one test pins this); kill switch = the run's harness switch. ontology-r1 accepted changes to their code on this branch, with their review before merge (D-115). uac-r2 set the access conditions. Both sets are copied into the constraints below. Run state, the Return job and the intake options come from 013; engine completion from 014; request columns from 010 (`sprk_intakestage` Awaiting approval = 100000003, In review = 100000001; assigned attorney = `sprk_assignedtointernal` → contact via `ContactUserRepresentation.ResolveContactForUserAsync`).</background>
     <relevant-files>
-      <file role="new">src/server/api/Sprk.Bff.Api/Api/Intake/IntakeApprovalEndpoints.cs</file>
-      <file role="new">src/server/api/Sprk.Bff.Api/Api/Intake/IntakeApprovalAuthorizationFilter.cs</file>
-      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeApprovalService.cs</file>
-      <file role="new">tests/integration/contract/Api/Intake/IntakeApprovalEndpointsContractTests.cs (contract) + tests/integration/auth/Intake/IntakeApprovalAuthorizationTests.cs (auth path) + tests/integration/data-mutation/Intake/IntakeApprovalServiceTests.cs (write path)</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
-      <file role="modify">the intake DI module and Approve-stage hook created by task 013 under src/server/api/Sprk.Bff.Api/Infrastructure/DI/ and Services/Intake/ (exact names set by 013)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs (CreateTaskAsync :44, degraded-success contract)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs (WriteAsync :750; registered SignalsModule.cs:70; used by Services/Signals/GateDecisionRecordJob.cs)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceApprovalEndpoints.cs (domain approve endpoint shape: route group, filter, ProblemDetails codes) — read only, do not edit</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (IRecordOwnershipResolver.ResolveOwningTeamAsync :112)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/PlaybookAuthorizationFilter.cs (team-membership check inside an endpoint filter)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs (VerifiedSubjects :516; DueDateColumnBySubject stays unset for sprk_servicerequest)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs (EvaluatorGlobalReadableEntities :198; only after the live check in step 2)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluationTriggerHandler.cs (SignalTriggerKind: add IntakeAwaitingApproval; IncludesDoLane false)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs (approve-intake / reject-intake; pattern: approve-variance :243)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs (executor: PreflightAsync + ExecuteAsync)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs (dismissal and Also-resolve refusals for the intake policy, ~:1721)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs and DecisionCapability.cs (service-request subject authorised by the caller's rights on the request; unknown subject type fails closed)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeApprovalService.cs (claim / approve / reject transitions)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Intake/IntakeApprovalEndpoints.cs (claim route; the model-driven form's approve/reject entry calls the same decision commit route, never a second writer)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRunJobHandler.cs (the Approve stage, AwaitApprovalAsync: set the stage and enqueue the trigger; the resume after approval)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs and EndpointMappingExtensions.cs (registrations, one line each)</file>
+      <file role="new">scripts/intake/Apply-IntakeApprovalPolicy.ps1 (policy + published version, D-14; copy scripts/Apply-DoLanePolicies.ps1). Writing it is in scope; RUNNING it on dev needs the owner's go</file>
+      <file role="new">tests/integration/contract/Api/Intake/IntakeApprovalContractTests.cs, tests/integration/auth/Intake/IntakeApprovalAuthorizationTests.cs, tests/integration/data-mutation/Intake/IntakeApprovalServiceTests.cs, tests/integration/seam/Intake/IntakeApprovalDecideLaneSeamTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs (step 1d: every step's preflight runs as the caller before any write)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/InquiryDispositionService.cs and BudgetInquiryExecutor.cs (outbound inquiries share sprk_servicerequest; DO NOT change these paths)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/WorkItemPrivilege.cs (batched as-the-caller read, fail closed)</file>
+      <file role="canonical-reference">CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync (the equalised gate question; find with Grep)</file>
+      <file role="canonical-reference">the existing Assigned-To write path for sprk_assignedtointernal (ADR-034 A4 Collaborate grant + notifications; find with Grep, do not write the column with a raw PATCH)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRunStore.cs (conditional writes on the row version)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="013" status="pending">Orchestrator stage machine, run-state write API, Return job type, intake DI module, kill switch.</dependency>
-      <dependency task="010" status="pending">sprk_servicerequest stage, assigned attorney (sprk_assignedtointernal or new column), current run.</dependency>
+      <dependency task="013" status="completed">Orchestrator, run state, Return job type, IntakePipelineOptions harness switch.</dependency>
+      <dependency task="010" status="completed">sprk_servicerequest intake columns.</dependency>
+      <dependency task="014" status="completed">Engine completion; JobProcessingModule edits land first.</dependency>
     </dependencies>
   </context>
 
   <constraints>
-    <constraint source="ADR-008">SCOPE = the decision endpoint. Authorization runs in an endpoint filter (`IntakeApprovalAuthorizationFilter`), not in the handler body; the route group also carries `RequireAuthorization()`.</constraint>
-    <constraint source="ADR-003">SCOPE = the filter. Allowed caller = a member of the team owning the run's `sprk_servicerequest` (user owner → `IRecordOwnershipResolver.ResolveOwningTeamAsync`). Read fault or unresolved team → 403, nothing written (fail closed). Never trust ids from the body.</constraint>
-    <constraint source="ADR-034">SCOPE = the membership check. Use the existing team-membership read used by `PlaybookAuthorizationFilter.cs`; do not add a second membership mechanism.</constraint>
-    <constraint source="ADR-002">SCOPE = request stage, current run, assigned attorney. Only this endpoint/service and the 013 orchestrator write them; clients only call the endpoint. No plugin.</constraint>
-    <constraint source="ADR-004">SCOPE = approve and the Approve stage. Replay-safe: deterministic Decision Record id per (runId, decision); create-once Work Item marker; Return enqueued with key `intake-return:{runId}`; atomic claim, never `IIdempotencyService` check-then-set alone.</constraint>
-    <constraint source="ADR-007">SCOPE = approved-version capture. Read the current SPE version id of each output `sprk_document` through `SpeFileStore` only.</constraint>
-    <constraint source="ADR-019">SCOPE = every non-200 response. ProblemDetails with a stable `errorCode` (INTAKE_RUN_NOT_FOUND, INTAKE_FORBIDDEN, INTAKE_RUN_WRONG_STATE, INTAKE_INVALID_ACTION, INTAKE_DISABLED) and the correlation id; no document or request text.</constraint>
-    <constraint source="ADR-032">SCOPE = the endpoint. When the intake kill switch from 013 is off, the endpoint returns 503 INTAKE_DISABLED (Null-Object), and nothing is written (NFR-08).</constraint>
-    <constraint source="ADR-015">SCOPE = all logs and Decision Record text written here. Identifiers only; the reject `reason` is stored on the Decision Record but never logged.</constraint>
-    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); publish-size delta vs a fresh master build (total ≤ 60 MB); no new package or HIGH CVE.</constraint>
+    <constraint source="owner-2026-11-28">SCOPE = the whole task. No new DecisionRecordWriter kind, no `IActionSeam.CreateTaskAsync`, no direct `SignalWriter.WriteAsync` call from intake: the Signal is raised only by the evaluate-plan-write path (`SignalEvaluationTrigger` → re-evaluation), with the nightly pass as backstop.</constraint>
+    <constraint source="ontology-r1 (a)1">SCOPE = subject allow-lists. Add `sprk_servicerequest` to `SignalWriter.VerifiedSubjects`. Add it to `PredicateCompiler.EvaluatorGlobalReadableEntities` ONLY after the live check (PredicateCompiler remarks §9.2: the same rows as admin and as the ontology writer) shows the writer reads it at Global depth. If that needs a privilege on the Spaarke Ontology Service role, STOP: a role edit needs the owner's approval.</constraint>
+    <constraint source="ontology-r1 (a)2">SCOPE = the rule body and every read. Outbound inquiries (`sprk_direction` = Outbound) live in the same table. The rule selects intake rows explicitly (`sprk_intakestage` = Awaiting approval, plus direction if a stage can be set on an inquiry). InquiryDispositionService, the ClosesTodo open-inquiry guard and the InquiryDisposition trigger are unchanged. The message template names only TemplateEligibleFields (PolicyVersionValidator).</constraint>
+    <constraint source="ontology-r1 (a)3">SCOPE = the trigger. New `SignalTriggerKind.IntakeAwaitingApproval`, routed through `SignalEvaluationTrigger` (never throws; key `signal-eval-{kind}-{subjectId}-{sourceId}`; IncludesDoLane false). If the stage moves without a decision, the re-evaluation closes the Signal ConditionCleared.</constraint>
+    <constraint source="ontology-r1 (a)4">SCOPE = catalog. Codes `approve-intake` and `reject-intake` (kebab-case, Decide lane): mutual Excludes (FirstConflict), a Gate, RecordClass Judgement, ResolvesSignal true. A new Decide WorkType value ("approve") requires checking how the Console Decide lane groups and labels work types (src/solutions/SpaarkeAi/**); if the UI does not handle it, report and do not ship a blank label. Catalog, describer and plan text are pinned in contract baselines: run `--filter "FullyQualifiedName~Signals"` and update `tests/integration/contract/Api/Signals/Baselines` (plan.200.*.json) in this change (#3016).</constraint>
+    <constraint source="ontology-r1 (a)5 / D-129">SCOPE = ownership. The claimer/decider is a person column (`sprk_assignedtointernal`, a contact), never ownerid. Registering that column for sprk_servicerequest in RecordTableRules / OwnedChildWrite.ForPersonColumns, and the secure-child status of Signals and Decision Records on a Secure request (D-33/D-123), follow uac-r2's direction; if the needed rule is unclear, STOP and ask through the main session.</constraint>
+    <constraint source="ontology-r1 (b)">SCOPE = executors. The claimer and record checks are implemented in the executor's `PreflightAsync` (runs as the caller before any write; `DecisionActionReasons.NotAuthorized` → 403; other codes → 409-class refusal) AND re-checked in `ExecuteAsync`. IntakeApprovalService's transition is conditional (stage still Awaiting approval, same claimer, If-Match on the row), so a race refuses instead of approving twice. The executor is idempotent on retry: the Return enqueue key is deterministic (`intake-return:{runId:N}`, the 013 key).</constraint>
+    <constraint source="ontology-r1 (c)">SCOPE = DecisionCommitService. For the intake approval policy: refuse dismissal with a reason code and never count it toward suppression (D-11); refuse intake-approval Signals as Also-resolve targets of any other decision; refuse Also-resolve on the intake item itself. All three are checked before the first write.</constraint>
+    <constraint source="uac-r2 (a) / owner 'Team, then claimer'">SCOPE = every claim, approve and reject. Checks in this order, each as the caller and fail closed. (1) Record check: the caller's own rights on the sprk_servicerequest through the equalised gate question (`CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync`): Read for every action, Write for claim, approve and reject. A fail, a fault, an unknown id or a non-intake row all give the SAME 404 (byte-identical body apart from the correlation id). (2) Membership of the request's owning team through `IIdentityNormalizationService.ResolveAsync(...).TeamIds`; a non-member gets 403; a fault or an unresolved team gets 403; the 2-minute cache is named as a K-class limit in the PR. (3) After a claim, only the claimer may approve or reject (403). Re-run (1)–(3) at approve and reject time, not only at claim. Self-approval is allowed (owner): the requester is not barred, and one test pins it.</constraint>
+    <constraint source="uac-r2 (b)">SCOPE = Signal and Decision Record readers (list and by id: SignalReadService, DecisionCapability, the Decide page, the MCP decision tools). A service-request subject is authorised by the caller's rights on that request. A subject table a reader does not know fails closed, never "no restriction". These Signals and Decision Records never reach a contact, the External SPA or any external surface (task 028 rule).</constraint>
+    <constraint source="uac-r2 (c) / ADR-002 / ADR-034">SCOPE = claim. Through the existing Assigned-To write path (one owner per invariant; keeps the ADR-034 A4 Collaborate grant and notifications in step), self-assignment only, conditional on the row version (If-Match), so two simultaneous claims give exactly one winner and one 409. G5: check as the user, write as the app; the Decision Record carries the person in `sprk_createdbyperson`.</constraint>
+    <constraint source="ADR-032 / owner">SCOPE = claim, approve, reject. The run's harness switch (`IntakePipelineOptions.IsHarnessEnabled(harnessKey)`) is checked AFTER authorization; off → 503 `INTAKE_DISABLED` and nothing is written (prove it in a test). No new switch.</constraint>
+    <constraint source="ADR-008 / ADR-019">SCOPE = the claim route and any intake route. Endpoint filter + `.RequireAuthorization()`; ProblemDetails with stable codes (INTAKE_RUN_NOT_FOUND, INTAKE_FORBIDDEN, INTAKE_RUN_WRONG_STATE, INTAKE_ALREADY_CLAIMED, INTAKE_DISABLED) and the correlation id.</constraint>
+    <constraint source="ADR-007">SCOPE = approved-version capture: the current SPE version id of each output document, through `SpeFileStore` (GetCurrentVersionIdAsync) only.</constraint>
+    <constraint source="ADR-015">SCOPE = all logs, ProblemDetails, Signal text and Decision Record text written here: identifiers only; a reject reason is stored on the Decision Record and never logged.</constraint>
+    <constraint source="root-CLAUDE.md-§10/§11">SCOPE = BFF changes. Placement Justification and §11 answers per new surface in the report; no new package or HIGH CVE; the main session measures publish size.</constraint>
+    <constraint source="public-repo">SCOPE = commit messages, notes, test names visible in PR text. No environment ids, identity ids or access-control mechanics (ontology-r1 / uac-r2); describe areas only.</constraint>
   </constraints>
 
   <knowledge>
     <files>
+      <file>projects/spaarke-intake-pipeline-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md</file>
       <file>.claude/constraints/api.md</file>
       <file>.claude/constraints/auth.md</file>
       <file>.claude/constraints/jobs.md</file>
       <file>.claude/constraints/bff-extensions.md</file>
       <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
       <file>.claude/adr/ADR-002-thin-plugins.md</file>
-      <file>.claude/adr/ADR-003-authorization-seams.md</file>
       <file>.claude/adr/ADR-004-job-contract.md</file>
       <file>.claude/adr/ADR-007-spefilestore.md</file>
       <file>.claude/adr/ADR-008-endpoint-filters.md</file>
       <file>.claude/adr/ADR-019-problemdetails.md</file>
       <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
-      <file>.claude/adr/ADR-034-user-record-membership.md</file><file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
       <file>.claude/adr/ADR-040-session-ledger.md</file>
       <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
       <file>docs/adr/ADR-038-testing-strategy.md</file>
       <file>tests/CLAUDE.md</file>
     </files>
     <patterns>
-      <pattern name="Endpoint definition" location=".claude/patterns/api/endpoint-definition.md">Route group + `MapPost` + `.WithName` + ProblemDetails.</pattern>
       <pattern name="Endpoint filters" location=".claude/patterns/api/endpoint-filters.md">Authorization filter shape.</pattern>
-      <pattern name="Auth" location=".claude/patterns/auth/spaarke-sso-binding.md">Caller identity (OBO principal) on BFF routes.</pattern>
       <pattern name="Access control" location=".claude/patterns/auth/uac-access-control.md">Fail-closed reads.</pattern>
-      <pattern name="Unit test structure" location=".claude/patterns/testing/unit-test-structure.md">Endpoint tests with doubles.</pattern>
+      <pattern name="Decide-lane action" location="src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs">approve-variance entry + its executor.</pattern>
     </patterns>
   </knowledge>
 
   <steps mode="directional">
-    <step order="1">Load the knowledge files and the 013 orchestrator code; declare RIGOR FULL, tier opus, effort high.</step>
-    <step order="2">Approve stage (013's hook): no Work Item marker → `IActionSeam.CreateTaskAsync` (owner = owning team, regarding = request, subject = fixed text + request number); store the task id; run AwaitingApproval, request stage "Awaiting approval". `Guid.Empty` TaskId → hold with admin attention.</step>
-    <step order="3">Write `IntakeApprovalAuthorizationFilter` (constraints ADR-003/034) and `IntakeApprovalEndpoints` mapping `POST /api/intake/runs/{runId:guid}/decision`; register it in `EndpointMappingExtensions.cs`.</step>
-    <step order="4">`IntakeApprovalService`: claim / approve / reject as the criteria state; approve captures each output's SPE version id, writes the Decision Record, enqueues Return and completes the Work Item; reject closes the run (not Failed) and completes the Work Item.</step>
-    <step order="5">Persist approved version ids in 013's run state for Return; state writes go last, after the Decision Record.</step>
-    <step order="6">Tests for every criterion; build and test; measure the publish-size delta.</step>
-    <step order="7">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
-    <step order="8">Document deviations (e.g. where approved versions are stored) in projects/spaarke-intake-pipeline-r1/notes/.</step>
+    <step order="1">Load the knowledge files, the 013/014 intake code and the Signals code listed above; declare RIGOR FULL, tier opus, effort high.</step>
+    <step order="2">Live read-only check: does the ontology writer identity read sprk_servicerequest at Global depth (PredicateCompiler §9.2 method)? This is a read; do it only if it needs no new privilege or secret, otherwise report what is needed and continue with the code behind the allow-list change, unmerged into the allow-list.</step>
+    <step order="3">Subject + rule + trigger: VerifiedSubjects; the trigger kind; the orchestrator's Approve stage sets the stage and enqueues the trigger (idempotent); the policy/version seed script (not run).</step>
+    <step order="4">Catalog actions + executor (preflight + execute) + IntakeApprovalService (conditional transitions, version capture, Return enqueue, run close on reject).</step>
+    <step order="5">DecisionCommitService refusals (dismissal, Also-resolve both ways) and the reader gating for service-request subjects (fail closed, never external).</step>
+    <step order="6">Claim route through the Assigned-To write path; the model-driven form's approve/reject entry point calls the decision commit route.</step>
+    <step order="7">Tests (see criteria), `--filter "FullyQualifiedName~Signals"` with baselines updated, the Intake filter, full `tests/Spaarke.ArchTests`, `dotnet build` 0 warnings.</step>
+    <step order="8">Document deviations in projects/spaarke-intake-pipeline-r1/notes/017-approval.md. Do not edit TASK-INDEX.md or current-task.md.</step>
   </steps>
 
   <escalation>
-    <trigger>If no canonical team-membership read exists that can answer "is the caller a member of team X" fail-closed, STOP and escalate (root CLAUDE.md §6, security-sensitive) rather than writing a new membership mechanism.</trigger>
-    <trigger>If task 011/013 provide no run field for the approved version ids or the Work Item marker, STOP and escalate rather than adding a Dataverse column here (schema belongs to 011).</trigger>
-    <trigger>If `DecisionRecordWriter` cannot take an intake decision without a new record kind or schema change, STOP and present the options (ADR-040 conflict, root CLAUDE.md §6.5).</trigger>
+    <trigger>The live check shows the ontology writer cannot read sprk_servicerequest at Global depth without a role privilege change: STOP that part and report (owner approval needed).</trigger>
+    <trigger>The commit route cannot refuse dismissal or Also-resolve per policy without changing behaviour for existing policies: STOP and report the options.</trigger>
+    <trigger>The Assigned-To write path cannot do a conditional (If-Match) self-assignment on sprk_servicerequest, or uac-r2's person-column registration rule is unclear: STOP and report.</trigger>
+    <trigger>The Console Decide lane cannot show a new WorkType without UI work: report it (UI change is task 019's scope), do not hack a label.</trigger>
   </escalation>
 
   <justification>
-    <existing>notes/reuse-scan.md row 4: `IActionSeam.CreateTaskAsync` (:44) and `DecisionRecordWriter` (SignalsModule.cs:70) reused; the only approve endpoints are domain-bound (`InvoiceApprovalEndpoints.cs:58`). CAPABILITY-INDEX: no generic approve row.</existing>
-    <extension>Partly: seam and writer reused as-is; `InvoiceApprovalEndpoints` is invoice-specific and frozen until eBilling UAT.</extension>
+    <existing>The Decide lane (SignalWriter, SignalEvaluationTrigger, DecisionActionCatalog, DecisionCommitService, the review-kind DecisionRecordWriter path) owns Work Items and decisions (ontology-component-model.md: "Work queue = things not yet decided. Decision Record = things decided"). The Assigned-To write path owns sprk_assignedtointernal.</existing>
+    <extension>Yes: everything except IntakeApprovalService and the claim route extends existing components (a subject, a trigger kind, two catalog entries, one executor, three commit refusals, reader gating).</extension>
     <cost-of-doing-nothing>Runs needing approval stay in AwaitingApproval forever; FR-11, FR-13(b) and Return never happen.</cost-of-doing-nothing>
   </justification>
 
   <tools>
     <tool name="dotnet">Build and test the BFF</tool>
-    <tool name="terminal">Publish-size measurement</tool>
   </tools>
 
   <outputs>
-    <output type="code">src/server/api/Sprk.Bff.Api/Api/Intake/IntakeApprovalEndpoints.cs</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Api/Intake/IntakeApprovalAuthorizationFilter.cs</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeApprovalService.cs</output>
-    <output type="test">the three test files listed in relevant-files</output>
+    <output type="code">The modified Signals files, IntakeApprovalService.cs, IntakeApprovalEndpoints.cs, the Approve-stage change in IntakeRunJobHandler.cs, scripts/intake/Apply-IntakeApprovalPolicy.ps1</output>
+    <output type="test">The four test files listed in relevant-files, plus updated Signals contract baselines</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given a run whose harness returned approval-required, the Approve stage creates exactly one Work Item owned by the request's owning team; redelivering the stage creates no second Work Item.</criterion>
-    <criterion testable="true">Given a team member and a run in AwaitingApproval, `approve` returns 200, writes one Decision Record (approved, actor = caller, approved version ids), sets the assigned attorney if unset, moves the run to Approved and enqueues one Return job.</criterion>
-    <criterion testable="true">A second `approve` of the same run returns 200 with the same Decision Record id, and no second Decision Record or Return job exists (FR-11 b).</criterion>
-    <criterion testable="true">Given a team member and a run in AwaitingApproval, `reject` returns 200, writes one Decision Record (rejected), ends the run (not Failed) and sets the request stage to "In review".</criterion>
-    <criterion testable="true">`claim` by a team member sets the assigned attorney; a claim when another attorney is already assigned returns 409 and changes nothing.</criterion>
-    <criterion testable="true">Negative: no token → 401; a caller outside the owning team → 403 INTAKE_FORBIDDEN and nothing changes (FR-11 a); a membership read fault → 403, nothing changes.</criterion>
-    <criterion testable="true">Negative: unknown runId or a non-intake run → 404 INTAKE_RUN_NOT_FOUND; approve/reject of a run not in AwaitingApproval (other than the idempotent repeat) → 409 INTAKE_RUN_WRONG_STATE (FR-11 d); an unknown action → 400 INTAKE_INVALID_ACTION.</criterion>
-    <criterion testable="true">With the intake kill switch off, the endpoint returns 503 INTAKE_DISABLED and writes nothing.</criterion>
-    <criterion testable="true">The approved version ids recorded are the SPE versions current at approval (FR-11 c), read through `SpeFileStore`.</criterion>
-    <criterion testable="true">No log line or ProblemDetails contains document text or the reject reason.</criterion>
-    <criterion testable="true">The PR states the Placement Justification and the publish-size delta (≤ 60 MB, no new HIGH CVE). Build and all tests pass.</criterion>
-    <criterion testable="true">Test scope: the stated contract plus the negative cases above; anything beyond needs a one-line justification in task notes. One seeding proof for the fail-closed check (break it, see the 403 test fail, restore).</criterion>
+    <criterion testable="true">A run reaching Approve sets the request stage to Awaiting approval and enqueues one IntakeAwaitingApproval trigger; evaluating it raises exactly one Decide-lane Signal on the request, owned by the request's owning team; redelivering the stage or the trigger raises no second Signal.</criterion>
+    <criterion testable="true">The rule never selects an outbound inquiry row or a row with a null intake stage; the inquiry paths' existing tests pass unchanged.</criterion>
+    <criterion testable="true">Claim by an owning-team member with Read+Write on the request sets the assigned attorney to the caller's contact through the Assigned-To path; a second claim by someone else → 409 INTAKE_ALREADY_CLAIMED, nothing changed; two simultaneous claims → exactly one winner and one 409.</criterion>
+    <criterion testable="true">The claimer's approve-intake commit returns success, writes one review-kind Decision Record (approved, sprk_createdbyperson = the caller), records the approved SPE version ids, moves the run to Approved, resolves the Signal and enqueues one Return job (key intake-return:{runId:N}); a repeated or retried commit writes no second record or Return job.</criterion>
+    <criterion testable="true">The claimer's reject-intake commit writes one Decision Record (rejected), ends the run (not Failed), sets the request stage to In review and resolves the Signal.</criterion>
+    <criterion testable="true">Self-approval (owner "Allow it"; ontology D-237: being the requester is no bar and grants nothing): must-not-fire, the requester who is an owning-team member and passes the record checks can claim and approve; must-fire, a requester WITHOUT approval rights (not in the team, or no Write) is refused (NotAuthorized → 403, or the 404 of the record check) before any write.</criterion>
+    <criterion testable="true">Negative, each with a test and mutation evidence for the record and claimer checks: unknown id and no-Read caller and No Access on a secure request → identical 404; non-member → 403; non-claimer after a claim → 403 (from PreflightAsync, and again when the claim changes between preflight and execute); a caller who lost membership or rights after claiming → refused at approve/reject; no token → 401.</criterion>
+    <criterion testable="true">Harness switch off → 503 INTAKE_DISABLED for claim, approve and reject, after authorization (an unauthorised caller still gets 404/403), and nothing is written.</criterion>
+    <criterion testable="true">Dismissal of the intake Signal is refused with a reason code and counts toward no suppression; an intake Signal cannot be an Also-resolve target of another decision; Also-resolve on the intake item is refused; each before any write, with must-not-fire tests that existing policies' dismissal and Also-resolve still work.</criterion>
+    <criterion testable="true">A caller without Read on the request sees neither its Signal nor its Decision Record (list and by id; same 404 as unknown); an external caller with a grant on a related record sees neither; a reader meeting an unknown subject table fails closed.</criterion>
+    <criterion testable="true">`--filter "FullyQualifiedName~Signals"` passes with the baselines updated in this change; the Intake filter and full tests/Spaarke.ArchTests pass; build 0 warnings.</criterion>
+    <criterion testable="true">No log line, ProblemDetails, Signal text or Decision Record text contains document text or the reject reason.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-11. Claim is an `action` on the same endpoint so one service owns the assigned-attorney invariant (ADR-002). If 013 chose other folder names than `Api/Intake/`, `Services/Intake/`, follow 013. Return is implemented by 021 and 043. Run `/conflict-check` before the PR.</notes>
+  <notes>Rewritten 2026-11-28 after the first run stopped at its escalation trigger (no Decision Record kind for intake; no create-once Work Item). Owner chose the Decide lane; conditions from ontology-r1 and uac-r2 are in notes/decisions.md. PR description must name the base and the three ontology areas (Services/Signals, Api/Signals, catalog) this branch changes; ontology-r1 reviews those, uac-r2 reviews access. Running the policy seed script on dev needs the owner's go. Run `/conflict-check` before the PR.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
