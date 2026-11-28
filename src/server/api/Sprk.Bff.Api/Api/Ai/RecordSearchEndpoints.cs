@@ -192,9 +192,10 @@ public static class RecordSearchEndpoints
             logger.LogError(ex, "Record search failed for recordTypes=[{RecordTypes}]",
                 string.Join(", ", request.RecordTypes));
 
+            // A fixed message: the exception's own text (an index or Dataverse error) is logged above, never returned.
             return Results.Problem(
                 title: "Record Search Failed",
-                detail: ex.Message,
+                detail: "Record search could not be completed.",
                 statusCode: 500,
                 extensions: new Dictionary<string, object?>
                 {

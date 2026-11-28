@@ -29,12 +29,12 @@ namespace Sprk.Bff.Api.Tests.Domain.Ai;
 /// <c>ResolveTemplate</c> short-circuits before calling it. <see cref="DeliverToIndexNodeExecutor"/>
 /// itself is the REAL production class.</para>
 /// </remarks>
-public sealed class DeliverToIndexNodeExecutorReplaceStaleChunksTests
+public sealed class DeliverToIndexNodeExecutorIndexJobTests
 {
     private readonly Mock<JobSubmissionService> _jobSubmissionMock;
     private readonly DeliverToIndexNodeExecutor _executor;
 
-    public DeliverToIndexNodeExecutorReplaceStaleChunksTests()
+    public DeliverToIndexNodeExecutorIndexJobTests()
     {
         var sbOptions = new Mock<IOptions<ServiceBusOptions>>();
         sbOptions.Setup(o => o.Value).Returns(new ServiceBusOptions
@@ -102,7 +102,7 @@ public sealed class DeliverToIndexNodeExecutorReplaceStaleChunksTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ValidNode_SetsReplaceStaleChunksTrueOnTheSubmittedPayload()
+    public async Task ExecuteAsync_ValidNode_SubmitsTheRagIndexJobForTheDocumentsItem()
     {
         JobContract? capturedJob = null;
         _jobSubmissionMock
@@ -115,13 +115,12 @@ public sealed class DeliverToIndexNodeExecutorReplaceStaleChunksTests
         result.Success.Should().BeTrue();
         capturedJob.Should().NotBeNull();
         capturedJob!.JobType.Should().Be(RagIndexingJobHandler.JobTypeName);
-        capturedJob.IdempotencyKey.Should().Be("rag-index-drive-playbook-item-playbook",
-            "the key is UNCHANGED by this task — only whether the trim runs");
+        capturedJob.IdempotencyKey.Should().Be("rag-index-drive-playbook-item-playbook");
 
+        // GitHub #3304: the payload no longer carries a stale-chunk switch; every index trims inside FileIndexingService.
         var payload = DeserializePayload(capturedJob);
-        payload.ReplaceStaleChunks.Should().BeTrue(
-            "a playbook can run the Index node again over a document it (or another path) already " +
-            "indexed; a first index simply finds nothing to trim");
+        payload.DriveId.Should().Be("drive-playbook");
+        payload.ItemId.Should().Be("item-playbook");
     }
 
     [Fact]

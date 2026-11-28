@@ -448,6 +448,7 @@ public static class RagEndpoints
     private static async Task<IResult> GetEmbedding(
         EmbeddingRequest request,
         IRagService ragService,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Text))
@@ -476,9 +477,10 @@ public static class RagEndpoints
         }
         catch (Exception ex)
         {
+            loggerFactory.CreateLogger("RagEndpoints").LogError(ex, "Embedding generation failed");
             return Results.Problem(
                 title: "Embedding Generation Failed",
-                detail: ex.Message,
+                detail: "The embedding could not be generated.",
                 statusCode: 500);
         }
     }
@@ -1324,11 +1326,6 @@ public static class RagEndpoints
                     DocumentId = documentId,
                     ParentEntity = parentEntity,
                     ReplaceParentEntity = !parentDecision.RowUnreadable,
-                    // Task 048 (spaarkeai-word-add-in-r1): this route re-indexes an EXISTING Dataverse
-                    // document by id ("Send to Index" / the Dataverse ribbon button) — the item may
-                    // already carry chunks from an earlier index. Trim any leftover tail after the new
-                    // chunks land; a first index (never-indexed document) finds nothing to trim.
-                    ReplaceStaleChunks = true,
                 };
 
                 // Step 5: Index via OBO authentication
@@ -1411,7 +1408,7 @@ public static class RagEndpoints
                 {
                     DocumentId = documentId,
                     Success = false,
-                    ErrorMessage = ex.Message
+                    ErrorMessage = "The document could not be indexed."
                 });
             }
         }
@@ -1505,13 +1502,6 @@ public static class RagEndpoints
                 ParentEntity = request.ParentEntity,
                 Source = "EnqueueEndpoint",
                 EnqueuedAt = DateTimeOffset.UtcNow,
-                // Task 048 (spaarkeai-word-add-in-r1): thread the caller's own value through instead of
-                // silently dropping it. FileIndexRequest.ReplaceStaleChunks has been a bindable field on
-                // this request body since task 029; before this fix a caller that set it true on the
-                // wire had that intent discarded here. This endpoint has no first-class "this is a
-                // re-index" signal of its own (unlike SendToIndex / the Knowledge Base reindex route), so
-                // the caller decides, same as the sibling IndexFile endpoint.
-                ReplaceStaleChunks = request.ReplaceStaleChunks,
             }));
 
             // Step 4: Create and submit job
@@ -1547,7 +1537,7 @@ public static class RagEndpoints
             logger.LogError(ex, "Failed to enqueue RAG indexing job for {FileName}", request.FileName);
             return Results.Problem(
                 title: "Enqueue Failed",
-                detail: ex.Message,
+                detail: "The indexing job could not be queued.",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }
@@ -1645,7 +1635,7 @@ public static class RagEndpoints
             logger.LogError(ex, "Failed to submit bulk RAG indexing job for tenant {TenantId}", request.TenantId);
             return Results.Problem(
                 title: "Submit Failed",
-                detail: ex.Message,
+                detail: "The bulk indexing job could not be submitted.",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }

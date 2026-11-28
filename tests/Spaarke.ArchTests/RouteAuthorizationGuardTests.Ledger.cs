@@ -3692,7 +3692,7 @@ public partial class RouteAuthorizationGuardTests
             "Narrates the caller's PRE-COLLECTED payload: NarrateAsync passes systemUserId: null so nothing is "
             + "collected (DailyBriefingCompositeService.cs:163-176)."),
         Permanent("POST /api/ai/rag/embedding", PermanentBasis.CallerSuppliedContentOnly, "167",
-            "Embeds the request text only (GetEmbeddingAsync(request.Text), RagEndpoints.cs:468); reads no "
+            "Embeds the request text only (GetEmbeddingAsync(request.Text), RagEndpoints.cs:466); reads no "
             + "index document."),
         Permanent("POST /api/communications/draft", PermanentBasis.CallerSuppliedContentOnly, "167",
             "Drafts from the request's intent, instruction, body and subject only "

@@ -20,15 +20,9 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Domain.Ai;
 
 /// <summary>
-/// Task 048 (spaarkeai-word-add-in-r1) — <see cref="BulkRagIndexingJobHandler"/> is the admin / scheduled
-/// bulk re-index path found during this task's audit. Unlike every other caller this task turns the trim
-/// on for, this one already carries an explicit, first-class signal for "this item may already have
-/// chunks": <see cref="BulkRagIndexingPayload.ForceReindex"/> — the SAME flag that already bypasses the
-/// per-item idempotency skip (<c>ProcessSingleDocumentAsync</c>) and the "unindexed only" Dataverse filter
-/// (<c>QueryDocumentsAsync</c>, <c>sprk_ragindexedon eq null</c>). Task 048 ties
-/// <see cref="FileIndexRequest.ReplaceStaleChunks"/> to that SAME flag rather than turning it on
-/// unconditionally, so the default "unindexed" sweep (every document here is a first index by
-/// construction) never pays for a trim query that can only ever delete nothing.
+/// <see cref="BulkRagIndexingJobHandler"/>, the admin / scheduled bulk re-index path: what it skips, what it stamps, and the
+/// parent it asks for. Task 048 (spaarkeai-word-add-in-r1) started this file for the stale-chunk switch the handler used to
+/// set from <see cref="BulkRagIndexingPayload.ForceReindex"/>; GitHub #3304 removed the switch (every index now trims).
 /// </summary>
 /// <remarks>
 /// <para><b>Boundary doubles</b> (ADR-038): <see cref="IFileIndexingService"/> (captures the
@@ -42,7 +36,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Ai;
 /// <see cref="BatchJobStatusStore"/> and <see cref="RagTelemetry"/> are the REAL production classes —
 /// both are inert without a real Redis / OpenTelemetry exporter, so no double is needed.</para>
 /// </remarks>
-public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
+public sealed class BulkRagIndexingJobHandlerIndexRequestTests
 {
     private const string TenantId = "tenant-bulk-048";
     private const string DataverseUrl = "https://test.crm.dynamics.com";
@@ -173,47 +167,9 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
         })),
     };
 
-    [Fact]
-    public async Task ProcessAsync_ForceReindexTrue_SetsReplaceStaleChunksTrueOnTheFileIndexRequest()
-    {
-        var (handler, fileIndexingMock, _) = CreateSut();
-        FileIndexRequest? captured = null;
-        fileIndexingMock
-            .Setup(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
-            .Callback<FileIndexRequest, CancellationToken>((req, _) => captured = req)
-            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 2 });
-
-        var outcome = await handler.ProcessAsync(MakeJob(forceReindex: true), CancellationToken.None);
-
-        outcome.Status.Should().Be(JobStatus.Completed, "the single document must have indexed successfully");
-        captured.Should().NotBeNull();
-        captured!.ReplaceStaleChunks.Should().BeTrue(
-            "ForceReindex is this handler's own explicit signal that a document may already carry " +
-            "chunks — the same flag that already bypasses the per-item skip and the unindexed-only " +
-            "Dataverse filter, so the trim runs wherever a re-index actually happens");
-    }
-
-    [Fact]
-    public async Task ProcessAsync_ForceReindexFalse_LeavesReplaceStaleChunksFalseOnTheFileIndexRequest()
-    {
-        // The default "unindexed" sweep (ScheduledRagIndexingService and the admin default): every
-        // document QueryDocumentsAsync returns here was selected BECAUSE it has never been indexed
-        // (sprk_ragindexedon eq null) — there is never a tail to trim, so this negative case must NOT
-        // pay for the extra search call task 048 proves is harmless-but-real everywhere else.
-        var (handler, fileIndexingMock, _) = CreateSut();
-        FileIndexRequest? captured = null;
-        fileIndexingMock
-            .Setup(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
-            .Callback<FileIndexRequest, CancellationToken>((req, _) => captured = req)
-            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 2 });
-
-        await handler.ProcessAsync(MakeJob(forceReindex: false), CancellationToken.None);
-
-        captured.Should().NotBeNull();
-        captured!.ReplaceStaleChunks.Should().BeFalse(
-            "the scheduled/default sweep only ever selects documents that were never indexed before " +
-            "(sprk_ragindexedon eq null) — a trim call there can only ever delete nothing");
-    }
+    // GitHub #3304: the two facts that pinned FileIndexRequest.ReplaceStaleChunks to ForceReindex went with the switch itself.
+    // Every index now removes the file's leftover chunks inside FileIndexingService, so no producer decides it; that behaviour
+    // is pinned at the service by tests/integration/regression/Issue3304_ReindexLeavesNoOldChunksTests.cs.
 
     [Theory]
     [InlineData(true, 0, 1)]
