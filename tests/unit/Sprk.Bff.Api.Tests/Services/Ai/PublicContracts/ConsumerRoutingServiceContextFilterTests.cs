@@ -10,7 +10,8 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.PublicContracts;
 /// proactive-suggestion candidate set to the focused tab's context. This is the ONLY ADR-039-permitted
 /// aid for the suggestion path (context scoping over the closed catalog), so its contract —
 /// "keep a binding when its tags contain the context type OR are empty (=any); a blank context type
-/// narrows nothing" — is regression-protected here.
+/// narrows nothing" — is regression-protected here. The last section covers the <c>requestType</c>
+/// match key of <see cref="ConsumerRoutingService.TryMatchConditions"/> (spaarke-intake-pipeline-r1 FR-08).
 /// </summary>
 public sealed class ConsumerRoutingServiceContextFilterTests
 {
@@ -150,5 +151,71 @@ public sealed class ConsumerRoutingServiceContextFilterTests
         var result = ConsumerRoutingService.FilterByContextTypes(new[] { email, doc }, new[] { "  ", "" });
 
         result.Should().HaveCount(2);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // requestType match key (spaarke-intake-pipeline-r1 task 012 / FR-08): the request-pipeline routing
+    // dimension on IRoutingContext. It is a default interface member returning null, so a context that
+    // does not set it routes exactly as before (FR-08b) and a requestType condition fails closed for it.
+    // ---------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("nda", true)]
+    [InlineData("NDA", true)]
+    [InlineData("invoice", false)]
+    public void TryMatchConditions_RequestTypeCondition_MatchesTheContextRequestTypeCaseInsensitively(
+        string requestType, bool expected)
+    {
+        var context = new RoutingContext { RequestType = requestType };
+
+        ConsumerRoutingService.TryMatchConditions("""{ "requestType": "nda" }""", context).Should().Be(expected);
+    }
+
+    [Fact]
+    public void TryMatchConditions_RequestTypeInList_MatchesAnyListedType()
+    {
+        var context = new RoutingContext { RequestType = "trademark" };
+
+        ConsumerRoutingService.TryMatchConditions("""{ "requestType": ["nda", "trademark"] }""", context)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void TryMatchConditions_RequestTypeAndDocumentType_RequireBothToMatch()
+    {
+        const string json = """{ "requestType": "nda", "documentType": "nda" }""";
+
+        ConsumerRoutingService.TryMatchConditions(json, new RoutingContext { RequestType = "nda", DocumentType = "nda" })
+            .Should().BeTrue();
+        ConsumerRoutingService.TryMatchConditions(json, new RoutingContext { RequestType = "nda", DocumentType = "msa" })
+            .Should().BeFalse("a non-NDA document on an nda request must not match the NDA row (FR-10)");
+    }
+
+    [Fact]
+    public void TryMatchConditions_RequestTypeCondition_ContextWithoutRequestType_FailsClosed()
+    {
+        ConsumerRoutingService.TryMatchConditions("""{ "requestType": "nda" }""", new RoutingContext())
+            .Should().BeFalse();
+        ConsumerRoutingService.TryMatchConditions("""{ "requestType": "nda" }""", new MimeOnlyContext("application/pdf"))
+            .Should().BeFalse("an IRoutingContext implementer that predates RequestType inherits the null default");
+    }
+
+    [Fact]
+    public void TryMatchConditions_ExistingKeys_UnaffectedByASetRequestType()
+    {
+        var context = new RoutingContext { MimeType = "application/pdf", DocumentType = "nda", RequestType = "nda" };
+
+        ConsumerRoutingService.TryMatchConditions("""{ "mimeType": "application/pdf", "documentType": "nda" }""", context)
+            .Should().BeTrue();
+        ConsumerRoutingService.TryMatchConditions("""{ "mimeType": "text/plain" }""", context)
+            .Should().BeFalse();
+    }
+
+    /// <summary>An implementer written before RequestType existed: it does not declare the member.</summary>
+    private sealed class MimeOnlyContext(string mimeType) : IRoutingContext
+    {
+        public string? MimeType { get; } = mimeType;
+
+        public string? DocumentType => null;
     }
 }

@@ -1,7 +1,7 @@
 # Background Workers Pattern (Queue-Driven)
 
-> **Last Reviewed**: 2026-06-22
-> **Reviewed By**: spaarke-platform-foundations-r3 Wave 28 (refreshed to distinguish queue-vs-schedule shape)
+> **Last Reviewed**: 2026-11-25
+> **Reviewed By**: spaarke-intake-pipeline-r1 task 005 (exemplar repointed after `DocumentProcessingJobHandler` was deleted; key rule updated)
 > **Status**: Verified
 
 ## When
@@ -11,7 +11,7 @@ Adding async job processing via **Service Bus queue** (event-triggered work — 
 1. `src/server/api/Sprk.Bff.Api/Services/Jobs/JobContract.cs` — Job envelope schema (JobId, JobType, IdempotencyKey, Payload)
 2. `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` — BackgroundService that routes jobs to handlers
 3. `src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs` — Submit jobs to Service Bus queue
-4. `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/DocumentProcessingJobHandler.cs` — Handler exemplar
+4. `src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/AppOnlyDocumentAnalysisJobHandler.cs` — Handler exemplar (idempotency key built by a static helper, `ProfileIdempotencyKey`, that every enqueue site calls)
 5. `src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkersModule.cs` — Worker DI registration
 
 ## Constraints
@@ -21,5 +21,5 @@ Adding async job processing via **Service Bus queue** (event-triggered work — 
 
 ## Key Rules
 - Implement `IJobHandler` interface (JobType string + ProcessAsync returning JobOutcome)
-- Idempotency key patterns: `doc-{id}-v{version}`, `analysis-{id}-{type}`, `email-{messageId}`
+- Idempotency key: one key per unit of work, built in one place and reused by every enqueue site (e.g. `AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey` → `analysis-{documentId}-documentprofile`; `Communication:{messageId}:Process`). Two sites building different keys for the same work run it twice
 - Register handlers as Scoped in WorkersModule

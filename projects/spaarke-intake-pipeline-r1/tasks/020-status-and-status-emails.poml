@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-12: Request status on every stage transition + one opt-in status email per transition from the shared mailbox (app-only, threaded, idempotent)</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>after:013,010,006</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag bff-api; adds a new BFF service (.cs) on the job path that sends email; at-least-once idempotency (NFR-01).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Composes the existing CommunicationService shared-mailbox send with an explicit canonical reference (EbillingNotificationJobHandler) and a fixed marker contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with tasks 021 and 022 on the intake DI module and 013's stage-transition hook.</parallel-reason>
+    <deps>013, 010, 006</deps>
+    <tags>bff-api, backend, worker, job, dataverse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make every run stage transition update the request's stage (sprk_servicerequest), and, when the request's "send email updates" is on, send exactly one status email to the requester per transition from the shared legal mailbox, app-only (`SendMode.SharedMailbox`), threaded, with a marker written before the send so a redelivered transition sends nothing.</prompt>
+  <role>SPAARKE platform developer. Expert in the Spaarke CommunicationService send path, ADR-004 idempotency and Dataverse write paths. Follow ADRs strictly.</role>
+  <goal>An `IntakeStatusNotifier` service called from 013's stage-transition write that (1) writes the request stage, (2) when opted in, writes a per-transition marker then sends one status-only email via `CommunicationService.SendAsync` with `SendMode.SharedMailbox`, threaded under the request's originating message when one exists; plus the channel default rule for "send email updates"; plus unit tests.</goal>
+
+  <context>
+    <background>Spec FR-12, NFR-01, NFR-02 and Assumptions ("send email updates" default ON for the email door, OFF for Front Door and Console; status emails carry status and a link, never document content). Owner Q5: the sending identity is the shared legal mailbox; never `SendMode.User` from a job (it needs an in-request HttpContext; project CLAUDE.md §2). Threading uses `InReplyToMessageId`, which task 006 makes real (Graph `createReply`). Decisions (approve/reject) are already in the Decision Record (task 017); this task does not write Decision Records.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeStatusNotifier.cs</file>
+      <file role="new">tests/integration/data-mutation/Intake/IntakeStatusNotifierTests.cs</file>
+      <file role="modify">the stage-transition write and intake DI module created by task 013 (Services/Intake/, Infrastructure/DI/; exact names set by 013)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EbillingNotificationJobHandler.cs (:238-245 app-only SharedMailbox send from a job) — read only, do not edit</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (SendAsync :2412)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs (To, Subject, Body, InReplyToMessageId :97)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendMode.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">Stage machine and the single stage-transition write.</dependency>
+      <dependency task="010" status="pending">Request stage, send-email-updates and channel columns.</dependency>
+      <dependency task="006" status="pending">Threaded reply via createReply when InReplyToMessageId is set.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">SCOPE = every email this task sends. Send only through `CommunicationService.SendAsync` with `SendMode.SharedMailbox`; never `SendMode.User`, never a direct Graph call.</constraint>
+    <constraint source="ADR-004">SCOPE = the status email. Before sending, atomically create a marker keyed `intake-status:{runId}:{stage}` (SET NX or conditional create — not `IIdempotencyService` check-then-set alone); if the marker exists, send nothing. A send failure after the marker leaves the run's admin-attention text; it never re-sends on redelivery.</constraint>
+    <constraint source="ADR-002">SCOPE = request stage. Written only through this notifier from the orchestrator's transition (one server-side owner); no client writes.</constraint>
+    <constraint source="ADR-015">SCOPE = email body, subject and logs. Body = fixed per-stage text + request number + a link to the request (Front Door portal or Console); no document text, clause text, AI output or reject reason. Logs carry ids only.</constraint>
+    <constraint source="ADR-032">SCOPE = sending. A kill switch (`Intake:StatusEmails:Enabled`, default off until the owner enables it) turns sending into a no-op; stage updates still happen.</constraint>
+    <constraint source="project">SCOPE = recipients. Only the request's requester (requested-by contact or user); no Cc/Bcc. Never send to a real external address in dev without the owner's OK; tests use doubles.</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>docs/data-model/sprk_servicerequest.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md (new tests go under KEEP paths: contract/auth/data-mutation)</file>
+    </files>
+    <patterns>
+      <pattern name="Send email integration" location=".claude/patterns/api/send-email-integration.md">Server-side send through CommunicationService.</pattern>
+      <pattern name="Background workers" location=".claude/patterns/api/background-workers.md">Idempotent side effects inside a job.</pattern>
+      <pattern name="Scheduled jobs" location=".claude/patterns/api/scheduled-jobs.md">Not used (no timer); listed per tag mapping.</pattern>
+      <pattern name="Mocking" location=".claude/patterns/testing/mocking-patterns.md">Doubles for CommunicationService and the marker store.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the knowledge files and 013's transition code; declare RIGOR FULL, tier sonnet, effort high.</step>
+    <step order="2">Write `IntakeStatusNotifier.OnStageChangedAsync(requestId, runId, newStage, ct)`: write the request stage; if send-email-updates is false or the kill switch is off, stop; else claim the marker, build the status-only message, set `InReplyToMessageId` to the request's originating message id (or to the first status email's message id for this request) and call `SendAsync` with `SendMode.SharedMailbox`.</step>
+    <step order="3">Add the channel default rule (Email → on; Front Door, Console, Copilot → off) as a static method the request-create path in 013 calls; wire the call if 013 does not set it already.</step>
+    <step order="4">Call the notifier from 013's single stage-transition write; register it in the intake DI module.</step>
+    <step order="5">Write unit tests per the acceptance criteria; build and run tests.</step>
+    <step order="6">Measure the publish-size delta for the PR.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="8">Document deviations in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 013 has more than one place that writes a stage transition, STOP and escalate rather than calling the notifier from several places (ADR-002 one owner).</trigger>
+    <trigger>Before any live test send from dev (shared mailbox, Exchange RBAC), STOP and get the owner's explicit OK (project CLAUDE.md §5).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>spec New Components row "Status-email sender": `CommunicationService` shared-mailbox send (`SendAsync` :2412) and `NotificationService`; reuse-scan row 12 (outbound reply, fixed in place by task 006). CAPABILITY-INDEX row 12 (communication send) is the extension point used.</existing>
+    <extension>Yes, it composes the existing send: the notifier only decides when and what to send and owns the per-transition marker; no new send path or template engine.</extension>
+    <cost-of-doing-nothing>Opted-in requesters (default for the email door) get no update when their request moves, which the owner required (FR-12), and the request stage shown to everyone stays stale.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeStatusNotifier.cs</output>
+    <output type="test">tests/integration/data-mutation/Intake/IntakeStatusNotifierTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every stage transition updates the request's stage, with or without email.</criterion>
+    <criterion testable="true">With send-email-updates on, one transition sends exactly one email via `SendAsync` with `SendMode.SharedMailbox` to the requester only.</criterion>
+    <criterion testable="true">A redelivered transition (marker present) sends no second email (FR-12 a).</criterion>
+    <criterion testable="true">With send-email-updates off, or the kill switch off, no email is sent (FR-12 b) and the stage still updates.</criterion>
+    <criterion testable="true">The email contains only the fixed stage text, the request number and a link; a test asserts no document, clause or reason text can reach the body (FR-12 c).</criterion>
+    <criterion testable="true">When the request has an originating message id, the email sets `InReplyToMessageId` to it.</criterion>
+    <criterion testable="true">New requests get send-email-updates ON for the Email channel and OFF for Front Door, Console and Copilot (FR-12 d).</criterion>
+    <criterion testable="true">Negative: no code path in this task uses `SendMode.User`; a send failure records admin attention and does not throw out of the stage write.</criterion>
+    <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-12; Assumptions; project CLAUDE.md §2 "Approval and return". The Return email with attachments is task 043, not this one. Live sends need the shared-mailbox RBAC (plan §5, R8).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute.</protocol>
+  </execution>
+</task>

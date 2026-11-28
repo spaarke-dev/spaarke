@@ -1,0 +1,8 @@
+# BuildKit reads this file (named after the Dockerfile) instead of the repo-root .dockerignore.
+# Allowlist: the build context is ONLY what the image COPYs, so nothing else in the repo (tests, the
+# accelerator's answer-key or corpus, other services, secrets) can reach the image or the build cache.
+*
+!src/accelerators/core/engines/*.py
+!src/accelerators/practices/nda/skills/nda-review/assets/summary-intro.md
+!src/server/services/Sprk.Intake.EngineJob/requirements.txt
+!src/server/services/Sprk.Intake.EngineJob/entrypoint/*.py

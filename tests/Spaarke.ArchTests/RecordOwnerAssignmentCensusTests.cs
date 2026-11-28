@@ -235,6 +235,10 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("TaskActionCore.cs", "sprk_event", 1, Disposition.Routed,
             "AI create-task: ForChild over the stamped parents; the caller-supplied owner no longer owns a filed task "
             + "(B2: the assignee belongs in Assigned To, task 152)."),
+        new CensusEntry("IntakeRunStore.cs", "sprk_processingjob", 1, Disposition.Routed,
+            "spaarke-intake-pipeline-r1 task 013: CreateRunAsync, the intake run of a service request (a pass of the orchestrator). "
+            + "ForChild over the row's lookups (its request, secure-if-any); a refusal throws IntakeRunOwnerRefusedException and "
+            + "creates nothing. Unlike the Office job row it names a core record, so it is routed, not waived."),
         new CensusEntry("InquiryReplyTodoCreator.cs", "sprk_todo", 1, Disposition.Routed,
             "Ontology task 071 (D-111): the \"Record the outcome of the budget inquiry\" To Do raised when a reply arrives: ForChild "
             + "over the matter it is filed against (secure-if-any); the person it is for is Assigned To (task 152's rule); a "
@@ -640,6 +644,8 @@ public class RecordOwnerAssignmentCensusTests
             + "invite is refused (sdap.access.registration_owner_unconfigured) when it does not resolve, and the builder throws on an "
             + "empty team. A contact the invite reuses is never re-owned."),
 
+        new OwnerWriteEntry("IntakeRunStore.cs", "CreateRunAsync", 1, OwnerWriteKind.Routed,
+            "spaarke-intake-pipeline-r1 task 013: an intake run is owned from its service request (ForChild, secure-if-any)."),
         new OwnerWriteEntry("DocumentCheckoutService.cs", "CreateFileVersionAsync", 1, OwnerWriteKind.Routed,
             "A file version is content of its document (ContentOf)."),
         new OwnerWriteEntry("TodoGenerationService.cs", "CreateTodoAsync", 1, OwnerWriteKind.Routed,

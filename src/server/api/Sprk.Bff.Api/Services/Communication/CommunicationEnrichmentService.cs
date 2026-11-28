@@ -301,7 +301,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// ALREADY enqueued at the archival site in BOTH paths
     /// (<c>CommunicationService.EnqueueDocumentAnalysisAsync</c> and
     /// <c>IncomingCommunicationProcessor.EnqueueDocumentAnalysisAsync</c>). Re-enqueuing here would be
-    /// redundant (idempotency key <c>DocAnalysis:{documentId}</c> would dedup it, but it adds noise).
+    /// redundant (idempotency key <c>AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey</c> would dedup it, but it adds noise).
     /// Centralizing analysis into this service is deferred to task 011 alongside the archival-site
     /// consolidation. For 010 this step is intentionally empty.
     /// </summary>

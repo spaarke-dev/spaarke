@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-14: Console "Submit as a request" — an uploaded document becomes one request and one run (idempotent per click)</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>after:013,010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a BFF endpoint (.cs, bff-api tag) and Console .tsx/.ts code (frontend, fluent-ui tags).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One endpoint plus one UI action with canonical references and a closed contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with 020/021 (intake DI module) and 017/024 (EndpointMappingExtensions.cs).</parallel-reason>
+    <deps>013, 010</deps>
+    <tags>bff-api, endpoints, frontend, fluent-ui, react, typescript</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a Console "Submit as a request" action on an uploaded document that creates one `sprk_servicerequest` (channel Console, requester = signed-in user, owner = owning legal team) and one run via 013's run-submit API, through a new endpoint `POST /api/intake/requests` (body `{ "documentId": guid, "requestType"?: int }`, `Idempotency-Key` header generated once per click). Plain chat upload creates no run.</prompt>
+  <role>SPAARKE platform developer. Expert in Minimal API endpoints, the Dataverse write path, React 19 code pages and Fluent UI v9. Follow ADRs strictly.</role>
+  <goal>A BFF endpoint + service creating the request and run once per idempotency key, and a Console action with a confirm dialog that calls it, shows the created request and never fires twice; tests for both.</goal>
+  <context>
+    <background>Spec FR-14 (a, b), NFR-02, NFR-08. Console upload is a door only on explicit submit; plain chat upload stays interactive. Ownership follows the Front Door rule (`IRecordOwnershipResolver`, ExternalIntakeEndpoints.cs:227-260). "Send email updates" defaults OFF for Console (rule from task 020).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Intake/IntakeSubmitEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRequestSubmitService.cs</file>
+      <file role="new">tests/integration/contract/Api/Intake/IntakeSubmitEndpointsContractTests.cs (contract) + tests/integration/data-mutation/Intake/IntakeRequestSubmitServiceTests.cs (write path)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
+      <file role="new">src/solutions/SpaarkeAi/src/services/intakeSubmitService.ts</file>
+      <file role="new">src/solutions/SpaarkeAi/src/components/conversation/SubmitAsRequestAction.tsx</file>
+      <file role="new">src/solutions/SpaarkeAi/src/components/conversation/__tests__/SubmitAsRequestAction.test.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalIntakeEndpoints.cs (owner resolution :227-260, create :293) — read only here</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/components/conversation/DocumentPerItemCards.tsx (per-item action on the active document tab)</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/components/conversation/FileAttachSessionPrompt.tsx (ChoiceDialog wrapper kept out of ConversationPane.tsx)</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/services/authInit.ts (authenticatedFetch :96)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">Run-submit API (request id + channel → run, idempotent) and door kill switches.</dependency>
+      <dependency task="010" status="pending">Request channel, stage, current-run and send-email-updates columns.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-008">SCOPE = `POST /api/intake/requests`. `RequireAuthorization()` plus an endpoint filter that confirms the caller can read the `sprk_document` named in the body (existing document-access filter or seam); denied or unreadable → 403/404, nothing created.</constraint>
+    <constraint source="ADR-002">SCOPE = request creation. The BFF service is the only writer of the request's channel, stage, owner and current run; the client sends only the document id, the optional request type and the idempotency key.</constraint>
+    <constraint source="ADR-004">SCOPE = the submit. The `Idempotency-Key` header is required (400 when missing); the first call for a key creates the request and run, and any repeat returns 200 with the same ids (atomic claim, not check-then-set). Run payload carries ids only.</constraint>
+    <constraint source="ADR-032">SCOPE = the Console door. Kill switch `Intake:Doors:Console:Enabled` off → 503 INTAKE_DISABLED and nothing created; the UI hides the action when the probe says disabled.</constraint>
+    <constraint source="ADR-019">SCOPE = every non-2xx. ProblemDetails with stable `errorCode` (INTAKE_DOCUMENT_NOT_FOUND, INTAKE_FORBIDDEN, INTAKE_IDEMPOTENCY_KEY_REQUIRED, INTAKE_OWNER_UNRESOLVED, INTAKE_DISABLED); no document text.</constraint>
+    <constraint source="ADR-012">SCOPE = the Console action UI. Use `ChoiceDialog`/Fluent v9 parts from `@spaarke/ui-components`; choose the element (per-item card, chip or menu item) by `docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md`; do not edit `ConversationPane.tsx` beyond one mount line.</constraint>
+    <constraint source="ADR-021">SCOPE = new UI files. Tokens only, no color literals, dark mode via the host FluentProvider. Visual direction: the action label "Submit as a request" with icon `SendRegular`; the confirm dialog title "Submit for legal review", body = document name + a request-type Dropdown ("Let Spaarke classify" default, "NDA review"), primary "Submit", secondary "Cancel"; on success a `MessageBar` intent="success" "Request {number} submitted" with a link to the request.</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint definition" location=".claude/patterns/api/endpoint-definition.md">Route group, filter, ProblemDetails.</pattern>
+      <pattern name="Endpoint filters" location=".claude/patterns/api/endpoint-filters.md">Document-access filter.</pattern>
+      <pattern name="Choice dialog" location=".claude/patterns/ui/choice-dialog-pattern.md">Confirm dialog shape.</pattern>
+      <pattern name="Control init" location=".claude/patterns/pcf/control-initialization.md">Tag-mapped; no PCF init here.</pattern>
+      <pattern name="Theme" location=".claude/patterns/pcf/theme-management.md">Follow the host theme.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load the knowledge files; pick the UI element per ASSISTANT-UI-ELEMENT-CRITERIA and record why; declare RIGOR FULL, tier sonnet, effort high.</step>
+    <step order="2">Write `IntakeRequestSubmitService`: claim the idempotency key, resolve the owning team for the caller, create the request (channel Console, requester = caller's systemuser, stage Submitted, send-email-updates per 020's rule), link the document to the request, call 013's run-submit API, store the result under the key.</step>
+    <step order="3">Write `IntakeSubmitEndpoints` (`POST /api/intake/requests`) with the filter and ProblemDetails codes; register in `EndpointMappingExtensions.cs`.</step>
+    <step order="4">Write `intakeSubmitService.ts` (one `crypto.randomUUID()` key per click, reused on retry of that click) and `SubmitAsRequestAction.tsx` (dialog per the visual constraint; button disabled in flight); mount it on the chosen element.</step>
+    <step order="5">Tests: endpoint unit tests and component tests per the criteria; build BFF and SpaarkeAi; run tests; measure the publish-size delta.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="7">Document the element choice and deviations in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the chosen element needs a change to the frozen `WidgetAssistantContract.perItemCards` in `@spaarke/ai-widgets` (`register-document-viewer-widget.ts`), STOP and escalate (shared contract owned by the assistant projects) rather than editing it.</trigger>
+    <trigger>If linking the uploaded document to the new request would move it out of the user's session or change its access, STOP and escalate (ADR-034) rather than copying the file.</trigger>
+  </escalation>
+  <justification>
+    <existing>spec New Components and reuse-scan row 11: the only request-create path is the external `SubmitServiceRequestAsync` (CIAM/contact-bound, `ExternalIntakeEndpoints.cs:143`); CAPABILITY-INDEX: no internal request-create row. Console upload today is session-only (`FileAttachSessionPrompt.tsx`, `DocumentPerItemCards.tsx`).</existing>
+    <extension>No: the external route binds the caller to a CIAM contact and the external plane's gates, so an internal user cannot use it; the create and owner rules are copied, and the run start reuses 013's run-submit API.</extension>
+    <cost-of-doing-nothing>An attorney or business user in the Console cannot turn an uploaded NDA into a request, so the Console door (FR-14, Phase 1 objective) does not exist.</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Submit creates one request">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_spaarkeai</url>
+      <steps>
+        <step>Upload a synthetic NDA in the Console and open it.</step>
+        <step>Choose "Submit as a request", keep "Let Spaarke classify", click Submit.</step>
+        <step>Check the console for errors and the network for one POST to `/api/intake/requests`.</step>
+      </steps>
+      <expected>One request and one run exist; success MessageBar with the request link; no console errors.</expected>
+    </test>
+    <test name="Double-click is idempotent">
+      <steps>
+        <step>Double-click Submit quickly.</step>
+      </steps>
+      <expected>At most one POST (or two with the same Idempotency-Key); exactly one request and run exist.</expected>
+    </test>
+    <test name="Chat upload without the action creates no run">
+      <steps>
+        <step>Attach a document to chat and ask a question without using the action.</step>
+      </steps>
+      <expected>No request or run is created (FR-14 b).</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Dark theme: open the action and dialog; no white backgrounds or black text.</step>
+      </steps>
+      <expected>All colors from Fluent v9 tokens.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build and test src/solutions/SpaarkeAi</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Intake/IntakeSubmitEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRequestSubmitService.cs</output>
+    <output type="code">src/solutions/SpaarkeAi/src/services/intakeSubmitService.ts</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/SubmitAsRequestAction.tsx</output>
+    <output type="test">tests/integration/contract/Api/Intake/IntakeSubmitEndpointsContractTests.cs (contract) + tests/integration/data-mutation/Intake/IntakeRequestSubmitServiceTests.cs (write path)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/components/conversation/__tests__/SubmitAsRequestAction.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">One click of "Submit as a request" creates exactly one request (channel Console, stage Submitted, owner = owning team, send-email-updates off) and one run (FR-14 a).</criterion>
+    <criterion testable="true">A repeat call with the same Idempotency-Key returns 200 with the same request and run ids and creates nothing new.</criterion>
+    <criterion testable="true">Attaching a document to chat without the action creates no request and no run (FR-14 b).</criterion>
+    <criterion testable="true">Negative: no token → 401; a document the caller cannot read → 403/404 and nothing created; missing Idempotency-Key → 400 INTAKE_IDEMPOTENCY_KEY_REQUIRED; unresolved owning team → 500 INTAKE_OWNER_UNRESOLVED with nothing created; kill switch off → 503 INTAKE_DISABLED.</criterion>
+    <criterion testable="true">The UI disables Submit while in flight, shows the success MessageBar with the request link, and shows an error MessageBar for each failure code.</criterion>
+    <criterion testable="true">Dark mode renders with tokens only.</criterion>
+    <criterion testable="true">BFF and SpaarkeAi build; all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+  <notes>Spec FR-14. `IntakeRequestSubmitService` is reused by 041 (Job B accept) and 044 (MCP submit): keep it channel-parameterised and caller-attributed. Deploy is task 029.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute.</protocol>
+  </execution>
+</task>

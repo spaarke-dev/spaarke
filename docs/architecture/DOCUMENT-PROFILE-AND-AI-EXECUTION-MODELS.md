@@ -2,7 +2,7 @@
 
 > **Created**: 2026-09-01 by `email-communication-intelligence-r2` (Fable-level investigation of the "document profile never completes" UAT bug).
 > **Purpose**: The single authoritative reference for **how a saved `sprk_document` gets AI-profiled** and, more broadly, **how the BFF runs AI at all**. Read this before changing anything in the file/Document create → profile → index pipeline. It exists so the failure mode documented in Part 4 never has to be re-discovered.
-> **Status**: The root cause in Part 4 is **empirically confirmed** (live Dataverse config + App Insights). The fix is **not yet applied** — Part 4 ends with fix options for the owner to choose (per root `CLAUDE.md` §6.5).
+> **Status**: The root cause in Part 4 is **empirically confirmed** (live Dataverse config + App Insights). The convergence fix (Fix Option 3) has since been applied (#919): the app-only path profiles on the direct-Action spine. Part 4 records the original failure and the options considered.
 > **Owning area**: AI orchestration (`Services/Ai/**`). The bug is NOT in the Office save path — but the Office save path is its most visible victim, which is why this doc lives at the intersection.
 
 ---
@@ -13,12 +13,12 @@
 
 2. **"Document profiling" exists in BOTH form (a) and form (b), using the SAME underlying Action (ACT-011 "Document Profiler").** Whether a given entry point uses the playbook or the direct Action is an accident of which code path it happens to call — and that is the whole reason the same feature "works here, fails there."
 
-3. **The three entry points that profile a document diverge:**
+3. **The three entry points that profile a document now share one spine (#919 convergence):**
    | Entry point | Execution model | Bug-exposed? |
    |---|---|---|
    | Interactive wizard (`POST /api/ai/analysis/execute`) | **Direct Action** (linear) | ✅ No |
    | Compose create-on-save (OBO) | **Direct Action** (linear) | ✅ No |
-   | **Outlook add-in / any app-only background save** | **Node-based playbook** | 🔴 **Yes** |
+   | **Outlook add-in / any app-only background save** | **Direct Action** (linear) via `AppOnlyAnalysisService.ProfileViaLinearActionAsync`; the node playbook runs only when the AI seams (`IActionResolver`/`IActionRunner`) are null | ✅ No (it was 🔴 before #919) |
 
 4. **The bug** (Part 4): the "Document Profile" **playbook** ends with an **Update Record** node whose config is stored in the Playbook-Builder **wrapper format** (`configJson`-nested-as-a-string). The Layer-1 template renderer escapes newlines at the *outer* level but treats the nested config as an opaque string, so the multi-line AI summary lands **un-escaped inside the nested JSON**. When `UpdateRecordNodeExecutor.ParseConfig` **re-parses** that nested string, it throws `JsonException: '0x0A' is invalid within a JSON string. Path: $.fieldMappings[0].value`, the node fails, the playbook stops, and every saved document ends at `sprk_filesummarystatus = Failed`.
 
@@ -56,7 +56,7 @@ flowchart TD
 - **Engine**: [`Services/Ai/PlaybookOrchestrationService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs) — `ExecuteAsync` (:84) / `ExecuteAppOnlyAsync` (:132) build a `PlaybookRunContext`, load nodes, build an `ExecutionGraph`, topologically batch them, run each batch with parallelism throttled to 3, and dispatch each node to an `INodeExecutor` keyed on `sprk_executortype`.
 - **Config rendering**: before each executor runs, `ApplyConfigJsonTemplates` (:2250, called from `ExecuteNodeAsync` ~:1239) substitutes `{{…}}` in the node's `ConfigJson` against the run context (prior node outputs, parameters, document/run metadata). **This is Layer 1 of the two-layer output pattern** ([`SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md)). **This is where the bug lives — see Part 4.**
 - **Node dispatch** is single-hop (R7 FR-07): the executor is chosen directly from `node.SprkExecutortype`; there is no `actionid → actiontypeid → executor` fallback ladder anymore.
-- **When used**: multi-step flows where structural nodes (Condition, Deliver, Index, Update Record, Create Task/Notification) matter, or where an author composed a graph on the Playbook Builder canvas. **Document profiling in the app-only/background path still uses this** (Path C below).
+- **When used**: multi-step flows where structural nodes (Condition, Deliver, Index, Update Record, Create Task/Notification) matter, or where an author composed a graph on the Playbook Builder canvas. **Document profiling no longer uses this** (#919): the app-only/background path profiles on the direct-Action spine (Path C below); the "Document Profile" node playbook runs only when the AI seams are null (e.g. a unit test constructing the service without them).
 
 ### ② Direct Action / Linear Consumer (ADR-043)
 
@@ -114,8 +114,8 @@ flowchart LR
         C[Compose create-on-save<br/>DocumentProfileAi OBO] --> DR
         DR --> MAP[DocumentProfileOutputMapper<br/>→ UpdateDocumentFieldsAsync]
     end
-    subgraph buggy["NODE PLAYBOOK spine (model ① — BUG)"]
-        O[Outlook add-in save<br/>/ any app-only background] --> PB[Document Profile playbook<br/>AiAnalysis → UpdateRecord → Index]
+    subgraph buggy["NODE PLAYBOOK spine (model ① — BUG; app-only path left it with #919, now only the null-seam fallback)"]
+        O[null-seam fallback only<br/>(was: Outlook add-in save / app-only background)] --> PB[Document Profile playbook<br/>AiAnalysis → UpdateRecord → Index]
         PB --> UR[UpdateRecordNodeExecutor<br/>ParseConfig re-parse 💥]
     end
     MAP --> DOC[(sprk_document<br/>filesummary / documenttype / …)]
@@ -126,9 +126,9 @@ flowchart LR
 
 **Path B — Compose create-on-save (Direct Action, OBO):** [`Services/Ai/PublicContracts/DocumentProfileAi.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/DocumentProfileAi.cs) `ProfileDocumentAsUserAsync` (:87) — the same resolve → extract → `ActionRunner` → `DocumentProfileOutputMapper.BuildFields` → `UpdateDocumentFieldsAsync` chain, under the caller's OBO token. Best-effort (never throws). **No node engine.**
 
-**Path C — Outlook add-in / app-only background (Node Playbook — the bug path):** the save pipeline (Part 3) enqueues an app-only analysis job → [`AppOnlyAnalysisService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs) `AnalyzeDocumentAsync(documentId, "Document Profile")` (:182) → `ExecutePlaybookAnalysisAsync` (:468) → the playbook **has nodes**, so `ExecuteNodeBasedAnalysisAsync` (:691) → `PlaybookOrchestrationService.ExecuteAppOnlyAsync` (:730). **This runs the node graph, and the graph's Update Record node is what fails.**
+**Path C — Outlook add-in / app-only background (Direct Action since #919; the node playbook is the null-seam fallback):** the save pipeline (Part 3) enqueues an app-only analysis job → [`AppOnlyAnalysisService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs) `AnalyzeDocumentAsync(documentId, "Document Profile")` → `ExecutePlaybookAnalysisAsync`, which routes the "Document Profile" consumer to `ProfileViaLinearActionAsync` (ACT-011 via `IActionResolver`/`IActionRunner`, then `DocumentProfileOutputMapper`). Only when `IActionResolver` or `IActionRunner` is null does it fall through to the playbook: the playbook **has nodes**, so `ExecuteNodeBasedAnalysisAsync` → `PlaybookOrchestrationService.ExecuteAppOnlyAsync`, which runs the node graph whose Update Record node is the Part 4 failure. Line numbers are deliberately omitted; the file moves (grep the method names).
 
-> **Office "Generate Profile" (FR-08) takes this queue too, since `spaarkeai-word-add-in-r1` task 068 (#1086).** It used to call Path B in a `Task.Run` behind its 202, which a restart lost. It now queues the same `AppOnlyDocumentAnalysis` job (`Services/Office/OfficeProfileQueue.cs`), keyed with the request's own id (`AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey`, task 029's discriminator) so every click runs. Since `f5c7687d8` (#919 Fix 2), `AppOnlyAnalysisService` routes the "Document Profile" consumer onto the direct-Action spine, so this job runs ACT-011 and `DocumentProfileOutputMapper`, not the node graph above. The Path C description above, and the "Know which spine you're on" line in Part 5, predate that fix.
+> **Office "Generate Profile" (FR-08) takes this queue too, since `spaarkeai-word-add-in-r1` task 068 (#1086).** It used to call Path B in a `Task.Run` behind its 202, which a restart lost. It now queues the same `AppOnlyDocumentAnalysis` job (`Services/Office/OfficeProfileQueue.cs`), keyed with the request's own id (`AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey`, task 029's discriminator) so every click runs. Since `f5c7687d8` (#919 Fix 2), `AppOnlyAnalysisService` routes the "Document Profile" consumer onto the direct-Action spine, so this job runs ACT-011 and `DocumentProfileOutputMapper`, not the node graph above. The Path C description above and the Part 5 line "Know which spine you're on" now describe that fix.
 
 > **The external upload route queues the same job too (`spaarke-SPA-external-access-platform-r3` task 063).** `ExternalProjectDataEndpoints.UploadDocumentForParent` queues one `AppOnlyDocumentAnalysis` profile job (`Source` `ExternalUpload`, keyed `ProfileIdempotencyKey(documentId)`) after the app-only SPE write and the row create, best-effort and bounded, so an external upload is profiled like an MDA upload.
 
@@ -174,10 +174,10 @@ flowchart TD
 - **Create**: `OfficeService.SaveAsync` uploads to SPE and creates the `sprk_document` **synchronously**, then always queues finalization.
 - **Trigger**: `OfficeJobQueue.QueueUploadFinalizationAsync` sets `TriggerAiProcessing` and `AiProcessingOptions{ProfileSummary, RagIndex, DeepAnalysis}` on the payload.
 - **Hand-off**: `UploadFinalizationWorker.QueueNextStageAsync` (gated on `TriggerAiProcessing`, :313) enqueues an `AppOnlyDocumentAnalysis` job to `sdap-jobs` with idempotency key `analysis-{documentId}-documentprofile`. It does **not** run AI inline.
-- **Profile**: `AppOnlyDocumentAnalysisJobHandler` → `AppOnlyAnalysisService.AnalyzeDocumentAsync(documentId, "Document Profile")` → node-based playbook (Path C).
+- **Profile**: `AppOnlyDocumentAnalysisJobHandler` → `AppOnlyAnalysisService.AnalyzeDocumentAsync(documentId, "Document Profile")` → the direct-Action spine (`ProfileViaLinearActionAsync`, Path C); the node playbook only when the AI seams are null.
 - **Other producers of the same job**: the external upload route (`ExternalProjectDataEndpoints.UploadDocumentForParent`, task 063) enqueues the same `AppOnlyDocumentAnalysis` profile job, plus app-only RAG indexing through `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync`; it does not go through `UploadFinalizationWorker`.
 
-> **Design note**: this path chose the **node playbook** for profiling while the interactive paths chose the **direct Action**. That divergence is the root architectural smell behind Part 4. There is no functional reason the app-only path could not also use the direct Action (see Fix Option 3).
+> **Design note**: this path originally chose the **node playbook** for profiling while the interactive paths chose the **direct Action**, the root architectural smell behind Part 4. #919 (Fix Option 3) converged it onto the direct Action; the node playbook remains only as the fallback when the AI seams are null.
 
 ---
 
@@ -254,7 +254,7 @@ Any node whose config uses the **wrapper format** AND into which an upstream **m
 |---|---|---|---|
 | **1 (targeted, recommended)** | Make Layer 1 **wrapper-aware**: in `WriteJsonElementWithTemplateExpansion`, when a string value is itself parseable JSON *and* contains `{{`, recurse (`RenderConfigJsonStructurally` on the nested string, write the escaped result back as a string). Then the nested config's newlines are escaped at the **nested** level, so `ParseConfig`'s re-parse succeeds. | One method in `PlaybookOrchestrationService`; fixes **all** wrapper-format executors at once. | Small heuristic ("string that is JSON containing a template"); low false-positive surface. |
 | **2 (defer substitution)** | Have Layer 1 **not** expand templates inside a nested `configJson` string and let the executor render values itself (it already does, at `UpdateRecordNodeExecutor.cs:222`, into a plain string with no re-parse). | Layer 1 must recognize the wrapper — leaks executor knowledge into the generic renderer. | Cleaner data flow but more special-casing. |
-| **3 (strategic convergence)** | Route the **app-only/Outlook** profiling path through the **direct-Action** spine (`IActionResolver → IDocumentTextSource(app-only) → IActionRunner → DocumentProfileOutputMapper`) that the wizard and Compose already use, retiring the node-based "Document Profile" playbook for this consumer. | Larger; needs an app-only text-source variant. | Deletes the entire bug class and unifies all three entry points on one spine (aligns with ADR-043 direction). |
+| **3 (strategic convergence) — APPLIED (#919)** | Route the **app-only/Outlook** profiling path through the **direct-Action** spine (`IActionResolver → IDocumentTextSource(app-only) → IActionRunner → DocumentProfileOutputMapper`) that the wizard and Compose already use, retiring the node-based "Document Profile" playbook for this consumer. | Larger; needs an app-only text-source variant. | Deletes the entire bug class and unifies all three entry points on one spine (aligns with ADR-043 direction). |
 
 **Recommendation**: apply **Fix 1** now (small, shared, unblocks profiling for every wrapper-format node), and track **Fix 3** as the durable architectural convergence. Whichever is chosen, add a **rendered-config** regression test (multi-line + embedded-quote value through the wrapper format), not just the stored-config test that exists today.
 
@@ -262,7 +262,7 @@ Any node whose config uses the **wrapper format** AND into which an upstream **m
 
 ## Part 5 — Change-safety checklist (before you touch the Document-create / profile pipeline)
 
-- [ ] **Know which spine you're on.** A change in `OfficeService`/`UploadFinalizationWorker`/`AppOnlyAnalysisService` runs the **node playbook** (Path C). A change in `AnalysisEndpoints` profile pipeline or `DocumentProfileAi` runs the **direct Action**. They are not the same code and do not fail the same way.
+- [ ] **Know which spine you're on.** A change in `OfficeService`/`UploadFinalizationWorker`/`AppOnlyAnalysisService` (Path C) runs the **direct Action** via `ProfileViaLinearActionAsync` (the node playbook only when the AI seams are null), as do `AnalysisEndpoints`' profile pipeline and `DocumentProfileAi`. A non-profile playbook on the app-only job, or any node playbook run, still goes through the node engine and does not fail the same way.
 - [ ] **If you add a field to the profile write-back**, add it to **both** the node playbook's Update Record `fieldMappings` (Dataverse config) **and** `DocumentProfileOutputMapper` / `DocumentProfileFieldMapper` (direct-Action path), or the two spines will drift.
 - [ ] **If an upstream value can be multi-line or contain quotes** and it flows into a node config (Update Record, Create Task, Create Notification, Send Email), you are in Part 4 territory until Fix 1/3 lands. Verify the **rendered** config, not just the stored template.
 - [ ] **Never trust a green stored-config test as proof profiling works.** The bug only appears in the *rendered* config. Test the render, or test end-to-end (save → query `sprk_document.sprk_filesummarystatus != Failed`).
@@ -277,7 +277,7 @@ Any node whose config uses the **wrapper format** AND into which an upstream **m
 |---|---|
 | Node engine / Layer-1 render / **the bug site** | [`Services/Ai/PlaybookOrchestrationService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs) — `ApplyConfigJsonTemplates` :2250, `RenderConfigJsonStructurally` :2299, mixed-string branch :2371 |
 | Update Record node / **re-parse throw** | [`Services/Ai/Nodes/UpdateRecordNodeExecutor.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs) — `ParseConfig` :325, nested branch :339-346 |
-| App-only playbook profiling (Path C) | [`Services/Ai/AppOnlyAnalysisService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs) — `AnalyzeDocumentAsync` :182, status enum :40-43 |
+| App-only direct-Action profiling (Path C; node playbook is the null-seam fallback) | [`Services/Ai/AppOnlyAnalysisService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs) — `AnalyzeDocumentAsync`, `ExecutePlaybookAnalysisAsync` (routes to) `ProfileViaLinearActionAsync`; status enum near the top |
 | Direct-Action wizard profiling (Path A) | [`Api/Ai/AnalysisEndpoints.cs`](../../src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs) — `ExecuteDocumentProfilePipelineAsync` :858 |
 | Direct-Action Compose profiling (Path B) | [`Services/Ai/PublicContracts/DocumentProfileAi.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/DocumentProfileAi.cs) — `ProfileDocumentAsUserAsync` :87 |
 | Linear engine | [`Services/Ai/LinearConsumers/ActionRunner.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs) — `RunAsync` :108 |

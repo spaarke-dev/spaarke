@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-04: Review and merge ADR-004 Amendment A2 (queue consumers outside the BFF) to master — main session only</title>
+    <phase>0 Foundations and cleanup</phase>
+    <gate>startable (main session only)</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>ADR amendment (Path B, root CLAUDE.md §6.5) with explicit ADR constraints; documentation only, no code.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR-compliance work: the amendment changes a binding rule for every future non-BFF consumer and must stay consistent across the concise ADR, full ADR, jobs constraint and ADR-052.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>SERIAL</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary, root CLAUDE.md §3)</parallel-reason>
+    <deps>none</deps>
+    <tags>worker, devops</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Get the ADR-004 Amendment A2 text already drafted on this branch reviewed for consistency and merged to master, before or in the same PR as task 001's container consumer code (FR-04). Run this in the main session: sub-agents cannot write to `.claude/`.</prompt>
+  <role>SPAARKE platform developer acting as ADR steward. Follow ADRs strictly; root CLAUDE.md §6.5 Path B.</role>
+  <goal>A PR (A2-only, or combined with task 001) whose diff is exactly the A2 edits to the five files below, reviewed for internal consistency, CI green (incl. WorkloadPlacementDocDriftTests and doc-drift checks), and merged to master with the owner's go-ahead.</goal>
+
+  <context>
+    <background>Spec FR-04 and ADR Tensions row "ADR-004 IJobHandler — Path B"; owner approved A2 on 2026-11-25. A2 (full text at `docs/adr/ADR-004-async-job-contract.md` §"Amendment A2") scopes `IJobHandler` to the BFF and requires equivalent guarantees (envelope, atomic marker, correlationId, outcome, MaxDeliveryCount → DLQ) for consumers on ADR-052 hosts. The text exists only on this branch.</background>
+    <relevant-files>
+      <file role="modify">docs/adr/ADR-004-async-job-contract.md</file>
+      <file role="modify">.claude/adr/ADR-004-job-contract.md</file>
+      <file role="modify">.claude/constraints/jobs.md</file>
+      <file role="modify">.claude/adr/ADR-052-workload-placement.md (the A2 row)</file>
+      <file role="modify">.claude/CHANGELOG.md</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/WorkloadPlacementDocDriftTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent. Task 001 must not merge before this.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Scope: the five files. The diff against master contains only A2 text (no unrelated edits); the concise ADR, full ADR, `jobs.md` and the ADR-052 row state the same five guarantees with the same wording of the MUST rules.</constraint>
+    <constraint source="project">Scope: execution. Main session only — sub-agents cannot write `.claude/` (root CLAUDE.md §3); never `git stash`.</constraint>
+    <constraint source="project">Scope: merge. Merge to master only with the owner's go-ahead on the PR; ordering rule: on master no later than the PR adding the container consumer (task 001).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>docs/adr/ADR-004-async-job-contract.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/merge-to-master/SKILL.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR amendment layout" location="docs/adr/ADR-004-async-job-contract.md">Amendment A1 section: status line, driver, evidence, numbered rule; concise copy mirrors the MUSTs.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Diff the five files against master; confirm the diff is A2-only.</step>
+    <step order="2">Cross-check consistency: the five guarantees and the "shared types are not required" rule read the same in all four rule files; the CHANGELOG entry names A2 and the date.</step>
+    <step order="3">Run `dotnet test tests/Spaarke.ArchTests` (WorkloadPlacementDocDriftTests) and any doc-drift check CI runs on `.claude/`.</step>
+    <step order="4">Open the PR (A2-only, or fold into task 001's PR if 001 is ready), cite root CLAUDE.md §6.5 Path B and the owner approval date, and request the owner's merge go-ahead.</step>
+    <step order="5">After the owner's go-ahead, merge via `/merge-to-master` (or the PR merge the owner performs); confirm A2 is on master.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="7">Record the PR link in `projects/spaarke-intake-pipeline-r1/notes/decisions.md` context (notes only, no rule changes).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the review finds the A2 text inconsistent across files or in conflict with ADR-052 as merged on master, STOP and present the conflict to the owner (🔔 ADR Conflict format, root CLAUDE.md §6.5) rather than rewording the rule.</trigger>
+    <trigger>Merging to master needs the owner's explicit go-ahead.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="gh">Open and inspect the PR</tool>
+    <tool name="dotnet">Run ArchTests</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/adr/ADR-004-async-job-contract.md</output>
+    <output type="docs">.claude/adr/ADR-004-job-contract.md</output>
+    <output type="docs">.claude/constraints/jobs.md</output>
+    <output type="docs">.claude/adr/ADR-052-workload-placement.md</output>
+    <output type="docs">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The PR diff touches only the five listed files and only A2 content.</criterion>
+    <criterion testable="true">The five A2 guarantees appear consistently in the concise ADR, the full ADR, `jobs.md` and the ADR-052 row.</criterion>
+    <criterion testable="true">ArchTests (incl. WorkloadPlacementDocDriftTests) and the PR's CI checks pass.</criterion>
+    <criterion testable="true">A2 is on master no later than the PR that adds task 001's container consumer (FR-04).</criterion>
+    <criterion testable="true">Negative: the task is not executed by a sub-agent; no `.claude/` edit is made outside the A2 text.</criterion>
+  </acceptance-criteria>
+
+  <notes>Main session only (root CLAUDE.md §3). If the owner prefers, fold this into task 001's PR; FR-04 allows "before or with".</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

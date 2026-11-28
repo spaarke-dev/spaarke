@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-20: Email return — the Return stage replies from the shared legal mailbox (app-only), threaded on the requester's mail, attorney named and Cc'd, approved outputs attached (≤ 35 MB)</title>
+    <phase>2 Email and Copilot doors</phase>
+    <gate>after:029,006</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag bff-api; adds a Return-stage service (.cs) that sends external email with attachments.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Composes the existing `CommunicationService.SendAsync` (SharedMailbox, InReplyToMessageId from task 006, AttachmentDocumentIds) with an explicit contract and the Front Door return (task 021) as the per-channel reference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with task 040 on the intake DI module (one registration line each); otherwise independent of 041, 042, 044.</parallel-reason>
+    <deps>029, 006, 040</deps>
+    <tags>bff-api, backend, worker, job</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the Return stage for requests whose channel is Email: after approval, send one reply from the shared legal mailbox, app-only (`SendMode.SharedMailbox`), threaded under the requester's original mail (`InReplyToMessageId`, made real by task 006), To the requester, Cc the approving attorney, with the attorney named in the signature and the approved output documents attached through `AttachmentDocumentIds`. A total over 35 MB holds the run with admin attention and sends nothing; a redelivered Return sends no second email.</prompt>
+  <role>SPAARKE platform developer. Expert in the Spaarke CommunicationService send path, Graph reply threading and ADR-004 idempotency. Follow ADRs strictly.</role>
+  <goal>An `EmailReturn` registered on 013's Return hook for channel Email that sends exactly one threaded reply with the approved outputs, holds instead of sending a partial mail, and is tested for each FR-20 case.</goal>
+
+  <context>
+    <background>Spec FR-20 (a–d), owner Q5 (shared legal mailbox, attorney named and Cc'd; never send as the attorney), project CLAUDE.md §2 and §6 gotchas: never `SendMode.User` from a job (needs an in-request HttpContext); `CommunicationService` caps total attachments at 35 MB (`MaxTotalAttachmentSizeBytes`). The approved version ids are recorded at approval by task 017; the Front Door return (task 021) is the sibling per-channel Return implementation.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/EmailReturn.cs</file>
+      <file role="new">tests/integration/data-mutation/Intake/EmailReturnTests.cs</file>
+      <file role="modify">the intake DI module / Return-stage hook created by task 013 (exact names set by 013)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Intake/FrontDoorReturn.cs (task 021, per-channel Return shape)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (SendAsync :2412; AttachmentDocumentIds :2507)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs (To, Cc, Subject, Body, InReplyToMessageId :97)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EbillingNotificationJobHandler.cs (:238-245 app-only SharedMailbox send from a job) — read only</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="029" status="pending">Phase 1 on dev: Return hook, approved version ids (017).</dependency>
+      <dependency task="006" status="pending">Reply threading via Graph createReply when InReplyToMessageId is set.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">SCOPE = the return email. Sent only through `CommunicationService.SendAsync` with `SendMode.SharedMailbox`; never `SendMode.User`, never a direct Graph call, never from the attorney's mailbox.</constraint>
+    <constraint source="ADR-004">SCOPE = the send. Atomically create marker `intake-return-email:{runId}` before sending; marker present → no send; the run's terminal status (Returned) is written last, after the send succeeds.</constraint>
+    <constraint source="project">SCOPE = attachments. Attach exactly the approved output documents (approved version ids from 017); compute the total size first; total over 35 MB → no send, run held with admin-attention text "outputs exceed the 35 MB email limit" (FR-20 c); never a partial mail.</constraint>
+    <constraint source="project">SCOPE = recipients and threading. To = the requester address on the request; Cc = the assigned attorney's email; `InReplyToMessageId` = the Graph message id of the request's originating communication; no other recipients.</constraint>
+    <constraint source="ADR-015">SCOPE = body and logs. Body = fixed text + request number + "Reviewed by {attorney display name}" signature; no AI summary or clause text in the body; logs ids only.</constraint>
+    <constraint source="ADR-032">SCOPE = the email Return. Covered by the email door kill switch (`Intake:Doors:Email:Enabled`); when off, the run holds with admin attention instead of sending.</constraint>
+    <constraint source="project">SCOPE = live sends. Never to a real external address without the owner's OK; tests use doubles.</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Send email integration" location=".claude/patterns/api/send-email-integration.md">Server send via CommunicationService.</pattern>
+      <pattern name="Background workers" location=".claude/patterns/api/background-workers.md">Marker before side effect; terminal last.</pattern>
+      <pattern name="Scheduled jobs" location=".claude/patterns/api/scheduled-jobs.md">Tag-mapped; not used.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the knowledge files, 013's Return hook, 017's approved-version storage and 021's FrontDoorReturn; check how `AttachmentDocumentIds` resolves the file version; declare RIGOR FULL, tier sonnet, effort high.</step>
+    <step order="2">Write `EmailReturn.ReturnAsync(run, request, ct)`: kill switch → marker → size check → build `SendCommunicationRequest` → `SendAsync` → write Returned (terminal last). Register for channel Email.</step>
+    <step order="3">Tests per the criteria; build and run tests; measure the publish-size delta.</step>
+    <step order="4">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="5">Document deviations in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `AttachmentDocumentIds` always attaches the document's latest version and cannot attach the version captured at approval, STOP and escalate (FR-20 b) rather than attaching a possibly edited later version.</trigger>
+    <trigger>If the owner prefers "links plus a reason" over holding the run when outputs exceed 35 MB (the task brief said links; spec FR-20 c says hold), STOP and confirm before changing the rule.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>spec New Components and reuse-scan row 12: `CommunicationService` shared-mailbox send with `AttachmentDocumentIds` and the `InReplyToMessageId` threading fixed in place by task 006; CAPABILITY-INDEX row 12. Sibling per-channel Return: `FrontDoorReturn` (task 021).</existing>
+    <extension>Yes, it composes the existing send; the new class only adds the Email channel's Return step (recipients, size rule, marker) that no component performs today.</extension>
+    <cost-of-doing-nothing>Requests that arrive by email get no reply with the reviewed NDA, so the email door ends at approval (FR-20, success criterion 6).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/EmailReturn.cs</output>
+    <output type="test">tests/integration/data-mutation/Intake/EmailReturnTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An approved Email-channel run sends exactly one email via `SendAsync` with `SendMode.SharedMailbox`, `InReplyToMessageId` = the originating message, To = requester, Cc = assigned attorney (FR-20 a).</criterion>
+    <criterion testable="true">The attachments are exactly the approved output versions (FR-20 b).</criterion>
+    <criterion testable="true">Negative: outputs totalling over 35 MB send nothing and hold the run with admin attention (FR-20 c).</criterion>
+    <criterion testable="true">A redelivered Return sends no second email (FR-20 d); the run is Returned only after a successful send.</criterion>
+    <criterion testable="true">Negative: no code path uses `SendMode.User`; with the email door switch off, nothing is sent and the run is held.</criterion>
+    <criterion testable="true">The body names the attorney and contains no AI summary or clause text; logs carry ids only.</criterion>
+    <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-20. Threading in the requester's real client (Outlook) is verified live in task 049 with an owner-approved address.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute.</protocol>
+  </execution>
+</task>

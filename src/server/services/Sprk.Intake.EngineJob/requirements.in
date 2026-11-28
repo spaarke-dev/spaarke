@@ -1,0 +1,15 @@
+# Top-level dependencies of the intake engine image. requirements.txt is generated from this file,
+# hash-pinned, and is the only file the image installs (pip install --require-hashes).
+#
+# Regenerate (Python 3.11, universal markers so the Linux image and a Windows dev venv both resolve):
+#   uv pip compile requirements.in --universal --python-version 3.11 --generate-hashes -o requirements.txt
+#
+# The engines (src/accelerators/core/engines/) need lxml only, exactly as the accelerator ships them.
+lxml
+# Entrypoint layer only (owner decision 2026-11-25, spec FR-01): managed-identity auth, peek-lock with
+# lock renewal, explicit dead-lettering, conditional blob writes, and the Azure Monitor OpenTelemetry
+# distro (the same pipeline as the BFF's UseAzureMonitor()). Nothing else is added.
+azure-identity
+azure-servicebus
+azure-storage-blob
+azure-monitor-opentelemetry

@@ -178,7 +178,7 @@ public sealed class MyService
         var playbookId = await _routing.ResolveAsync(
             consumerType: ConsumerTypes.MyConsumer,
             consumerCode: "default",
-            context: null,                  // or RoutingContext with MimeType/DocumentType
+            context: null,                  // or RoutingContext with MimeType/DocumentType/RequestType
             environment: null,              // implicit from IHostEnvironment
             cancellationToken: ct);
 

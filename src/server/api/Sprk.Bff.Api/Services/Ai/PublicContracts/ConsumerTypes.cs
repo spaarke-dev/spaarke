@@ -408,6 +408,52 @@ public static class ConsumerTypes
     /// </summary>
     public const string InvoiceFirmNotice = "invoice-firm-notice";
 
+    // ── Agreements / NDA (ai-advanced-capabilities-agreements-r1 + -nda-r1; constants added by spaarke-intake-pipeline-r1 task 005) ──
+    // Their Binding rows were seeded earlier (sprk_playbookconsumer-rows.json), but with no constant here
+    // RoutingConsumerTypeHealthCheck reported each as an Unhealthy row-without-constant on /healthz/catalog. The
+    // chat/Compose clients dispatch by these strings; the constants only make the closed catalog (ADR-039) match the rows.
+
+    /// <summary>
+    /// Reasoning-tier agreement classifier (Action <c>agreement-classify</c>, Binding row in
+    /// <c>infra/dataverse/sprk_playbookconsumer-rows.json</c>). Dispatched deterministically by the
+    /// client's review-intent gate; routing behaviour unchanged by this constant.
+    /// </summary>
+    public const string AgreementClassify = "agreement-classify";
+
+    /// <summary>
+    /// Whole-document advisory NDA review. The consumer type stays <c>nda-review</c> although the bound
+    /// Action was generalised to <c>agreement-review</c> (the asymmetry is intentional; see the row's
+    /// <c>$comment-agreements-r1-002</c>).
+    /// </summary>
+    public const string NdaReview = "nda-review";
+
+    /// <summary>
+    /// Plain-language explainer of the firm NDA standard (Action <c>nda-standard-summary</c>, Binding row in
+    /// <c>infra/dataverse/sprk_playbookconsumer-rows.json</c>).
+    /// </summary>
+    public const string NdaStandardSummary = "nda-standard-summary";
+
+    // ── Intake pipeline (spaarke-intake-pipeline-r1 task 012, FR-08) ──
+
+    /// <summary>
+    /// Intake harness selection. <c>IntakeHarnessRegistry</c> resolves this consumer type with
+    /// <c>consumerCode</c> = the request type and a <see cref="RoutingContext"/> carrying
+    /// <see cref="RoutingContext.RequestType"/> (and <see cref="RoutingContext.DocumentType"/> when
+    /// classified); the matched row's <see cref="Binding.ConsumerCode"/> is the harness key. One
+    /// row per harness in <c>infra/dataverse/sprk_playbookconsumer-rows.json</c> (first: <c>nda</c>).
+    /// Never chat/loop-projected (no tool description, no chips, no event bindings).
+    /// </summary>
+    public const string IntakeHarness = "intake-harness";
+
+    /// <summary>
+    /// App-only NDA edit plan (Action <c>agreement-edit-plan</c>, Binding row in
+    /// <c>infra/dataverse/sprk_playbookconsumer-rows.json</c>; spaarke-intake-pipeline-r1 task 004, FR-02).
+    /// Reached only through <see cref="IAgreementAi.BuildEditPlanAsync"/> (never chat/loop-projected: the Binding
+    /// carries no tool description). The model writes topic-keyed edits against the pinned NDA standard; the facade
+    /// completes and validates the plan. <c>agreement-review</c>'s closed output contract is not involved.
+    /// </summary>
+    public const string AgreementEditPlan = "agreement-edit-plan";
+
     /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
@@ -447,5 +493,10 @@ public static class ConsumerTypes
         InvoiceCodeSetMatch,
         BillingRuleDraft,
         InvoiceFirmNotice,
+        AgreementClassify,
+        NdaReview,
+        NdaStandardSummary,
+        IntakeHarness,
+        AgreementEditPlan,
     };
 }

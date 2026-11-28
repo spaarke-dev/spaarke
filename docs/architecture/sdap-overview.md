@@ -273,12 +273,9 @@ All async work runs through Azure Service Bus with a single `ServiceBusJobProces
 | `AppOnlyDocumentAnalysisJobHandler` | Background analysis (app-only auth) | API enqueue |
 | `AttachmentClassificationJobHandler` | Attachment type classification | Upload completion |
 | `BulkRagIndexingJobHandler` | Batch embedding generation | Admin trigger |
-| `DocumentProcessingJobHandler` | Chunking, extraction, indexing | Upload completion |
-| `EmailAnalysisJobHandler` | Email content analysis | Email save |
 | `IncomingCommunicationJobHandler` | Inbound email processing | Webhook |
 | `InvoiceSubmissionProcessingJobHandler` | Invoice read, evaluation and persistence | Finance confirm (via the submission) |
 | `InvoiceIndexingJobHandler` | Invoice → AI Search | Post-extraction |
-| `ProfileSummaryJobHandler` | Matter profile aggregation | Scheduled |
 | `RagIndexingJobHandler` | Single document indexing | Knowledge source upload |
 | `SpendSnapshotGenerationJobHandler` | Financial snapshot generation | Scheduled |
 

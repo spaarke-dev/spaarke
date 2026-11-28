@@ -10,9 +10,10 @@
     (created by task 016).
 
     NAMING-COLLISION NOTE (per spec.md FR-2.4 + design.md alternatives table):
-      sprk_processingjob already exists and is scoped to Office document operations
-      (DocumentSave / EmailSave / ShareLinks / QuickCreate / ProfileSummary / Indexing /
-      DeepAnalysis). DO NOT extend that entity. sprk_backgroundjob is a parallel,
+      sprk_processingjob already exists and holds one row per job RUN: Office document
+      operations (DocumentSave / EmailSave / ShareLinks / QuickCreate / ProfileSummary /
+      Indexing / DeepAnalysis) and intake pipeline runs (Intake run). DO NOT overload that
+      entity with job DEFINITIONS. sprk_backgroundjob is a parallel,
       distinct entity for the scheduled-job framework (junction recon, playbook scheduler,
       cache warming, etc.). Both coexist.
 
@@ -230,7 +231,7 @@ function New-BackgroundJobEntity {
         "SchemaName"            = "sprk_backgroundjob"
         "DisplayName"           = New-Label -Text "Background Job"
         "DisplayCollectionName" = New-Label -Text "Background Jobs"
-        "Description"           = New-Label -Text "Job definition for the Spaarke.Scheduling background-job framework (R3 Part 2). Read by ScheduledJobHost on startup + hourly refresh. Per-run audit history lives in sprk_backgroundjobrun. Distinct from sprk_processingjob, which is Office-scoped — do NOT overload that entity."
+        "Description"           = New-Label -Text "Job definition for the Spaarke.Scheduling background-job framework (R3 Part 2). Read by ScheduledJobHost on startup + hourly refresh. Per-run audit history lives in sprk_backgroundjobrun. Distinct from sprk_processingjob, which holds run records for Office saves and intake pipeline runs — do NOT overload that entity."
         "OwnershipType"         = "OrganizationOwned"
         "IsActivity"            = $false
         "HasNotes"              = $false

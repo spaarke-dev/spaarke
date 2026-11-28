@@ -14,9 +14,19 @@ namespace Sprk.Bff.Api.Tests.Domain.Access;
 public class SecureChildLineageTests
 {
     /// <summary>
+    /// Role-set child tables that deliberately have no lineage row. Mirrors <c>SecureFamilyConsistencyTests.RoleSetNotInLineage</c>
+    /// (tests/Spaarke.ArchTests), which holds the full reason. <c>sprk_processingjob</c> (intake-pipeline-r1 task 013, path (b)
+    /// chosen by unified-access-control-r2 2026-11-27): an intake run's only filing parent is its service request, which the
+    /// secure walk never looks through (D-36), so it takes its owner once at create from IRecordOwnershipResolver and is never
+    /// re-owned or share-mirrored.
+    /// </summary>
+    private static readonly string[] RoleSetChildrenNotInLineage = ["sprk_processingjob"];
+
+    /// <summary>
     /// Every child table the Secure Record Owner role covers (config/secure-record-owner-role.json — the ONE codified set,
     /// task 145/146) is a table the synchronizer mirrors, and nothing else is. A child table added to the role set without
-    /// a lineage entry would be owned by the Secure team and shared with nobody.
+    /// a lineage entry would be owned by the Secure team and shared with nobody — unless it is listed in
+    /// <see cref="RoleSetChildrenNotInLineage"/> with its reason.
     /// </summary>
     [Fact]
     public void TheLineageMapCoversExactlyTheCodifiedChildTables()
@@ -26,7 +36,10 @@ public class SecureChildLineageTests
             .Select(t => t.LogicalName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        SecureChildLineage.Children.Keys.Should().BeEquivalentTo(codified);
+        codified.Should().Contain(RoleSetChildrenNotInLineage, "an exception for a table no longer in the role set is stale");
+        SecureChildLineage.Children.Keys.Should().NotContain(RoleSetChildrenNotInLineage,
+            "an exception for a table that now has a lineage row is stale");
+        SecureChildLineage.Children.Keys.Should().BeEquivalentTo(codified.Except(RoleSetChildrenNotInLineage));
         SecureRecordOwnerRoleSet.Embedded.Tables.Where(t => t.Kind == "root").Select(t => t.LogicalName)
             .Should().BeEquivalentTo(SecureChildLineage.Roots);
     }

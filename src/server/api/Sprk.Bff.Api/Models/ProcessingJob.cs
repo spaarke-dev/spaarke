@@ -130,7 +130,13 @@ public enum ProcessingJobType
     QuickCreate = 3,
     ProfileSummary = 4,
     Indexing = 5,
-    DeepAnalysis = 6
+    DeepAnalysis = 6,
+
+    /// <summary>
+    /// One intake pipeline run (spaarke-intake-pipeline-r1 FR-06): the run record of a <c>sprk_servicerequest</c>.
+    /// Not an Office job: the Office job-status reads never return it (FR-06b, <c>OfficeJobStatusService.IsIntakeRun</c>).
+    /// </summary>
+    IntakeRun = 7
 }
 
 /// <summary>

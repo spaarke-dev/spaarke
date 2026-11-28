@@ -1347,6 +1347,16 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::RejectInvoiceAsync"] =
             "Writes BuildReviewStatusFields on sprk_document: the invoice review status, reviewed-on and notes (literal keys).",
         ["Sprk.Bff.Api.Services.Finance.SignalEvaluationService::UpsertSignalAsync"] = "Writes sprk_spendsignal only (SignalEntity).",
+        // spaarke-intake-pipeline-r1 task 013: the intake run store's conditional writes (the claim, fenced stage writes, the claim
+        // release, the engine-completion record). Every one targets RunEntity (sprk_processingjob) with a payload the store builds
+        // from its own column constants; none names a document column (sprk_outputdocument is a lookup ON the run, not a document write).
+        ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::TryClaimAsync"] = "Writes sprk_processingjob only (RunEntity): the run state and its error columns.",
+        ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::WriteRunAsync"] =
+            "Writes sprk_processingjob only (RunEntity): the run state plus run columns its handler passes (status, stage, dates, codes, harness key, output-document lookup).",
+        ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::ReleaseClaimAsync"] = "Writes sprk_processingjob only (RunEntity): the run state.",
+        ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::RecordExternalStepResultAsync"] = "Writes sprk_processingjob only (RunEntity): the run state.",
+        ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::WriteRequestStageAsync"] =
+            "Writes sprk_servicerequest only (RequestEntity): sprk_intakestage and the sprk_currentrun lookup (to a run), built here.",
         // ebilling-r1 task 095d-2b-2: the re-run's after-commit Signal steps record their state on the submission.
         ["Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionRerun::WriteSignalStateAsync"] =
             "Writes sprk_invoicesubmission only (FinanceBaseValues.SubmissionEntity): sprk_findingsjson and sprk_adminattention, a payload it builds itself.",
