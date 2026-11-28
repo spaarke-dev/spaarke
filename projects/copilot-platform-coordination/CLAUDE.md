@@ -24,12 +24,12 @@ Coordination project for every Spaarke artifact in Microsoft 365 Copilot tenants
   - The runner does not pass the return value back.
   - It refuses `toString` and a top-level `await`.
   - Detail: accelerator PR #3266.
-- **Admin-center plugin upload refused the Word Probe three times; cause unknown** ("We couldn't validate this manifest file", 2026-11-27).
-  - The refused versions were v0.5 (0.5.0, two `SKILL.md` over 20,000 characters), v0.6 (0.6.0) and v0.7 (1.7.0, passes all atk rules).
-  - So neither file size nor a 0.x version explains all three.
-  - v0.4 went in through Cowork's own upload; spaarke-decisions (no scripts, fresh app id) installed through the admin center.
-  - Two candidates remain: skills that ship scripts, or reusing an app id already used by Cowork personal uploads.
-  - Learn documents neither. The current test is in `notes/tenant-inventory.md` P1.
+- **The admin center refuses a plugin whose app id was already used by a Cowork › Customize › Plugins upload, even after that upload is removed.** The message is only "We couldn't validate this manifest file".
+  - Proof (2026-11-27, accelerator P1/P1b): the same no-script zip was refused on the Word Probe's Cowork-used app id and accepted on a fresh id.
+  - Earlier refusals on that id (v0.5, v0.6, v0.7) are explained by this, not by `SKILL.md` size or a 0.x version.
+  - Learn does not document it. The owner has hit it before.
+  - So a package tested through Cowork needs a different app id for the admin route. `build_accelerator.py` gives each package a fixed uuid5 id, so admin builds need `--fresh-id` or a different seed.
+  - Untested: whether the admin center accepts a skill that ships Python on a fresh id.
 - Local validation:
   - `atk validate` checks the Teams manifest only, not `agentSkills` or `SKILL.md`.
   - Learn says `wiqd plugin validate --mode deep` runs the full upload rules. It is not installed on this machine (2026-11-27), and installing it is a download that needs the owner's OK.
