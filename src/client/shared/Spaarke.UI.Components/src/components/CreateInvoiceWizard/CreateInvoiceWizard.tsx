@@ -272,7 +272,9 @@ const CreateInvoiceWizard: React.FC<ICreateInvoiceWizardProps> = ({
       embedded={embedded}
       title="Create New Invoice"
       onClose={onClose}
+      // A launch from a record (lockAssociation) fixes the record: no Record step, the user cannot pick another (owner UAT 2026-11-28).
       initialRecord={initialRecord}
+      lockedRecord={lockAssociation === true ? initialRecord : undefined}
       loadRecords={client.loadRecords}
       loadFirms={client.loadFirms}
       submit={client.submit}
