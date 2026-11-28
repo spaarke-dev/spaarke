@@ -1,19 +1,32 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-27 ~14:30Z (task 043 merged and live on dev: BFF + SPA)
+> **Last Updated**: 2026-11-28 (task 048 done; PR open, waiting on the owner's merge go)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Active** | **Task 043 DONE** (FR-28 #2269), PR open — see In flight. Next task per TASK-INDEX after the owner's go. Full record: `notes/task-043-notes.md`. |
-| **In flight** | Task 043 PR #3267 MERGED (squash `c438119bca`, 2026-11-26 19:54Z). UAC APPROVED (uac-r2 2026-11-26); its note 1 fixed in 043 (sign-in Forbidden bind/create → 403 create_unavailable), note 2 = comment; #3264 narrowed to the resolver catch arms. BFF with 043 LIVE (see below); 30-min gate PASSED 13:45Z. SPA `c438119bca` LIVE (owner's go). |
-| **Next action** | Next task per TASK-INDEX, on the owner's go. Optional: owner E2E of the 503 retry on dev. |
+| **Active** | None. Task 048 (phone layout ≤ 480px, FR-32, #2466) is done: code, review (2 fixes), notes, status. |
+| **Branch** | `work/spaarke-SPA-external-access-platform-r4-048` (cut from the state branch at `30decd737e`), pushed with a PR to master. The PR merges only on the owner's go. |
+| **Next action** | After the owner's merge go: merge the 048 PR. Then task 058 (P4 deploy + E2E). Its POML notes now carry 048's follow-up checks: real record sections and widget bodies at 375px, high-contrast and Teams dark, overflow-menu dialogs. |
+
+## Task 048 result
+- One breakpoint module `src/client/external-spa/src/components/phoneLayout.ts` (480px, matchMedia hook, an app-wide 44px static rule). Shell, tab strip, header, Quick Start, widget library and record template follow it. Secondary record actions go to RecordCommandBar's existing overflow (API unchanged).
+- Suite: 78 files, 2,183 tests. Notes: `notes/task-048-notes.md` (measurements, decisions, review, K-limits).
+- Found in passing: D-48 #3331 (local mock mode redirects to CIAM sign-in once a grid widget loads).
+
+## In flight elsewhere
+- Squashes `4f9e371445` (044 + 047) and `f0f1e810bd` (045) are on uac-r2's NEXT dev BFF candidate list. They go live only on the owner's go in uac-r2's session.
+- Commit `30decd737e` (046 closed; #2578 closed citing #2791) is on the state branch and in the 048 branch; it reaches master with the 048 PR.
 
 ## Live on dev
-- **BFF:** master `d9595dd98e` (contains 043) LIVE since 2026-11-27 ~20:19Z (uac-r2, owner's go); gate due ~20:50Z. Previous: `5cd40984b0` (gate PASSED 13:45Z).
-- **SPA:** `c438119bca` (043 merge) LIVE since 2026-11-27 ~14:29Z (run 46016029559, headSha checked, owner's go). Rollback tag `external-spa-dev-24d53fb333`. Dispatch SPA deploys from tag `external-spa-dev-<sha>` to build exactly the approved SHA; check the run's headSha.
+- BFF `b84fa5f061` (rollback `af8a5547ef`).
+- SPA `c438119bca` (rollback tag `external-spa-dev-24d53fb333`). Dispatch from tag `external-spa-dev-<sha>`; check the run's headSha.
+
+## Next tasks
+- 058 (P4 deploy + E2E), then 080, 090. 016 stays wip.
+- Board: Tasks Completed = 40/46 (item `PVTI_lAHODW0Pv84BEgWuzhHt-CE`, field `PVTF_lAHODW0Pv84BEgWuzhWPlLY`, project `PVT_kwHODW0Pv84BEgWu`).
 
 ## Owner questions open
 - Track the raw filing-reference footer seen in an older PRJ-000046 system email?
@@ -23,10 +36,7 @@
 - `useHostRowSource` row in `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval)?
 
 ## Filed
-- D-24 #2939 … D-42 #3201; D-43 #3264; D-44 #3265.
+- D-24 #2939 … D-42 #3201; D-43 #3264; D-44 #3265; D-47 #3315; D-48 #3331.
 
-## Housekeeping
-- Task 043 publish worktrees removed. PR #3267 open; portfolio synced (35/46).
-
-## Merge trap (seen 2026-11-22, again 2026-11-25)
-Master holds older squashes of this project's notes. On a master merge, keep the branch's copies of `projects/spaarke-SPA-external-access-platform-r4/**` (`git checkout --ours`). After a squash merge of this branch's PR, the next master merge conflicts on the same source lines; take ours only after checking that master's only commit to those files is that squash.
+## Merge trap
+Master holds older squashes of this project's notes. On a master merge, keep the branch's `projects/spaarke-SPA-external-access-platform-r4/**` (`git checkout --ours`), after checking that the squash is master's only commit to those files.

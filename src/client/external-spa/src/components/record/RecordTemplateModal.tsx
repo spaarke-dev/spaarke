@@ -93,7 +93,14 @@ import {
 } from './recordAccess';
 import { useRecord, type RecordState } from './recordReads';
 import { RecordSectionStateContext, sectionStateUserKeyOf } from './recordSectionState';
-import { RECORD_ACTION_TEXT, recordActionIdsOf, recordTemplateTitle, recordText } from './recordTemplates';
+import {
+  PHONE_OVERFLOW_ACTIONS,
+  RECORD_ACTION_TEXT,
+  recordActionIdsOf,
+  recordTemplateTitle,
+  recordText,
+} from './recordTemplates';
+import { PHONE_MEDIA, useIsPhoneWidth } from '../phoneLayout';
 import type {
   RecordActionHostContext,
   RecordHostAction,
@@ -198,6 +205,7 @@ const useStyles = makeStyles({
     paddingInline: tokens.spacingHorizontalL,
     backgroundColor: tokens.colorNeutralBackground2,
     ...thinScrollbarStyle,
+    [PHONE_MEDIA]: { paddingBlock: tokens.spacingVerticalM, paddingInline: tokens.spacingHorizontalS },
   },
   columns: {
     display: 'grid',
@@ -277,6 +285,7 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   readRecord,
 }) => {
   const styles = useStyles();
+  const isPhone = useIsPhoneWidth();
   const detail = getRecordDetailEntity(config.entity);
   const [attempt, setAttempt] = React.useState(0);
   // Records deleted in this view (a 204): shown as deleted, never re-read (the read would answer "no access").
@@ -489,7 +498,11 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
       onClick: handler ?? (hosted?.visible ? hosted.onClick : noop),
     };
   };
-  const actions: RecordCommandBarAction[] = config.toolbar.map(actionOf);
+  // At phone width the secondary actions go to the bar's own "More actions" menu (task 048); its API is unchanged.
+  const actions: RecordCommandBarAction[] = config.toolbar.map(actionId => ({
+    ...actionOf(actionId),
+    overflow: isPhone && PHONE_OVERFLOW_ACTIONS.has(actionId),
+  }));
   // A section's header actions (task 009): its offered ones only, as `HeaderToolbar` icon slots (hide, don't disable).
   const headerActionsOf = (section: RecordSectionId): IHeaderToolbarSlot[] =>
     (config.sectionActions?.[section] ?? [])

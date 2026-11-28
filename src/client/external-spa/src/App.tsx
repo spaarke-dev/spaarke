@@ -20,6 +20,7 @@ import { AppHeader, portalTitleFor } from './components/AppHeader';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { NotificationBell } from './components/shell/NotificationBell';
+import { usePhoneTouchTargetStyles } from './components/phoneLayout';
 import { RecordOpenerProvider } from './components/detail/RecordOpener';
 import { RecordDeepLink } from './components/detail/RecordDeepLink';
 import { WorkspaceHomePage } from './pages/WorkspaceHomePage';
@@ -133,6 +134,8 @@ const AppShell: React.FC<{
   onSignOut: () => void;
 }> = ({ isDark, onToggleDark, portalUser, teamsHost, onSignOut }) => {
   const styles = useStyles();
+  // At phone width every Fluent control in the app, portalled dialogs and menus included, is a 44px target (task 048).
+  usePhoneTouchTargetStyles();
   const navigate = useNavigate();
   const { inProgress } = useMsal();
   // The workforce home plane holds the workspace back until the contact is registered or linked (A9, task 058); every

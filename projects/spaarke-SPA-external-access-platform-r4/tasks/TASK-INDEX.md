@@ -49,8 +49,8 @@
 | 045 | Contact store log labels + test double + gate fix (FR-30) | 4 | ✅ [done] | 038 | Group E | sonnet / high |
 | 047 | Foreign-environment 403 → Warning / cooldown (FR-31c) | 4 | ✅ [done] | 038 | Group E | sonnet / xhigh |
 | 042 | Email-missing text + email rule alignment (FR-26, FR-27) | 4 | ✅ [done] | 041 | Group F | sonnet / high |
-| 048 | Teams mobile layout (FR-32) | 4 | 🔲 [open] | 040 | Group F | sonnet / high |
-| 046 | acme fault: owner-approved checks + data fix (FR-31a/b) | 4 | 🔲 [open] | none (owner-gated) | — (live) | sonnet / high |
+| 048 | Teams mobile layout (FR-32) | 4 | ✅ [done] | 040 | Group F | sonnet / high |
+| 046 | acme fault: owner-approved checks + data fix (FR-31a/b) | 4 | ✅ [done] | none (owner-gated) | — (live) | sonnet / high |
 | 058 | P4 deploy (BFF via uac-r2, SPA dev, Teams package) + E2E | 4 | 🔲 [open] | 040, 041, 042, 043, 044, 045, 046, 047, 048 | — (live) | sonnet / high |
 | 080 | Standards proposals (FR-34) — main session | Closing | 🔲 [open] | 018 | — (`.claude/`) | sonnet / high |
 | 090 | Project wrap-up (`090-wrapup-project.poml`) | Closing | 🔲 [open] | all | — | sonnet / high |

@@ -15,6 +15,7 @@
  */
 import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
+import { PHONE_MEDIA } from '../phoneLayout';
 
 export interface RecordTemplateHeaderFact {
   label: string;
@@ -46,6 +47,7 @@ const useStyles = makeStyles({
     paddingInline: tokens.spacingHorizontalL,
     backgroundColor: tokens.colorNeutralBackground1,
     borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+    [PHONE_MEDIA]: { paddingInline: tokens.spacingHorizontalM },
   },
   name: {
     margin: 0,
@@ -67,6 +69,8 @@ const useStyles = makeStyles({
     rowGap: tokens.spacingVerticalS,
     margin: 0,
     minWidth: 0,
+    // Phone (task 048): one fact per line.
+    [PHONE_MEDIA]: { flexDirection: 'column', width: '100%' },
   },
   fact: {
     // Value over label; `column-reverse` keeps the <dt> before its <dd> for screen readers.
@@ -77,6 +81,7 @@ const useStyles = makeStyles({
     minWidth: 0,
     paddingInline: tokens.spacingHorizontalL,
     borderLeft: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+    [PHONE_MEDIA]: { paddingInline: 0, borderLeft: 'none' },
   },
   factLabel: {
     margin: 0,

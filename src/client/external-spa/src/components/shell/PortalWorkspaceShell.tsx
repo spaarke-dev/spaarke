@@ -36,10 +36,20 @@ import {
 } from '@fluentui/react-icons';
 import { TabStrip, type TabItem } from './TabStrip';
 import { QUICK_START_TAB, type WidgetTab } from './useWorkspaceTabs';
+import { PHONE_MEDIA } from '../phoneLayout';
 
+// At phone width (task 048, FR-32) the shell is one column: the tab bar, then the tab body; the collapsed assistant is a
+// bar across the full width, and the open assistant takes the whole body (the workspace comes back when it collapses).
 const useStyles = makeStyles({
-  bodyRow: { display: 'flex', flexGrow: 1, minHeight: 0, minWidth: 0 },
-  main: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
+  bodyRow: {
+    display: 'flex',
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+    [PHONE_MEDIA]: { flexDirection: 'column' },
+  },
+  main: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
+  mainBehindAssistant: { [PHONE_MEDIA]: { display: 'none' } },
   tabBar: {
     display: 'flex',
     alignItems: 'flex-end',
@@ -51,6 +61,7 @@ const useStyles = makeStyles({
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexWrap: 'wrap',
+    [PHONE_MEDIA]: { paddingLeft: tokens.spacingHorizontalM, paddingRight: tokens.spacingHorizontalM },
   },
   tabActions: {
     display: 'flex',
@@ -68,6 +79,7 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalXXL,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
+    [PHONE_MEDIA]: { paddingLeft: tokens.spacingHorizontalM, paddingRight: tokens.spacingHorizontalM },
   },
   empty: {
     display: 'flex',
@@ -88,17 +100,22 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     minHeight: 0,
     backgroundColor: tokens.colorNeutralBackground1,
+    [PHONE_MEDIA]: { width: '100%', flexGrow: 1, flexShrink: 1 },
   },
   dockRight: {
     borderLeftWidth: tokens.strokeWidthThin,
     borderLeftStyle: 'solid',
     borderLeftColor: tokens.colorNeutralStroke2,
+    [PHONE_MEDIA]: { borderLeftWidth: 0 },
   },
   dockLeft: {
     borderRightWidth: tokens.strokeWidthThin,
     borderRightStyle: 'solid',
     borderRightColor: tokens.colorNeutralStroke2,
+    [PHONE_MEDIA]: { borderRightWidth: 0 },
   },
+  // Left or right means nothing in one column.
+  moveDock: { [PHONE_MEDIA]: { display: 'none' } },
   dockHead: {
     display: 'flex',
     alignItems: 'center',
@@ -134,16 +151,36 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalM,
     gap: tokens.spacingVerticalS,
     backgroundColor: tokens.colorNeutralBackground2,
+    [PHONE_MEDIA]: {
+      width: '100%',
+      flexDirection: 'row',
+      paddingTop: 0,
+      paddingLeft: tokens.spacingHorizontalM,
+      paddingRight: tokens.spacingHorizontalM,
+      gap: tokens.spacingHorizontalS,
+    },
   },
   railRight: {
     borderLeftWidth: tokens.strokeWidthThin,
     borderLeftStyle: 'solid',
     borderLeftColor: tokens.colorNeutralStroke2,
+    [PHONE_MEDIA]: {
+      borderLeftWidth: 0,
+      borderTopWidth: tokens.strokeWidthThin,
+      borderTopStyle: 'solid',
+      borderTopColor: tokens.colorNeutralStroke2,
+    },
   },
   railLeft: {
     borderRightWidth: tokens.strokeWidthThin,
     borderRightStyle: 'solid',
     borderRightColor: tokens.colorNeutralStroke2,
+    [PHONE_MEDIA]: {
+      borderRightWidth: 0,
+      borderBottomWidth: tokens.strokeWidthThin,
+      borderBottomStyle: 'solid',
+      borderBottomColor: tokens.colorNeutralStroke2,
+    },
   },
 });
 
@@ -223,6 +260,7 @@ export const PortalWorkspaceShell: React.FC<PortalWorkspaceShellProps> = ({
               relationship="label"
             >
               <Button
+                className={s.moveDock}
                 appearance="subtle"
                 size="small"
                 icon={assistantDock === 'left' ? <PanelRightRegular /> : <PanelLeftRegular />}
@@ -268,7 +306,7 @@ export const PortalWorkspaceShell: React.FC<PortalWorkspaceShellProps> = ({
       {/* Assistant docked LEFT (expanded or collapsed rail). */}
       {assistantDock === 'left' && (dockNode ?? railNode)}
 
-      <main className={s.main}>
+      <main className={mergeClasses(s.main, dockNode !== null && s.mainBehindAssistant)}>
         <div className={s.tabBar}>
           <TabStrip tabs={tabs} activeId={active} onSelect={onSelectTab} onClose={onCloseTab} />
           <div className={s.tabActions}>

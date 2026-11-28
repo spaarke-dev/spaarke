@@ -16,6 +16,7 @@ import { SpaarkeLogoSvg } from './SpaarkeLogoSvg';
 // SHARED library — the canonical theme toggle (drives the 4-level theme cascade); §11 reuse.
 import { ThemeToggle } from '@spaarke/ui-components/components/ThemeToggle';
 import type { PortalUser } from '../types';
+import { PHONE_MEDIA } from './phoneLayout';
 
 const useStyles = makeStyles({
   header: {
@@ -42,6 +43,7 @@ const useStyles = makeStyles({
     borderBottomWidth: tokens.strokeWidthThin,
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke3,
+    [PHONE_MEDIA]: { paddingLeft: tokens.spacingHorizontalM, paddingRight: tokens.spacingHorizontalM },
   },
   brand: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM, minWidth: 0 },
   logoWrapper: { display: 'flex', alignItems: 'center', flexShrink: 0 },
@@ -51,8 +53,16 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
-  brandName: { color: tokens.colorNeutralForeground1, whiteSpace: 'nowrap' },
+  brandName: {
+    color: tokens.colorNeutralForeground1,
+    whiteSpace: 'nowrap',
+    // Phone (task 048): the portal title wraps instead of widening the page.
+    [PHONE_MEDIA]: { whiteSpace: 'normal', minWidth: 0 },
+  },
   right: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, flexShrink: 0 },
+  // Phone (task 048): the account button is icon-only (its aria-label keeps the name), so a long name or an email
+  // address cannot widen the page.
+  accountName: { [PHONE_MEDIA]: { display: 'none' } },
   // Teams-embedded: the host provides its own header + theme; show only a thin hint.
   teamsHint: {
     display: 'flex',
@@ -69,6 +79,7 @@ const useStyles = makeStyles({
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
+    [PHONE_MEDIA]: { paddingLeft: tokens.spacingHorizontalM, paddingRight: tokens.spacingHorizontalM },
   },
 });
 
@@ -155,7 +166,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                     icon={<Person20Regular />}
                     aria-label={`${portalUser.displayName} — account menu`}
                   >
-                    {portalUser.displayName}
+                    <span className={styles.accountName} data-testid="account-name">
+                      {portalUser.displayName}
+                    </span>
                   </Button>
                 </Tooltip>
               </MenuTrigger>

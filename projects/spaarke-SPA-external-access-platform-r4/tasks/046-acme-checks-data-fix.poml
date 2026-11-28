@@ -4,7 +4,7 @@
     <title>acme readability-proof fault: owner-approved read-only checks, then the data fix with a recorded rollback (FR-31 a, b; #2578)</title>
     <phase>4 Access, sign-in, carry-overs, Teams</phase>
     <gate>owner-gated: the owner sees and approves each read-only command before it runs, and approves the data fix and its rollback before any change</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Live read-only checks and an owner-approved data change; no code (phase 4, explicit constraints)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -102,7 +102,10 @@
     <criterion testable="true">UAC's review of the fix is recorded (FR-31).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-31 (a, b); issue #2578 (duplicate #2163). Owner directive 2026-11-10: no task execution before the owner reviews the final plan and tasks. Deps "none" per the task table (it may run any time), an exception to the phase-deploy convention. Check A's filter uses the environment host from design.md's evidence; adjust the filter if the row stores a different spelling (e.g. an .api. host).</notes>
+  <notes>Spec FR-31 (a, b); issue #2578 (duplicate #2163). Owner directive 2026-11-10: no task execution before the owner reviews the final plan and tasks. Deps "none" per the task table (it may run any time), an exception to the phase-deploy convention. Check A's filter uses the environment host from design.md's evidence; adjust the filter if the row stores a different spelling (e.g. an .api. host).
+
+Completed 2026-11-28 with no live read and no data change (owner: close if not needed). uac-r2's #2791 (f23dfed281) skips registry rows served by another BFF; acme's row names its own BFF, and there has been no acme fault on dev since 2026-11-13 20:40Z. #2578 closed. Detail: notes/task-046-notes.md.
+rework: none task 046</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
