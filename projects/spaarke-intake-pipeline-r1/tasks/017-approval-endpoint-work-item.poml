@@ -4,7 +4,7 @@
     <title>FR-11: Approval on the Decide lane: intake approval Signal, claim, approve-intake / reject-intake plan actions, review Decision Record, approved SPE versions, resume from AwaitingApproval</title>
     <phase>1 Pipeline core and first doors</phase>
     <gate>after:013,010,014</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags bff-api and auth; changes the Signals subject set, the decision commit route's guards and Signal/Decision Record readers; new claim write and executors.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -149,7 +149,9 @@
     <criterion testable="true">No log line, ProblemDetails, Signal text or Decision Record text contains document text or the reject reason.</criterion>
   </acceptance-criteria>
 
-  <notes>Rewritten 2026-11-28 after the first run stopped at its escalation trigger (no Decision Record kind for intake; no create-once Work Item). Owner chose the Decide lane; conditions from ontology-r1 and uac-r2 are in notes/decisions.md. PR description must name the base and the three ontology areas (Services/Signals, Api/Signals, catalog) this branch changes; ontology-r1 reviews those, uac-r2 reviews access. Running the policy seed script on dev needs the owner's go. Run `/conflict-check` before the PR.</notes>
+  <notes>Rewritten 2026-11-28 after the first run stopped at its escalation trigger (no Decision Record kind for intake; no create-once Work Item). Owner chose the Decide lane; conditions from ontology-r1 and uac-r2 are in notes/decisions.md. PR description must name the base and the three ontology areas (Services/Signals, Api/Signals, catalog) this branch changes; ontology-r1 reviews those, uac-r2 reviews access. Running the policy seed script on dev needs the owner's go. Run `/conflict-check` before the PR.
+Completed 2026-11-28 (FULL, opus, two adversarial passes). Built: the IntakeAwaitingApproval trigger and the Approve stage; sprk_servicerequest as a verified subject and an evaluator-readable table (after the read-only live check); the approval policy definition and its seed wrapper (written, not run); approve-intake / reject-intake catalog actions and executors; the commit route's dismissal and Also-resolve refusals and Disabled→503; the claim route POST /api/v1/intake/requests/{id}/claim. Approve and reject write the run and the request in one transaction conditional on both rows as checked. Deviations (all in notes/017-approval.md): the claim is a direct app write, not ADR-034 A4 (uac-r2); no ForPerson registration; WorkType null, so the Console shows the item under "Other" (follow-up for task 019: a sprk_policy.sprk_worktype option, the Console labels, the parity corpus); the seed is a wrapper plus a new definition kind; tests live in unit/data-mutation/auth/contract instead of a live seam test; readers needed no change; approve and reject require an existing claim; kill-switch codes differ per route. Known limits: the 2-minute team cache; the form can edit the claimer (field security follow-up); a reject's record outcome is Authorized; the policy is seed-only; the D-17 order. Unclaim is not built (follow-up). Deferred defect, blocks the re-run doors (021/022/043/044): a second approval cycle on one request (no re-raise of the Acted Signal, stale claimer, decision not bound to its run). Open questions for ontology-r1 / uac-r2: Work Item owner (business-unit default team) vs claim authority (the request's owning team); execute-time refusal answers 500 on the commit route (criterion 7 at the route). No Signals contract baseline changed.
+rework: fix-round-1 fix-round-2 task 017</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
