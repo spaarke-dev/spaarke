@@ -171,10 +171,12 @@ public sealed class IndexedRecordRow
 /// their rows. The watermark is kept in the distributed cache (<c>recordsync:watermark:{entityType}</c>, ADR-009) and advances only
 /// after every batch of the type is written, so a failed type is read again by the next run.</para>
 /// <para><b>Deleted records (GitHub #3321).</b> At most once per <see cref="RecordSyncOptions.DeletedRecordSweepHours"/> per type, the
-/// run lists the type's rows in this tenant, then every id of the type that Dataverse still holds, and deletes the rows whose record is
-/// gone. The index is read first, so a record created during the pass is never taken for deleted. Nothing is removed when Dataverse
-/// cannot be read, or when it returns no records of a type whose rows the index holds (a lost read permission looks like that). The
-/// pass is marked done (<c>recordsync:sweep:{entityType}</c>) only when every delete succeeded; otherwise the next run repeats it.</para>
+/// run lists the type's rows in this tenant (in record-id order, any number of rows), then every id of the type that Dataverse still
+/// holds. Each row whose record is missing from that list is read back on its own, and only a "not found" answer makes it deleted. The
+/// index is read first, so a record created during the pass is never taken for deleted. Nothing is removed when Dataverse cannot be
+/// read, when it returns no records of a type whose rows the index holds, when a record missing from the list still exists (the list
+/// was incomplete), or when a read-back is refused. The pass is marked done (<c>recordsync:sweep:{entityType}</c>) only when every
+/// delete succeeded; otherwise the next run repeats it.</para>
 /// <para><b>ADR-036 A1.</b> Registered through <c>AddScheduledJob</c> (rule 6); one dispatch per tick under the host's lease (rule 1),
 /// where the old timer ran on every instance; one heartbeat per attempt (rule 5). Rule 3, idempotency: upserts SET a row and deletes of
 /// a missing row succeed, so a re-run converges. Rule 4, retry: it THROWS when no type could be synced (no progress was possible) and
@@ -199,9 +201,6 @@ public class RecordSyncJob : IScheduledJob
     private const int DataversePageSize = 200;
     private const int DataverseIdPageSize = 5000;
     private const int MaxRetries = 3;
-
-    /// <summary>The largest offset Azure AI Search accepts; rows beyond it wait for a later pass.</summary>
-    private const int MaxIndexRowsPerType = 100_000;
 
     private static readonly JsonSerializerOptions ResultJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -560,10 +559,27 @@ public class RecordSyncJob : IScheduledJob
             return 0;
         }
 
-        var staleKeys = rows
-            .Where(row => Guid.TryParse(row.DataverseRecordId, out var recordId) && !liveIds.Contains(recordId))
-            .Select(row => row.Id)
+        var candidates = rows
+            .Select(row => (row.Id, Parsed: Guid.TryParse(row.DataverseRecordId, out var recordId), RecordId: recordId))
+            .Where(row => row.Parsed && !liveIds.Contains(row.RecordId))
             .ToList();
+
+        // A listing can be incomplete without failing (the identity lost read access to part of the table). Every candidate is read
+        // back on its own before anything is deleted: only "not found" counts as deleted. One candidate that is still there means the
+        // listing missed records, and a refused read throws, so in both cases nothing is removed.
+        var staleKeys = new List<string>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (await RecordExistsAsync(entity, candidate.RecordId, ct))
+            {
+                // Thrown, not returned: the run counts it as a failed pass, so it shows in the run result and the heartbeat.
+                throw new InvalidOperationException(
+                    $"A {entity.EntityLogicalName} record missing from the Dataverse listing still exists, so the listing is incomplete; nothing is removed.");
+            }
+
+            staleKeys.Add(candidate.Id);
+        }
 
         var removed = 0;
         for (var offset = 0; offset < staleKeys.Count; offset += DeleteBatchSize)
@@ -586,38 +602,83 @@ public class RecordSyncJob : IScheduledJob
         return removed;
     }
 
-    /// <summary>The type's rows in this tenant (key and record id only).</summary>
+    /// <summary>
+    /// The type's rows in this tenant that carry a record id (key and record id only), read in record-id order: each page asks for
+    /// the ids from the last one read onward, so no offset limit applies and rows added or removed meanwhile do not shift the pages.
+    /// </summary>
     internal async Task<List<IndexedRecordRow>> ListIndexRowsAsync(EntityConfig entity, string tenantId, CancellationToken ct)
     {
-        var filter = $"recordType eq '{EscapeODataLiteral(entity.EntityLogicalName)}' and tenantId eq '{EscapeODataLiteral(tenantId)}'";
+        var baseFilter = $"recordType eq '{EscapeODataLiteral(entity.EntityLogicalName)}' and tenantId eq '{EscapeODataLiteral(tenantId)}' and dataverseRecordId ne null";
         var rows = new List<IndexedRecordRow>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        string? from = null;
 
-        while (rows.Count < MaxIndexRowsPerType)
+        while (true)
         {
             ct.ThrowIfCancellationRequested();
 
-            var options = new SearchOptions { Filter = filter, Size = IndexPageSize, Skip = rows.Count };
+            // "ge" re-reads the rows of the last id; the key set drops them, so a row sharing its record id with another is still read.
+            var options = new SearchOptions
+            {
+                Filter = from is null ? baseFilter : $"{baseFilter} and dataverseRecordId ge '{EscapeODataLiteral(from)}'",
+                Size = IndexPageSize,
+            };
             options.Select.Add("id");
             options.Select.Add("dataverseRecordId");
+            options.OrderBy.Add("dataverseRecordId asc");
 
             var response = await Search.SearchAsync<IndexedRecordRow>("*", options, ct);
             var pageCount = 0;
+            var added = 0;
             await foreach (var result in response.Value.GetResultsAsync().WithCancellation(ct))
             {
-                rows.Add(result.Document);
                 pageCount++;
+                if (seen.Add(result.Document.Id))
+                {
+                    rows.Add(result.Document);
+                    added++;
+                    from = result.Document.DataverseRecordId;
+                }
             }
 
-            if (pageCount < IndexPageSize)
+            if (pageCount < IndexPageSize || added == 0)
             {
                 return rows;
             }
         }
+    }
 
-        _logger.LogWarning(
-            "RecordSyncJob: the index holds more than {Max} {EntityType} rows; rows beyond that are checked by a later pass.",
-            MaxIndexRowsPerType, entity.EntityLogicalName);
-        return rows;
+    /// <summary>
+    /// Reads one record by id: true when it exists, false when Dataverse answers "not found". Any other answer (a refused read, an
+    /// outage) throws, so the pass removes nothing.
+    /// </summary>
+    public virtual async Task<bool> RecordExistsAsync(EntityConfig entity, Guid recordId, CancellationToken ct)
+    {
+        var baseUrl = _options.DataverseEnvironmentUrl;
+        using var http = _httpClientFactory.CreateClient("RecordSyncDataverse");
+        var dataverseToken = await GetDataverseTokenAsync(baseUrl, ct);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{baseUrl.TrimEnd('/')}/api/data/v9.2/{entity.EntitySetName}({recordId:D})?$select={Uri.EscapeDataString(entity.IdField)}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Add("OData-MaxVersion", "4.0");
+        request.Headers.Add("OData-Version", "4.0");
+
+        using var response = await http.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"Dataverse returned {(int)response.StatusCode} reading one {entity.EntitySetName} record");
+        }
+
+        return true;
     }
 
     /// <summary>

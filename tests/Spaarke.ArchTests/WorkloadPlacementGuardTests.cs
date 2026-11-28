@@ -59,7 +59,7 @@ public class WorkloadPlacementGuardTests
     //   shared library the BFF registers, is not inventoried — none exists today (task-102 code review). Review
     //   catches those; widen the scan if one appears.
     // =============================================================================================
-    private const int TimerServiceBaseline = 10; // 14 → 13: TodoGenerationService (UAC-r2 task 152); 13 → 12: SpeDashboardSyncService (UAC-r2 task 165); 12 → 11: DemoExpirationService → DemoExpirationJob (#1363); 11 → 10: InboundPollingBackupService (#2749) — all migrated to IScheduledJob
+    private const int TimerServiceBaseline = 9; // 14 → 13: TodoGenerationService (UAC-r2 task 152); 13 → 12: SpeDashboardSyncService (UAC-r2 task 165); 12 → 11: DemoExpirationService → DemoExpirationJob (#1363); 11 → 10: InboundPollingBackupService (#2749); 10 → 9: RecordSyncJob (#3321) — all migrated to IScheduledJob
 
     private const int OtherServiceBaseline = 9;
 

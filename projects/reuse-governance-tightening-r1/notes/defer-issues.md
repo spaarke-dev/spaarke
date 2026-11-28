@@ -576,7 +576,7 @@ A regression in any of these ships green. "New Email" would open with no "Relate
 
 | Field | Value |
 |---|---|
-| **Status** | In progress, not deferred (owner, 2026-11-28: "Yes separate issue but ensure it gets worked on not deferred"). Fix on branch `fix/records-index-deleted-3321`. The DEV row cleanup and the DEV deploy each wait for the owner's go; the deploy goes through uac-r2. |
+| **Status** | In progress, not deferred (owner, 2026-11-28: "Yes separate issue but ensure it gets worked on not deferred"). Fix on branch `fix/records-index-deleted-3321`. DEV rollout is two steps, each on the owner's go: (1) set `RecordSync__DeletedRecordSweepHours=0` and deploy (through uac-r2), so the deploy removes nothing; (2) set it back to 6 (or trigger the job), which removes the stale rows on the next run. |
 | **Urgency** | now |
 | **Filed** | 2026-11-28 |
 | **Source** | Records-search half of #3306, found while fixing #3304/#3306/#3307 (PR #3319) |
