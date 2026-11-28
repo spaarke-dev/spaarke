@@ -58,6 +58,14 @@ function addButton(doc: Document, label = 'To'): HTMLButtonElement {
 
 const advance = (ms: number) => jest.advanceTimersByTime(ms);
 
+/** Models what the TOP page reports as its focused element (jsdom does not move it when a frame is focused). */
+function setTopActiveElement(el: Element | null): () => void {
+  Object.defineProperty(document, 'activeElement', { get: () => el, configurable: true });
+  return () => {
+    delete (document as unknown as Record<string, unknown>).activeElement;
+  };
+}
+
 describe('scheduleFocusReturn in an iframe (task 238 c)', () => {
   let frame: Frame;
   beforeEach(() => {
@@ -114,20 +122,89 @@ describe('scheduleFocusReturn in an iframe (task 238 c)', () => {
     expect(frame.topLevelFocus()).toBe(true);
   });
 
-  it('puts focus back when the platform takes it from the frame right after it landed', () => {
+  it('puts focus back when the platform takes it from the frame right after it landed (top page shows the iframe)', () => {
+    const restoreTop = setTopActiveElement(frame.iframe);
+    try {
+      const to = addButton(frame.doc);
+      scheduleFocusReturn({ doc: frame.doc, target: () => to });
+      advance(0);
+      expect(frame.doc.activeElement).toBe(to);
+
+      // The pane's own focus restore arrives late and leaves nobody focused in the frame.
+      advance(40);
+      to.blur();
+      frame.paneTakesFocus();
+      advance(FRAMED_FOCUS_CONFIRM_MS + 200);
+
+      expect(frame.doc.activeElement).toBe(to);
+      expect(frame.topLevelFocus()).toBe(true);
+    } finally {
+      restoreTop();
+    }
+  });
+
+  it('puts focus back when the top page has nobody focused (body) after the platform took it', () => {
+    const restoreTop = setTopActiveElement(document.body);
+    try {
+      const to = addButton(frame.doc);
+      scheduleFocusReturn({ doc: frame.doc, target: () => to });
+      advance(0);
+      advance(40);
+      to.blur();
+      frame.paneTakesFocus();
+      advance(FRAMED_FOCUS_CONFIRM_MS + 200);
+
+      expect(frame.doc.activeElement).toBe(to);
+      expect(frame.topLevelFocus()).toBe(true);
+    } finally {
+      restoreTop();
+    }
+  });
+
+  it('does not take the focus back when the top page focused a real element after the frame landed', () => {
+    const parentButton = document.createElement('button');
+    document.body.appendChild(parentButton);
+    const restoreTop = setTopActiveElement(frame.iframe);
+    try {
+      const to = addButton(frame.doc);
+      scheduleFocusReturn({ doc: frame.doc, target: () => to });
+      advance(0);
+      expect(frame.winFocus).toHaveBeenCalledTimes(1);
+
+      // The user clicks a button in the parent dialog: the frame loses the top-level focus.
+      restoreTop();
+      setTopActiveElement(parentButton);
+      frame.paneTakesFocus();
+      advance(FRAMED_FOCUS_CONFIRM_MS + 2000);
+
+      expect(frame.winFocus).toHaveBeenCalledTimes(1);
+      expect(frame.topLevelFocus()).toBe(false);
+    } finally {
+      delete (document as unknown as Record<string, unknown>).activeElement;
+      parentButton.remove();
+    }
+  });
+
+  it('does not take the focus when the top document cannot be read (cross-origin)', () => {
     const to = addButton(frame.doc);
-    scheduleFocusReturn({ doc: frame.doc, target: () => to });
-    advance(0);
-    expect(frame.doc.activeElement).toBe(to);
-
-    // The pane's own focus restore arrives late and leaves nobody focused in the frame.
-    advance(40);
-    to.blur();
     frame.paneTakesFocus();
-    advance(FRAMED_FOCUS_CONFIRM_MS + 200);
+    // Reading the top page's focused element throws, as it does when the top page is another origin.
+    Object.defineProperty(document, 'activeElement', {
+      get: () => {
+        throw new Error('SecurityError: Blocked a frame from accessing a cross-origin frame');
+      },
+      configurable: true,
+    });
 
-    expect(frame.doc.activeElement).toBe(to);
-    expect(frame.topLevelFocus()).toBe(true);
+    try {
+      scheduleFocusReturn({ doc: frame.doc, target: () => to });
+      advance(2000);
+
+      expect(frame.winFocus).not.toHaveBeenCalled();
+      expect(frame.doc.activeElement).not.toBe(to);
+    } finally {
+      delete (document as unknown as Record<string, unknown>).activeElement;
+    }
   });
 
   it('does not fight a host that deliberately focused another element in the frame', () => {

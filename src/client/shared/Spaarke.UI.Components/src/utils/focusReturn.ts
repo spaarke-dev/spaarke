@@ -28,7 +28,10 @@
  *    a landing counts only once `doc.hasFocus()`, and the schedule is longer (FRAMED_FOCUS_RETURN_MAX_ATTEMPTS) because
  *    the parent page un-yields its dialog and the platform pane hands focus back on their own timers, which can run
  *    past the first window. After it lands a framed surface is checked once more (FRAMED_FOCUS_CONFIRM_MS) and retried
- *    if the frame lost focus in between; the "do not fight a host that chose another element" rule is unchanged.
+ *    if the frame lost focus in between; the "do not fight a host that chose another element" rule is unchanged, and
+ *    it extends to the top page: a frame that lacks the top-level focus takes it back only while the top document's
+ *    activeElement is null, <body> or an <iframe> (what is left after the platform pane closes); a real element there
+ *    (a button in the parent dialog) or an unreadable top document (cross-origin) ends the retries.
  */
 
 import * as React from 'react';
@@ -49,6 +52,23 @@ function isFramedWindow(win: Window): boolean {
     return win.top !== null && win.top !== win;
   } catch {
     return true; // a top window we may not even compare against is certainly not this one
+  }
+}
+
+/**
+ * Framed surface whose frame lacks the top-level focus: may we take it back? Only when the top page's focused element
+ * is "nobody" (null or <body>) or an iframe (what the page shows after the platform pane closes). Anything else (a
+ * button in the parent dialog, a platform dialog) means the top page chose where focus goes, and it is not fought. A
+ * top document we cannot read (cross-origin) is treated the same way.
+ */
+function topPageAllowsRefocus(win: Window): boolean {
+  try {
+    const topDoc = win.top?.document;
+    if (!topDoc) return false;
+    const topActive = topDoc.activeElement;
+    return !topActive || topActive === topDoc.body || topActive.tagName === 'IFRAME';
+  } catch {
+    return false;
   }
 }
 
@@ -88,6 +108,8 @@ export function scheduleFocusReturn(spec: FocusReturnSpec): () => void {
     // A frame without the top-level focus keeps nothing: its activeElement may sit on the composer (it survives the
     // frame losing focus, and the pane that took focus away has just closed) while the keys go elsewhere.
     const frameHoldsFocus = !framed || doc.hasFocus();
+    // ...and when the top page itself put focus on a real element, that choice stands: stop, do not take it back.
+    if (!frameHoldsFocus && !topPageAllowsRefocus(win)) return;
     if (frameHoldsFocus && spec.isKept?.(active)) return;
     // Retry only: focus is somewhere other than where our last attempt left it, and not "nowhere".
     if (attempts > 0 && active !== seenAfterAttempt && active && active !== doc.body) return;
