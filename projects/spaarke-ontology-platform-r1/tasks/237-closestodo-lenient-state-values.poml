@@ -4,7 +4,7 @@
     <title>ClosesTodo recognises statecode/statuscode sent as a string or a non-integer JSON number, so the open-inquiry guard cannot be skipped (uac-r2 note on #3293)</title>
     <phase>13 Deferred-issue triage group D (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF .cs on a write-refusal guard (bff-api).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -37,4 +37,5 @@
     <criterion testable="true">--filter "FullyQualifiedName~Signals|FullyQualifiedName~ChildRecord|FullyQualifiedName~DataverseUpdateRecordHandler" passes; ArchTests pass.</criterion>
     <criterion testable="true">Publish-size delta recorded (expected ~0) in the PR.</criterion>
   </acceptance-criteria>
+  <completion>Done 2026-11-27: PR #3308 squash-merged to master as bf7d6a969f (head 9624e10610) after Sonnet review (no F-class) and nit tests. ClosesTodo now reads statecode/statuscode given as a string or a non-integer JSON number and fails closed on values it cannot read, so the open-inquiry guard cannot be skipped. Not yet on dev: goes with the next uac-r2 dev BFF candidate (SHA sent 2026-11-27).</completion>
 </task>
