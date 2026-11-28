@@ -113,7 +113,7 @@ public class IntakeRunStore
 
     private static readonly string[] RunColumns =
     [
-        RunRequest, RunJobType, RunStatus, RunCurrentStage, RunState, RunCorrelation, RunHarnessKey, RowVersionColumn,
+        RunRequest, RunJobType, RunStatus, RunCurrentStage, RunState, RunCorrelation, RunHarnessKey, RunEngineExecution, RowVersionColumn,
     ];
 
     private static readonly string[] RequestColumns = [RequestIntakeStage, RequestType, RequestChannel, RequestCurrentRun, RowVersionColumn];
@@ -381,9 +381,13 @@ public class IntakeRunStore
     /// The engine completion's write (task 014): records the result of the external step the run is awaiting and clears
     /// the wait, conditionally on the version read. The caller then enqueues an <c>IntakeRun</c> job to continue the run.
     /// </summary>
-    /// <returns>False (nothing written) when the run is gone, terminal, or not awaiting <paramref name="step"/>, or the step already has a result.</returns>
+    /// <param name="expectedExecutionId">
+    /// When set, the run's <see cref="IntakeRunSnapshot.EngineExecutionId"/> must equal it, checked on the same read the write is
+    /// conditional on: a completion of an older dispatch attempt never records its result against a newer one (task 014).
+    /// </param>
+    /// <returns>False (nothing written) when the run is gone, terminal, or not awaiting <paramref name="step"/>, the step already has a result, or the execution id differs.</returns>
     public virtual async Task<bool> RecordExternalStepResultAsync(
-        Guid runId, string step, IntakeHarnessResultReference result, CancellationToken ct)
+        Guid runId, string step, IntakeHarnessResultReference result, CancellationToken ct, string? expectedExecutionId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(step);
         ArgumentNullException.ThrowIfNull(result);
@@ -391,7 +395,8 @@ public class IntakeRunStore
         {
             var run = await ReadRunAsync(runId, ct).ConfigureAwait(false);
             if (run is null || run.RowVersion is null || IsTerminalStatus(run.Status)
-                || run.State.Awaiting?.Step != step || run.State.Steps.ContainsKey(step))
+                || run.State.Awaiting?.Step != step || run.State.Steps.ContainsKey(step)
+                || (expectedExecutionId is not null && run.EngineExecutionId != expectedExecutionId))
             {
                 return false;
             }
@@ -403,6 +408,106 @@ public class IntakeRunStore
                 await _entities.UpdateIfRowVersionMatchesAsync(RunEntity, runId, run.RowVersion,
                     new Dictionary<string, object> { [RunState] = Serialize(run.State) }, ct).ConfigureAwait(false);
                 return true;
+            }
+            catch (System.Data.DBConcurrencyException) when (attempt < MaxConcurrencyRetries)
+            {
+            }
+        }
+    }
+
+    /// <summary>
+    /// Stops the run's wait on an external step without a result (task 014): <see cref="IntakeExternalStopKind.Hold"/> (a failed
+    /// <c>check_outputs</c>, a plan that does not fit: status stays In Progress, admin-attention text, nothing continues) or
+    /// <see cref="IntakeExternalStopKind.Fail"/> (the hard timeout, an unreadable draft: terminal Failed with the code, the
+    /// request moved to Needs triage first so a person sees it, the terminal status written last).
+    /// </summary>
+    /// <remarks>
+    /// Applies only while the run is awaiting the dispatch named by <paramref name="executionId"/> (the engine request's key), so a
+    /// completion or timeout of an older attempt, or of a step the run has left, changes nothing. A run a live delivery holds is
+    /// <see cref="IntakeExternalWriteResult.Busy"/> (the caller retries), so this never writes under the orchestrator's claim. The
+    /// step stays unrecorded and the wait is cleared: a re-driven run dispatches the step again (under a new attempt).
+    /// </remarks>
+    /// <param name="acceptUnrecordedExecution">True for the timeout: a dispatch whose execution id was never recorded still times out.</param>
+    public virtual async Task<IntakeExternalWriteResult> StopAwaitedStepAsync(
+        Guid runId, string executionId, bool acceptUnrecordedExecution, IntakeExternalStop stop, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executionId);
+        ArgumentNullException.ThrowIfNull(stop);
+        for (var attempt = 1; ; attempt++)
+        {
+            var run = await ReadRunAsync(runId, ct).ConfigureAwait(false);
+            if (run is null || run.RowVersion is null || IsTerminalStatus(run.Status) || run.State.Awaiting is null
+                || !(run.EngineExecutionId == executionId || (acceptUnrecordedExecution && string.IsNullOrEmpty(run.EngineExecutionId))))
+            {
+                return IntakeExternalWriteResult.NotApplicable;
+            }
+
+            var now = _time.GetUtcNow();
+            if (run.State.Claim is { } claim && now - claim.At < ClaimLease)
+            {
+                return IntakeExternalWriteResult.Busy;
+            }
+
+            var fields = new Dictionary<string, object>
+            {
+                [RunCurrentStage] = stop.Stage.ToString(),
+                [RunErrorCode] = stop.Code,
+                [RunErrorMessage] = stop.Message,
+            };
+            run.State.Awaiting = null;
+            run.State.Claim = null;
+            if (stop.Kind == IntakeExternalStopKind.Hold)
+            {
+                run.State.Held = new IntakeRunHold(stop.Stage.ToString(), stop.Code, now);
+            }
+            else
+            {
+                run.State.Held = null;
+                fields[RunStatus] = new OptionSetValue((int)ProcessingJobStatus.Failed);
+                fields[RunCompleted] = now.UtcDateTime;
+                if (run.RequestId is { } requestId)
+                {
+                    // Before the terminal write: a crash between the two leaves the run awaiting, and the redelivered message repeats both.
+                    await WriteRequestStageAsync(requestId, runId, IntakeRequestStages.NeedsTriage, makeCurrentRun: false, ct).ConfigureAwait(false);
+                }
+            }
+
+            fields[RunState] = Serialize(run.State);
+            try
+            {
+                await _entities.UpdateIfRowVersionMatchesAsync(RunEntity, runId, run.RowVersion, fields, ct).ConfigureAwait(false);
+                return IntakeExternalWriteResult.Written;
+            }
+            catch (System.Data.DBConcurrencyException) when (attempt < MaxConcurrencyRetries)
+            {
+                // Changed since the read (a completion recorded, a claim taken): decide again on the new row.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Records that the continuation of an engine completion was enqueued (<paramref name="marker"/> → <paramref name="key"/>), so a
+    /// duplicate of that completion enqueues nothing. Written after the send: a failure here costs one extra, harmless
+    /// <c>IntakeRun</c> job on the duplicate, never a lost one.
+    /// </summary>
+    public virtual async Task MarkContinuationEnqueuedAsync(Guid runId, string marker, string key, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(marker);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        for (var attempt = 1; ; attempt++)
+        {
+            var run = await ReadRunAsync(runId, ct).ConfigureAwait(false);
+            if (run is null || run.RowVersion is null || IsTerminalStatus(run.Status) || run.State.Markers.ContainsKey(marker))
+            {
+                return;
+            }
+
+            run.State.Markers[marker] = key;
+            try
+            {
+                await _entities.UpdateIfRowVersionMatchesAsync(RunEntity, runId, run.RowVersion,
+                    new Dictionary<string, object> { [RunState] = Serialize(run.State) }, ct).ConfigureAwait(false);
+                return;
             }
             catch (System.Data.DBConcurrencyException) when (attempt < MaxConcurrencyRetries)
             {
@@ -506,6 +611,7 @@ public class IntakeRunStore
         CurrentStage = row.GetAttributeValue<string>(RunCurrentStage),
         CorrelationId = row.GetAttributeValue<string>(RunCorrelation),
         HarnessKey = row.GetAttributeValue<string>(RunHarnessKey),
+        EngineExecutionId = row.GetAttributeValue<string>(RunEngineExecution),
         State = IntakeRunState.Parse(row.GetAttributeValue<string>(RunState)),
         RowVersion = row.RowVersion
             ?? (row.Contains(RowVersionColumn) ? Convert.ToString(row[RowVersionColumn], CultureInfo.InvariantCulture) : null),

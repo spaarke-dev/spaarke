@@ -1355,6 +1355,10 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes sprk_processingjob only (RunEntity): the run state plus run columns its handler passes (status, stage, dates, codes, harness key, output-document lookup).",
         ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::ReleaseClaimAsync"] = "Writes sprk_processingjob only (RunEntity): the run state.",
         ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::RecordExternalStepResultAsync"] = "Writes sprk_processingjob only (RunEntity): the run state.",
+        // Task 014: the engine plumbing's two further run writes - the end of a wait (hold or fail) and the continuation marker.
+        ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::StopAwaitedStepAsync"] =
+            "Writes sprk_processingjob only (RunEntity): the run state, current stage and error columns, and for a failure the status and completion date.",
+        ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::MarkContinuationEnqueuedAsync"] = "Writes sprk_processingjob only (RunEntity): the run state's markers.",
         ["Sprk.Bff.Api.Services.Intake.IntakeRunStore::WriteRequestStageAsync"] =
             "Writes sprk_servicerequest only (RequestEntity): sprk_intakestage and the sprk_currentrun lookup (to a run), built here.",
         // ebilling-r1 task 095d-2b-2: the re-run's after-commit Signal steps record their state on the submission.

@@ -38,6 +38,9 @@ public sealed class IntakePipelineOptions
     /// </summary>
     public int ClaimHeartbeatSeconds { get; set; } = 20;
 
+    /// <summary>The engine job's plumbing (task 014): its request queue, the staging container and the hard timeout.</summary>
+    public IntakeEngineOptions Engine { get; set; } = new();
+
     /// <summary>True unless <see cref="Doors"/> sets <paramref name="door"/> to false.</summary>
     public bool IsDoorEnabled(string door) => IsEnabled(Doors, door);
 
@@ -57,4 +60,57 @@ public sealed class IntakePipelineOptions
 
         return true;
     }
+}
+
+/// <summary>
+/// How the BFF reaches the intake engine job (spaarke-intake-pipeline-r1 task 014, FR-01, FR-07, NFR-03, NFR-05), bound from
+/// <c>IntakePipeline:Engine</c>. The completion queue is <c>ServiceBus:IntakeEngineCompletionQueueName</c>: the engine sends there
+/// and the BFF consumes it, so it is a Service Bus setting, not an intake one.
+/// </summary>
+/// <remarks>
+/// <para><b>Not configured is a state, not a DI failure.</b> An empty <see cref="StagingBlobEndpoint"/> means the stamp has no
+/// engine (<c>deployIntakeEngine=false</c>): a dispatch holds the run with an admin-attention code and sends nothing.</para>
+/// <para>§11: <i>Existing</i> - <c>FinanceFileStoreOptions</c> (a blob endpoint for one store) and <c>ServiceBusOptions</c> (queue
+/// names). <i>Extension</i> - neither names the engine's staging container, its request queue or its timeout, and they belong with
+/// the intake kill switches. <i>Cost of doing nothing</i> - the dispatcher would hard-code names that differ per stamp.</para>
+/// </remarks>
+public sealed class IntakeEngineOptions
+{
+    /// <summary>The queue the engine job consumes requests from (task 002). App setting <c>IntakePipeline__Engine__RequestQueueName</c>.</summary>
+    public string RequestQueueName { get; set; } = "intake-engine-requests";
+
+    /// <summary>
+    /// The stamp's blob endpoint holding the staging container, e.g. <c>https://{account}.blob.core.windows.net</c>: a bare https
+    /// endpoint, never a connection string, key or SAS (managed identity only, ADR-028). Empty: no engine on this stamp.
+    /// </summary>
+    public string StagingBlobEndpoint { get; set; } = string.Empty;
+
+    /// <summary>The private staging container (task 002; a 7-day lifecycle rule deletes its blobs).</summary>
+    public string StagingContainer { get; set; } = "intake-staging";
+
+    /// <summary>
+    /// The hard timeout in minutes: how long a dispatched step may wait for its completion before the run is failed ("engine
+    /// timeout", NFR-05). Never below <see cref="MinimumTimeout"/> (the engine job's own retry window plus a minute: a shorter
+    /// timeout fails runs the job is still retrying). Not positive: <see cref="DefaultTimeoutMinutes"/>.
+    /// </summary>
+    public int TimeoutMinutes { get; set; } = DefaultTimeoutMinutes;
+
+    /// <summary>
+    /// 30: a normal pass takes about two minutes; this leaves room for one engine-job timeout (10 minutes), the first back-off
+    /// (1 minute) and a second full run.
+    /// </summary>
+    public const int DefaultTimeoutMinutes = 30;
+
+    /// <summary>The floor of <see cref="TimeoutMinutes"/>: <c>JobContract.RetryWindow</c> (the engine job's 1+2+4+8 minute back-off) plus one minute.</summary>
+    public static TimeSpan MinimumTimeout => Sprk.Bff.Api.Services.Jobs.JobContract.RetryWindow + TimeSpan.FromMinutes(1);
+
+    /// <summary>The timeout in force: configured, bounded below by <see cref="MinimumTimeout"/>.</summary>
+    public TimeSpan EffectiveTimeout()
+    {
+        var configured = TimeSpan.FromMinutes(TimeoutMinutes > 0 ? TimeoutMinutes : DefaultTimeoutMinutes);
+        return configured < MinimumTimeout ? MinimumTimeout : configured;
+    }
+
+    /// <summary>True when a staging endpoint is set (an engine exists on this stamp).</summary>
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(StagingBlobEndpoint);
 }

@@ -58,6 +58,15 @@ public class ServiceBusOptions
     public string CommunicationQueueName { get; set; } = "sdap-communication";
 
     /// <summary>
+    /// The queue the intake engine job (a Container Apps Job, its OWN identity) sends its completions to, consumed by
+    /// <c>IntakeEngineCompletionProcessor</c> (spaarke-intake-pipeline-r1 task 014, ADR-004 A2). Default EMPTY: the queue exists only
+    /// on stamps with <c>deployIntakeEngine=true</c>, and the processor is registered only when this is set, so no stamp starts a
+    /// consumer for a queue that is not there. Dev value: <c>intake-engine-completions</c>
+    /// (<c>ServiceBus__IntakeEngineCompletionQueueName</c>).
+    /// </summary>
+    public string IntakeEngineCompletionQueueName { get; set; } = string.Empty;
+
+    /// <summary>
     /// Maximum number of concurrent message processing calls.
     /// Range: 1-100
     /// Recommended: 5 for staging, 10+ for production

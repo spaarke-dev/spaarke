@@ -68,6 +68,25 @@ public static class JobProcessingModule
         services.AddScoped<Sprk.Bff.Api.Services.Intake.IntakeContentTextReader>();
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Intake.IntakeRunJobHandler>();
 
+        // Intake engine plumbing (task 014, FR-07/FR-09; ADR-004 A2 claim check, ADR-052 placement: queue → ADR-004 consumer,
+        // schedule → a scheduled message handled by an IJobHandler). All unconditional and inert without an engine: the staging
+        // gateway is built on first use and the dispatcher holds the run when no staging endpoint is configured.
+        //  - the dispatcher is called by a harness's Build step (task 015);
+        //  - the timeout handler is the BFF's own scheduled message on the jobs queue (an IJobHandler);
+        //  - the completion handler is registered CONCRETE ONLY, run solely by IntakeEngineCompletionProcessor, so a completion
+        //    arriving on sdap-jobs finds no handler (the engine identity holds Sender on the completion queue only).
+        services.AddSingleton<Sprk.Bff.Api.Services.Intake.Engine.IntakeEngineStaging>();
+        services.AddScoped<Sprk.Bff.Api.Services.Intake.Engine.IntakeEngineDispatcher>();
+        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Intake.Engine.IntakeEngineTimeoutJobHandler>();
+        services.AddScoped<Sprk.Bff.Api.Services.Intake.Engine.IntakeEngineCompletionJobHandler>();
+
+        // The completion consumer is the ONE hosted service this adds, and only on a stamp that deploys the engine: no queue name,
+        // no processor (ADR-032 conditional registration; the engine's queues exist only where it is deployed).
+        if (!string.IsNullOrWhiteSpace(configuration["ServiceBus:IntakeEngineCompletionQueueName"]))
+        {
+            services.AddHostedService<Sprk.Bff.Api.Services.Intake.Engine.IntakeEngineCompletionProcessor>();
+        }
+
         // AI-dependent handlers (require IFileIndexingService and/or IOpenAiClient)
         // Mixed handlers (RagIndexing references Dataverse) stay in Services/Jobs/Handlers/;
         // pure-AI handler (BulkRagIndexing) relocated per task 051 (FR-E3)

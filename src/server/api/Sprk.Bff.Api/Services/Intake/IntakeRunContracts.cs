@@ -90,6 +90,32 @@ public sealed record IntakePersistedOutputs(
 /// <summary>Why a run stopped for an administrator.</summary>
 public sealed record IntakeRunHold(string Stage, string Code, DateTimeOffset At);
 
+/// <summary>How an external step's wait ends without a result (<c>IntakeRunStore.StopAwaitedStepAsync</c>, task 014).</summary>
+public enum IntakeExternalStopKind
+{
+    /// <summary>Held for an administrator: status stays In Progress, nothing continues.</summary>
+    Hold = 0,
+
+    /// <summary>Failed for good: terminal Failed with the code; the request moves to Needs triage.</summary>
+    Fail = 1,
+}
+
+/// <summary>Why and how the wait ends: a closed code, admin-attention text (ids and codes only), and the stage shown.</summary>
+public sealed record IntakeExternalStop(IntakeExternalStopKind Kind, IntakeRunStage Stage, string Code, string Message);
+
+/// <summary>The answer of <c>IntakeRunStore.StopAwaitedStepAsync</c>.</summary>
+public enum IntakeExternalWriteResult
+{
+    /// <summary>The run was updated.</summary>
+    Written = 0,
+
+    /// <summary>The run is gone, terminal, not awaiting that dispatch (or not at all): nothing was written.</summary>
+    NotApplicable = 1,
+
+    /// <summary>A live delivery holds the run: nothing was written, the caller retries later.</summary>
+    Busy = 2,
+}
+
 /// <summary>The delivery that holds the run (the atomic receive-side claim, ADR-004 A1 §4).</summary>
 public sealed record IntakeRunClaim(string Owner, DateTimeOffset At);
 
@@ -162,6 +188,14 @@ public sealed record IntakeRunSnapshot
     public string? CurrentStage { get; init; }
     public string? CorrelationId { get; init; }
     public string? HarnessKey { get; init; }
+
+    /// <summary>
+    /// The engine dispatch the run waits on (<c>sprk_engineexecutionid</c>): the idempotency key of the engine request
+    /// (<c>IntakeEngine:{runId}:{operation}:{dispatchAttempt}</c>, task 014), written by the orchestrator from the step's
+    /// <see cref="Harnesses.IntakeHarnessStepOutcome.ExecutionId"/>. Null before any dispatch was recorded.
+    /// </summary>
+    public string? EngineExecutionId { get; init; }
+
     public required IntakeRunState State { get; init; }
 
     /// <summary>The row's <c>versionnumber</c> as read: every write of the delivery is conditional on it.</summary>

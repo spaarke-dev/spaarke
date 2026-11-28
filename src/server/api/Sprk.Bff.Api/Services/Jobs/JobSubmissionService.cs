@@ -81,7 +81,50 @@ public class JobSubmissionService
         await SubmitToQueueAsync(job, _communicationQueueName, ct);
     }
 
-    private async Task SubmitToQueueAsync(JobContract job, string queueName, CancellationToken ct)
+    /// <summary>
+    /// Sends a job to a queue OTHER than the BFF's own, named by the caller: the intake engine's request queue
+    /// (spaarke-intake-pipeline-r1 task 014, ADR-004 A2). The envelope is the same Job Contract JSON; the queue name is a setting
+    /// (<c>IntakePipeline:Engine:RequestQueueName</c>), not a <see cref="ServiceBusOptions"/> field, because the queue exists only
+    /// on stamps that deploy the engine.
+    /// </summary>
+    /// <remarks>Virtual to enable unit-test overriding via <c>Mock&lt;JobSubmissionService&gt;</c>.</remarks>
+    public virtual async Task SubmitToNamedQueueAsync(JobContract job, string queueName, CancellationToken ct = default)
+    {
+        ValidateJob(job);
+        ArgumentException.ThrowIfNullOrWhiteSpace(queueName);
+
+        await SubmitToQueueAsync(job, queueName, ct);
+    }
+
+    /// <summary>
+    /// Schedules a job on the BFF's own jobs queue to become available at <paramref name="enqueueAt"/> (a Service Bus scheduled
+    /// message). The intake engine's hard timeout is one such message (task 014, ADR-052: a scheduled message handled by an
+    /// job handler, no timer service). Same envelope and MessageId rule as <see cref="SubmitJobAsync"/>.
+    /// </summary>
+    /// <remarks>Virtual to enable unit-test overriding via <c>Mock&lt;JobSubmissionService&gt;</c>.</remarks>
+    public virtual async Task ScheduleJobAsync(JobContract job, DateTimeOffset enqueueAt, CancellationToken ct = default)
+    {
+        ValidateJob(job);
+
+        await SubmitToQueueAsync(job, _queueName, ct, enqueueAt);
+    }
+
+    private static void ValidateJob(JobContract job)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+
+        if (job.JobId == Guid.Empty)
+        {
+            throw new ArgumentException("Job.JobId cannot be empty", nameof(job));
+        }
+
+        if (string.IsNullOrWhiteSpace(job.JobType))
+        {
+            throw new ArgumentException("Job.JobType cannot be null or empty", nameof(job));
+        }
+    }
+
+    private async Task SubmitToQueueAsync(JobContract job, string queueName, CancellationToken ct, DateTimeOffset? enqueueAt = null)
     {
         try
         {
@@ -119,6 +162,15 @@ public class JobSubmissionService
                     ["CreatedAt"] = job.CreatedAt.ToString("o")
                 }
             };
+
+            if (enqueueAt is { } due)
+            {
+                await sender.ScheduleMessageAsync(message, due, ct);
+                _logger.LogInformation(
+                    "Job {JobId} ({JobType}) scheduled on Service Bus queue {QueueName} for {EnqueueAt:o} with idempotency key {IdempotencyKey}",
+                    job.JobId, job.JobType, queueName, due, job.IdempotencyKey);
+                return;
+            }
 
             await sender.SendMessageAsync(message, ct);
 

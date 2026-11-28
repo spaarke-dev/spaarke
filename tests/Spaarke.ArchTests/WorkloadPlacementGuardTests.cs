@@ -61,7 +61,7 @@ public class WorkloadPlacementGuardTests
     // =============================================================================================
     private const int TimerServiceBaseline = 10; // 14 → 13: TodoGenerationService (UAC-r2 task 152); 13 → 12: SpeDashboardSyncService (UAC-r2 task 165); 12 → 11: DemoExpirationService → DemoExpirationJob (#1363); 11 → 10: InboundPollingBackupService (#2749) — all migrated to IScheduledJob
 
-    private const int OtherServiceBaseline = 9;
+    private const int OtherServiceBaseline = 10; // 9 → 10: IntakeEngineCompletionProcessor (spaarke-intake-pipeline-r1 task 014)
 
     private static readonly IReadOnlyDictionary<string, string> ExistingTimerServices = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -81,6 +81,7 @@ public class WorkloadPlacementGuardTests
     {
         ["ServiceBusJobProcessor"] = "Queue consumer — the ADR-004 host itself; Task.Delay(Infinite) only parks ExecuteAsync while the processor runs.",
         ["CommunicationJobProcessor"] = "Queue consumer for communication jobs (ADR-004 shape); parks on Task.Delay(Infinite).",
+        ["IntakeEngineCompletionProcessor"] = "Queue consumer for intake-engine-completions (ADR-004 shape, ADR-052 §1: a queue consumer is ADR-004 work); its own queue and a closed JobType switch because the engine identity holds Sender on that queue only; registered only when the queue name is set; parks on Task.Delay(Infinite).",
         ["UploadFinalizationWorker"] = "Office queue consumer with a bespoke message shape — a named non-conforming consumer (ADR-004 A1 §6, #977).",
         ["ProfileSummaryWorker"] = "Office queue consumer with a bespoke message shape — a named non-conforming consumer (ADR-004 A1 §6, #977).",
         ["IndexingWorkerHostedService"] = "Office queue consumer with a bespoke message shape — a named non-conforming consumer (ADR-004 A1 §6, #977, #978).",
