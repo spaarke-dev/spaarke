@@ -188,8 +188,12 @@ public sealed class DecisionPlanService
             nextSteps.Add(step);
         }
 
-        return new DecisionPlanResolution(
-            new ResolvedDecisionPlan(actions, nextSteps, DecisionActionCatalog.DismissalReasons(lane)), null);
+        // Task 017 (review F1): an intake approval plan is never dismissed (the commit route refuses it, by the same catalog predicate),
+        // so the plan offers no dismissal reason: the wizard shows Approve and Reject only, never a Dismiss that is always a 422.
+        var dismissalReasons = DecisionActionCatalog.IsIntakeApprovalPlan(actionCodes)
+            ? []
+            : DecisionActionCatalog.DismissalReasons(lane);
+        return new DecisionPlanResolution(new ResolvedDecisionPlan(actions, nextSteps, dismissalReasons), null);
     }
 
     private static DecisionPlanResolution Refused(string reason) => new(null, reason);

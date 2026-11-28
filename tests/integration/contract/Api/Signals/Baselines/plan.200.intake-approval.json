@@ -1,0 +1,72 @@
+{
+  "case": "plan.200.intake-approval",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"signalId\":\"c0430000-0000-4000-8000-000000000031\",\"lane\":\"Decide\",\"policyVersionId\":\"c0430000-0000-4000-8000-000000000e01\",\"actions\":[{\"code\":\"approve-intake\",\"label\":\"Approve\",\"workType\":null,\"recordClass\":\"Judgement\",\"isRecommended\":true,\"parameters\":[{\"code\":\"note\",\"label\":\"Approval note\",\"kind\":\"TextArea\",\"required\":false,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null}],\"effectLines\":[\"Records the approved version of each output document\",\"Continues the request: the output is returned to the requester\"],\"excludes\":[\"reject-intake\"],\"composer\":null,\"prefillTo\":null},{\"code\":\"reject-intake\",\"label\":\"Reject\",\"workType\":null,\"recordClass\":\"Judgement\",\"isRecommended\":false,\"parameters\":[{\"code\":\"reason\",\"label\":\"Reason for rejecting\",\"kind\":\"TextArea\",\"required\":true,\"hint\":\"Shown with the decision; required\",\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null}],\"effectLines\":[\"Ends this run without returning its output\",\"Moves the request back to In review\"],\"excludes\":[\"approve-intake\"],\"composer\":null,\"prefillTo\":null}],\"nextSteps\":[],\"dismissalReasons\":[],\"ruleDescription\":null,\"unfinished\":null}",
+  "bodyPretty": {
+    "signalId": "c0430000-0000-4000-8000-000000000031",
+    "lane": "Decide",
+    "policyVersionId": "c0430000-0000-4000-8000-000000000e01",
+    "actions": [
+      {
+        "code": "approve-intake",
+        "label": "Approve",
+        "workType": null,
+        "recordClass": "Judgement",
+        "isRecommended": true,
+        "parameters": [
+          {
+            "code": "note",
+            "label": "Approval note",
+            "kind": "TextArea",
+            "required": false,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          }
+        ],
+        "effectLines": [
+          "Records the approved version of each output document",
+          "Continues the request: the output is returned to the requester"
+        ],
+        "excludes": ["reject-intake"],
+        "composer": null,
+        "prefillTo": null
+      },
+      {
+        "code": "reject-intake",
+        "label": "Reject",
+        "workType": null,
+        "recordClass": "Judgement",
+        "isRecommended": false,
+        "parameters": [
+          {
+            "code": "reason",
+            "label": "Reason for rejecting",
+            "kind": "TextArea",
+            "required": true,
+            "hint": "Shown with the decision; required",
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          }
+        ],
+        "effectLines": ["Ends this run without returning its output", "Moves the request back to In review"],
+        "excludes": ["approve-intake"],
+        "composer": null,
+        "prefillTo": null
+      }
+    ],
+    "nextSteps": [],
+    "dismissalReasons": [],
+    "ruleDescription": null,
+    "unfinished": null
+  }
+}

@@ -108,6 +108,22 @@ public class IntakeApprovalPolicyDefinitionTests
     }
 
     [Fact]
+    public void TheDecisionPlan_OffersNoDismissalReason_BecauseTheCommitRouteNeverDismissesAnIntakeApproval()
+    {
+        var resolution = DecisionPlanService.Resolve(Compact(Version()["decisionPlan"]!), DecisionLane.Decide);
+
+        resolution.Plan!.DismissalReasons.Should().BeEmpty("the commit route refuses every dismissal of an intake approval, so none is offered");
+    }
+
+    [Fact]
+    public void AnOrdinaryDecidePlan_StillOffersItsDismissalReasons()
+    {
+        var resolution = DecisionPlanService.Resolve("""{"actions":["send-budget-inquiry","approve-variance"],"nextSteps":[]}""", DecisionLane.Decide);
+
+        resolution.Plan!.DismissalReasons.Should().Equal(DecisionActionCatalog.DismissalReasons(DecisionLane.Decide)).And.NotBeEmpty();
+    }
+
+    [Fact]
     public void TheDecisionPlan_IsRefusedAsADoLanePlan()
     {
         DecisionPlanService.Resolve(Compact(Version()["decisionPlan"]!), DecisionLane.Do).IsRefused.Should().BeTrue();

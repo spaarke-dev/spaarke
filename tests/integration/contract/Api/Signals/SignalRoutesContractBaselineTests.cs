@@ -264,6 +264,18 @@ public sealed partial class DecisionCommitServiceTests
             Verify("plan.200.do-lane", await GetAsync(rig, PlanRoute, DoSignal), 200);
         }
 
+        /// <summary>Intake pipeline task 017 (review F1): an intake approval plan offers Approve and Reject and NO dismissal reason, because
+        /// the commit route always refuses a dismissal of one. The ordinary plans (path-b, do-lane) keep their reasons in their baselines.</summary>
+        [Fact]
+        public async Task Plan_200_IntakeApproval_OffersNoDismissalReasons()
+        {
+            var observed = await GetAsync(IntakeRig(), PlanRoute);
+            var root = JsonDocument.Parse(observed.Body).RootElement;
+            root.GetProperty("actions").EnumerateArray().Select(a => a.GetProperty("code").GetString()).Should().Equal("approve-intake", "reject-intake");
+            root.GetProperty("dismissalReasons").GetArrayLength().Should().Be(0);
+            Verify("plan.200.intake-approval", observed, 200);
+        }
+
         [Fact]
         public async Task Plan_401_Anonymous() =>
             Verify("plan.401.anonymous", await GetAsync(new Rig(), PlanRoute, authenticated: false), 401);
