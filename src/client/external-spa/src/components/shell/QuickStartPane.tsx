@@ -40,6 +40,7 @@ import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import type { MeEntitlementsResponse } from '../../api/me-client';
 import { INTAKE_REQUEST_TYPE } from '../../api/intake-client';
 import { getIntakeWizard, isIntakeTypeAvailable } from '../../intake/intakeRegistry';
+import { PHONE_MEDIA } from '../phoneLayout';
 
 const useStyles = makeStyles({
   root: {
@@ -52,6 +53,7 @@ const useStyles = makeStyles({
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+    [PHONE_MEDIA]: { gridTemplateColumns: 'minmax(0, 1fr)' },
     gap: tokens.spacingHorizontalM,
   },
   cell: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },

@@ -19,6 +19,7 @@
 import * as React from 'react';
 import { makeStyles, shorthands, tokens, mergeClasses, Text } from '@fluentui/react-components';
 import { DismissRegular, type FluentIcon } from '@fluentui/react-icons';
+import { PHONE_MEDIA, TOUCH_TARGET } from '../phoneLayout';
 
 const useStyles = makeStyles({
   strip: {
@@ -28,6 +29,7 @@ const useStyles = makeStyles({
     flexWrap: 'wrap',
     // Room for the close circle that overhangs the selected tab's top edge.
     paddingTop: tokens.spacingVerticalS,
+    minWidth: 0,
   },
   tab: {
     position: 'relative',
@@ -51,6 +53,8 @@ const useStyles = makeStyles({
     marginBottom: `calc(-1 * ${tokens.strokeWidthThin})`,
     transitionProperty: 'background-color, color, border-color',
     transitionDuration: tokens.durationFaster,
+    // Phone (task 048): a 44px target; a long title shortens rather than widening the page.
+    [PHONE_MEDIA]: { minHeight: TOUCH_TARGET, boxSizing: 'border-box', maxWidth: '100%' },
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground2Hover,
       color: tokens.colorNeutralForeground1,
@@ -70,7 +74,10 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   icon: { display: 'inline-flex', fontSize: '16px', flexShrink: 0 },
-  label: { whiteSpace: 'nowrap' },
+  label: {
+    whiteSpace: 'nowrap',
+    [PHONE_MEDIA]: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' },
+  },
   // The SpaarkeAi-style close circle in the selected tab's upper-right corner.
   closeCircle: {
     position: 'absolute',
@@ -90,6 +97,21 @@ const useStyles = makeStyles({
     fontSize: '12px',
     lineHeight: '1',
     boxShadow: tokens.shadow2,
+    // Phone (task 048): an 18px corner circle is too small to tap, so the close control sits inline at the end of the
+    // tab as a 44px target.
+    [PHONE_MEDIA]: {
+      position: 'static',
+      flexShrink: 0,
+      width: TOUCH_TARGET,
+      height: TOUCH_TARGET,
+      marginTop: `calc(-1 * ${tokens.spacingVerticalS})`,
+      marginBottom: `calc(-1 * ${tokens.spacingVerticalS})`,
+      marginRight: `calc(-1 * ${tokens.spacingHorizontalM})`,
+      fontSize: '16px',
+      boxShadow: 'none',
+      ...shorthands.borderColor('transparent'),
+      backgroundColor: tokens.colorTransparentBackground,
+    },
     ':hover': {
       backgroundColor: tokens.colorStatusDangerBackground1,
       ...shorthands.borderColor(tokens.colorStatusDangerBorder1),

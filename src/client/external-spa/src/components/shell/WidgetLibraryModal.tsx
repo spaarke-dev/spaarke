@@ -16,12 +16,14 @@ import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import { ActionCard } from '@spaarke/ui-components/components/WorkspaceShell/ActionCard';
 import type { MeEntitlementsResponse } from '../../api/me-client';
 import { libraryWidgetsFor } from '../../registry/widgetRegistry';
+import { PHONE_MEDIA } from '../phoneLayout';
 
 const useStyles = makeStyles({
   intro: { color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalS },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+    [PHONE_MEDIA]: { gridTemplateColumns: 'minmax(0, 1fr)' },
     gap: tokens.spacingHorizontalM,
   },
   cell: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },

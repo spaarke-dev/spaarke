@@ -158,6 +158,18 @@ export function recordActionIdsOf(config: RecordTemplateConfig): RecordToolbarAc
 }
 
 /**
+ * The secondary toolbar actions (task 048, FR-32): at phone width they move into the RecordCommandBar's "More actions"
+ * menu, and the rest (Refresh and the type's own primary action: Download, Submit invoice, Edit) stay inline. Wider
+ * layouts show every action inline, as before. Keyed by action id, never by entity.
+ */
+export const PHONE_OVERFLOW_ACTIONS: ReadonlySet<RecordToolbarActionId> = new Set<RecordToolbarActionId>([
+  'copyLink',
+  'changeStatus',
+  'delete',
+  'history',
+]);
+
+/**
  * The visible label and the tooltip (= accessible name) of each record action (toolbar or section header). The tooltip contains the label (WCAG 2.5.3
  * label in name). Keyed by action id, never by entity.
  */
