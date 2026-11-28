@@ -5,7 +5,7 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-28 ~02:55Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-28 ~04:50Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -13,13 +13,13 @@
 |---|---|
 | **Mode** | Wrap-up, extended (round 90). `uac-r2` is authoritative: it reviews peers as an access gate and runs EVERY dev deploy. Live actions need the owner's go IN THIS SESSION; a deploy needs the owner to name the exact SHA here. A go relayed by another session is not a go. ≤ 2 agents at once. |
 | **Active work** | None in flight. #3317 fix MERGED (PR #3324, squash `bc22f35481`, owner go "Yes merge" 2026-11-28; office-scope job cancelled at its 20-min cap = known stall); decision recorded in `notes/decisions.md`. Not deployed. |
-| **Dev BFF (CURRENT)** | `b84fa5f061` (= af8a5547ef + mcp-r2 file probe SpaarkeMCP_spike_return_file), owner go "Go BFF deploy b84fa5f061"; deploy t0 04:13:02Z 2026-11-28 from `C:/wtdep34`, DLL SHA-256 C1F925CC… = local, healthz 200, tools/list 10. 30-min GATE due ~04:43Z (pending). Rollback `af8a5547ef` (`C:/wtdep33`). |
+| **Dev BFF (CURRENT)** | `b84fa5f061` (= af8a5547ef + mcp-r2 file probe SpaarkeMCP_spike_return_file), owner go "Go BFF deploy b84fa5f061"; deploy t0 04:13:02Z 2026-11-28 from `C:/wtdep34`, DLL SHA-256 C1F925CC… = local, healthz 200, tools/list 10. 30-min GATE PASS 04:43Z (39 req, 0 5xx, 0 exceptions, 0 external, 0 SdapProblem, healthz 200); GATE notices sent. Owner testing the probe. Rollback `af8a5547ef` (`C:/wtdep33`). |
 | **Dev SPA** | c438119bca. Invoice Review page: sha256 00fb8d16…ba1d from c55b9812d8 (21:44Z). |
 | **Agents running** | None. |
 
 ## Next dev BFF candidate (needs the owner's exact-SHA go here)
 - Cleared server inputs on master, not on dev: **7f48825d90** (#3242 MCP Host/Origin filter, LogOnly default — still CHECK its src/server diff and that LogOnly is the default when the setting is absent), **8b38e97667** (#3316 ISS-010 D1 owner-lookup cache, approved; merged patch-id 179cfb35ec86 = reviewed), **bf7d6a969f** (#3308 ClosesTodo fail-closed, approved), **4f9e371445** (#3311 spa-r4 044+047, 047 approved). Plus **bc22f35481** (#3324, #3317 Read|AppendTo on comm create-task) and **a7712744d4** (intake #3253 merge; all items approved incl. late d83e269b5d = stage bookkeeping only). **f0f1e810bd** (#3322 spa-r4 045, approved, merged).
-- File probe (b84fa5f061) lives only on spike/spe-file-probe-on-dev, NOT on spike/specialist-agents-phase0: before the next candidate ask mcp-r2 whether it must stay on dev; if yes re-layer it (or have specialist merge that branch). ontology-r1 waits for the candidate with bf7d6a969f + 8b38e97667 before its 237 re-check.
+- File probe (b84fa5f061) lives only on spike/spe-file-probe-on-dev, NOT on spike/specialist-agents-phase0: owner deciding (via mcp-r2) whether it must stay; DEFAULT = next candidate may drop it; re-layer = one cherry-pick of b84fa5f061. ontology-r1 waits for the candidate with bf7d6a969f + 8b38e97667 before its 237 re-check.
 - Live is a spike tip: before a candidate, ask specialist-legal-agents-r1 to re-merge master into `spike/specialist-agents-phase0`; verify the spike patch-id equals the reviewed spike (48c5630a3f21).
 - Before: `issecured.ps1` (064/065 condition). After: smoke (`after30.ps1`), `livecheck.ps1`, 30-min gate (`gate-now.ps1 <t0>`, `gatesdap.ps1`), BEFORE/LIVE/GATE notices to the 8 (CLAUDE-session summary lists pipes). ontology-r1 runs its zz- re-check of 237 only AFTER my GATE notice (agreed).
 
