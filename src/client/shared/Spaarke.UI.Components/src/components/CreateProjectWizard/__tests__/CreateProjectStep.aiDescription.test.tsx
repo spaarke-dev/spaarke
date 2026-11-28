@@ -5,7 +5,9 @@
  *   - the button is disabled until the Project Name has text, and enabled after;
  *   - clicking it asks the shared helper for a project draft (name, type, practice area) and puts the draft in the
  *     description, which the user can then edit;
- *   - a failed draft shows the helper's existing fallback text (never a blank or a crash), and the button recovers;
+ *   - a failed draft (helper reports isFallback, or a real 429) keeps the user's text and shows a short warning, and
+ *     the button recovers; a success replaces the text with no warning;
+ *   - a host that passes no authenticated fetch / BFF base url gets no button;
  *   - while it runs the button reads "Generating…" and is disabled.
  */
 import * as React from 'react';
@@ -14,6 +16,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { CreateProjectStep } from '../CreateProjectStep';
+import { AI_DRAFT_UNAVAILABLE_MESSAGE } from '../../CreateMatterWizard/matterService';
 import { EMPTY_PROJECT_FORM } from '../projectFormTypes';
 
 const mockStream = jest.fn();
@@ -33,7 +36,10 @@ const dataService = {
 const authFetch = jest.fn() as unknown as typeof fetch;
 const BFF = 'https://bff.example.test';
 
-function renderStep(initial: Partial<typeof EMPTY_PROJECT_FORM> = {}) {
+function renderStep(
+  initial: Partial<typeof EMPTY_PROJECT_FORM> = {},
+  hostOverrides: { authenticatedFetch?: typeof fetch; bffBaseUrl?: string } = {}
+) {
   const props = {
     dataService,
     onValidChange: jest.fn(),
@@ -42,6 +48,7 @@ function renderStep(initial: Partial<typeof EMPTY_PROJECT_FORM> = {}) {
     bffBaseUrl: BFF,
     // A seeded name makes the step start from these values (and skip the native AI pre-fill).
     initialFormValues: { ...EMPTY_PROJECT_FORM, ...initial },
+    ...hostOverrides,
   };
   renderWithProviders(<CreateProjectStep {...props} />);
   return props;
@@ -136,17 +143,58 @@ describe('CreateProjectStep — Generate with AI (task 239)', () => {
     expect(screen.getByText('Generate with AI')).toBeInTheDocument();
   });
 
-  it('an unavailable AI shows the helper’s fallback text and the button recovers (existing AI error treatment)', async () => {
-    // The real helper is used here: no host, so it answers with its project fallback.
-    mockStream.mockImplementation(
-      jest.requireActual('../../CreateMatterWizard/matterService').streamAiDraftDescription
-    );
-    renderStep({ projectName: 'Data Room Migration', practiceAreaName: 'Employment' });
+  it('a failed draft keeps the text the user typed, shows the warning, and the button recovers', async () => {
+    mockStream.mockResolvedValue({ summary: '', isFallback: true });
+    renderStep({ projectName: 'Data Room Migration', description: 'My own notes' });
 
     fireEvent.click(generateButton());
 
-    await waitFor(() => expect(descriptionBox().value).toContain('project, "Data Room Migration"'));
-    expect(descriptionBox().value).not.toMatch(/matter/i);
+    expect(await screen.findByText(AI_DRAFT_UNAVAILABLE_MESSAGE)).toBeInTheDocument();
+    expect(descriptionBox()).toHaveValue('My own notes');
     expect(generateButton()).toBeEnabled();
+  });
+
+  it('a real non-OK response (rate limit) keeps the typed text and shows the warning', async () => {
+    // The real helper against a fetch that answers 429: no canned text, the user's text survives.
+    mockStream.mockImplementation(
+      jest.requireActual('../../CreateMatterWizard/matterService').streamAiDraftDescription
+    );
+    const rateLimited = jest.fn(
+      async () => ({ ok: false, status: 429, text: async () => 'Too many requests', body: null }) as unknown as Response
+    );
+    renderStep(
+      { projectName: 'Data Room Migration', description: 'My own notes' },
+      { authenticatedFetch: rateLimited as unknown as typeof fetch }
+    );
+
+    fireEvent.click(generateButton());
+
+    expect(await screen.findByText(AI_DRAFT_UNAVAILABLE_MESSAGE)).toBeInTheDocument();
+    expect(rateLimited).toHaveBeenCalledTimes(1);
+    expect(descriptionBox()).toHaveValue('My own notes');
+  });
+
+  it('a successful draft replaces the text and shows no warning (and clears an earlier warning)', async () => {
+    mockStream.mockResolvedValueOnce({ summary: '', isFallback: true });
+    renderStep({ projectName: 'P', description: 'Old text' });
+
+    fireEvent.click(generateButton());
+    expect(await screen.findByText(AI_DRAFT_UNAVAILABLE_MESSAGE)).toBeInTheDocument();
+
+    mockStream.mockResolvedValueOnce({ summary: 'Fresh draft.' });
+    fireEvent.click(generateButton());
+
+    await waitFor(() => expect(descriptionBox()).toHaveValue('Fresh draft.'));
+    expect(screen.queryByText(AI_DRAFT_UNAVAILABLE_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['no authenticated fetch', { authenticatedFetch: undefined }],
+    ['no BFF base url', { bffBaseUrl: undefined }],
+  ])('a host with %s shows no "Generate with AI" button', (_label, overrides) => {
+    renderStep({ projectName: 'P' }, overrides);
+
+    expect(screen.queryByRole('button', { name: /generate description with ai/i })).not.toBeInTheDocument();
+    expect(descriptionBox()).toBeInTheDocument();
   });
 });

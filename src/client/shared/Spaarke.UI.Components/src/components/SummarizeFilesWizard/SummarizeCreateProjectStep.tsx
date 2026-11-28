@@ -26,6 +26,10 @@ export interface ISummarizeCreateProjectStepProps {
   onFormValues: (values: ICreateProjectFormState) => void;
   /** Initial form values (preserved on back-navigation). */
   initialFormValues?: ICreateProjectFormState;
+  /** Authenticated fetch for BFF calls — "Generate with AI" is hidden without it (and bffBaseUrl). */
+  authenticatedFetch?: typeof fetch;
+  /** BFF API base URL. */
+  bffBaseUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -38,6 +42,8 @@ export const SummarizeCreateProjectStep: React.FC<ISummarizeCreateProjectStepPro
   onValidChange,
   onFormValues,
   initialFormValues,
+  authenticatedFetch,
+  bffBaseUrl,
 }) => {
   return (
     <CreateProjectStep
@@ -46,6 +52,8 @@ export const SummarizeCreateProjectStep: React.FC<ISummarizeCreateProjectStepPro
       onFormValues={onFormValues}
       uploadedFiles={uploadedFiles}
       initialFormValues={initialFormValues}
+      authenticatedFetch={authenticatedFetch}
+      bffBaseUrl={bffBaseUrl}
     />
   );
 };

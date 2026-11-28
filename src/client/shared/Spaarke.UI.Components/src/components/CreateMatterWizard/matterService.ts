@@ -555,9 +555,20 @@ export async function searchPracticeAreas(dataService: IDataService, nameFilter:
 // ---------------------------------------------------------------------------
 
 export interface IAiDraftSummaryResponse {
-  /** The generated summary text. */
+  /** The generated summary text. Empty when the draft failed (see {@link isFallback}). */
   summary: string;
+  /**
+   * True when no draft could be produced (no host, HTTP failure such as 429 rate limit or 503 AI disabled,
+   * timeout, network error, error chunk, empty stream). `summary` is then empty and the caller must leave the
+   * user's existing text untouched and tell the user the AI draft is unavailable.
+   */
+  isFallback?: boolean;
 }
+
+/** The user-facing line a step shows when {@link IAiDraftSummaryResponse.isFallback} is true. No raw error text. */
+export const AI_DRAFT_UNAVAILABLE_MESSAGE = 'AI draft is unavailable right now. Try again later.';
+
+const AI_DRAFT_FAILED: IAiDraftSummaryResponse = { summary: '', isFallback: true };
 
 export interface StreamAiSummaryCallbacks {
   onProgress?: (stepId: string) => void;
@@ -579,7 +590,8 @@ export interface IAiDraftRequest {
  * One helper serves both Create wizards (the endpoint is POST /api/workspace/matters/ai-summary;
  * a project adds `recordKind: 'project'`, a matter's body is unchanged from before task 239).
  * Fires onProgress callbacks as the backend emits progress events.
- * Returns a fallback response if the endpoint is unavailable (graceful degradation).
+ * When the endpoint is unavailable or fails, resolves `{ summary: '', isFallback: true }` (never throws) so the
+ * caller keeps the user's text and shows {@link AI_DRAFT_UNAVAILABLE_MESSAGE}.
  *
  * @param request - The record kind and the fields to draft from
  * @param callbacks - SSE progress callbacks
@@ -596,14 +608,10 @@ export async function streamAiDraftDescription(
 ): Promise<IAiDraftSummaryResponse> {
   const { onProgress } = callbacks;
   const { kind, name, type, practiceArea } = request;
-  const fallback = () =>
-    kind === 'project'
-      ? buildFallbackProjectDescription(name, type, practiceArea)
-      : buildFallbackSummary(name, type, practiceArea);
 
-  // If no authenticatedFetch is provided, return fallback
+  // If no authenticatedFetch is provided, there is no draft to return
   if (!authenticatedFetch || !bffBaseUrl) {
-    return fallback();
+    return AI_DRAFT_FAILED;
   }
 
   try {
@@ -648,9 +656,9 @@ export async function streamAiDraftDescription(
       },
     });
 
-    return resultSummary ? { summary: resultSummary } : fallback();
+    return resultSummary ? { summary: resultSummary } : AI_DRAFT_FAILED;
   } catch {
-    return fallback();
+    return AI_DRAFT_FAILED;
   }
 }
 
@@ -748,29 +756,3 @@ export async function searchOrganizationsAsLookup(
 // Re-exported from the canonical shared implementation (services/userLookup) rather
 // than kept as a second copy here (#2866). Existing imports from this module keep working.
 export { searchUsersAsLookup } from '../../services/userLookup';
-
-function buildFallbackSummary(matterName: string, matterType: string, practiceArea: string): IAiDraftSummaryResponse {
-  const type = matterType || 'general';
-  const area = practiceArea || 'legal services';
-  return {
-    summary:
-      `This ${type.toLowerCase()} matter, "${matterName}", has been created in the ${area} practice area. ` +
-      `Key stakeholders have been identified and initial documentation has been uploaded for review. ` +
-      `Next steps include counsel assignment and matter planning. ` +
-      `Please review and update this summary with specific matter objectives and timeline.`,
-  };
-}
-
-function buildFallbackProjectDescription(
-  projectName: string,
-  projectType: string,
-  practiceArea: string
-): IAiDraftSummaryResponse {
-  const type = projectType ? `${projectType.toLowerCase()} ` : '';
-  const area = practiceArea || 'legal services';
-  return {
-    summary:
-      `This ${type}project, "${projectName}", is being set up in the ${area} practice area. ` +
-      `Please review and update this description with the project's objectives, scope and timeline.`,
-  };
-}

@@ -4,7 +4,8 @@
  *   - a matter's request body is exactly what it was before task 239 (no recordKind);
  *   - a project sends recordKind "project" with projectName / projectType / practiceArea;
  *   - the streamed result is returned and progress steps are reported;
- *   - every failure (no host, HTTP failure, error chunk, empty stream) degrades to a fallback in the right wording.
+ *   - every failure (no host, HTTP failure, error chunk, network error, empty stream) resolves an explicit
+ *     `isFallback: true` with no canned text, so the caller keeps the user's text.
  */
 import { TextEncoder as NodeTextEncoder, TextDecoder as NodeTextDecoder } from 'util';
 import { streamAiDraftDescription, streamAiDraftSummary } from '../matterService';
@@ -114,13 +115,14 @@ describe('streamAiDraftDescription / streamAiDraftSummary', () => {
     expect(steps).toEqual(['analyzing', 'delivering']);
   });
 
-  describe('failure degrades to the fallback in the right wording', () => {
+  describe('every failure resolves { summary: "", isFallback: true } and never canned text', () => {
     const project = {
       kind: 'project' as const,
       name: 'Data Room Migration',
       type: 'Transaction',
       practiceArea: 'Employment',
     };
+    const failed = { summary: '', isFallback: true };
 
     it.each([
       ['no authenticated fetch', undefined, undefined],
@@ -128,8 +130,7 @@ describe('streamAiDraftDescription / streamAiDraftSummary', () => {
     ])('%s', async (_label, fetchFn, base) => {
       const result = await streamAiDraftDescription(project, {}, undefined, fetchFn as never, base);
 
-      expect(result.summary).toContain('project, "Data Room Migration"');
-      expect(result.summary).not.toMatch(/matter/i);
+      expect(result).toEqual(failed);
     });
 
     it('an error chunk from the server', async () => {
@@ -137,29 +138,41 @@ describe('streamAiDraftDescription / streamAiDraftSummary', () => {
         sse({ type: 'error', content: 'An error occurred while generating the summary.' }, '[DONE]')
       );
 
-      const result = await streamAiDraftDescription(project, {}, undefined, fetchMock, BFF);
-
-      expect(result.summary).toContain('project, "Data Room Migration"');
+      expect(await streamAiDraftDescription(project, {}, undefined, fetchMock, BFF)).toEqual(failed);
     });
 
     it('an HTTP failure', async () => {
-      const result = await streamAiDraftDescription(project, {}, undefined, streamingFetch('', false), BFF);
+      expect(await streamAiDraftDescription(project, {}, undefined, streamingFetch('', false), BFF)).toEqual(failed);
+    });
 
-      expect(result.summary).toContain('project, "Data Room Migration"');
+    it('a thrown network error', async () => {
+      const fetchMock = jest.fn(async () => {
+        throw new Error('network down');
+      });
+
+      expect(await streamAiDraftDescription(project, {}, undefined, fetchMock as never, BFF)).toEqual(failed);
     });
 
     it('a stream that ends with no result', async () => {
-      const result = await streamAiDraftDescription(project, {}, undefined, streamingFetch(sse('[DONE]')), BFF);
-
-      expect(result.summary).toContain('project, "Data Room Migration"');
+      expect(await streamAiDraftDescription(project, {}, undefined, streamingFetch(sse('[DONE]')), BFF)).toEqual(
+        failed
+      );
     });
 
-    it('a matter keeps its original fallback wording', async () => {
-      const result = await streamAiDraftSummary('Acme v. Beta', 'Litigation', 'Employment');
+    it('a matter fails the same way (no canned text)', async () => {
+      expect(await streamAiDraftSummary('Acme v. Beta', 'Litigation', 'Employment')).toEqual(failed);
+    });
 
-      expect(result.summary).toContain(
-        'This litigation matter, "Acme v. Beta", has been created in the Employment practice area.'
+    it('a success carries no isFallback flag', async () => {
+      const result = await streamAiDraftDescription(
+        project,
+        {},
+        undefined,
+        streamingFetch(sse(resultChunk('Draft.'), '[DONE]')),
+        BFF
       );
+
+      expect(result).toEqual({ summary: 'Draft.' });
     });
   });
 });

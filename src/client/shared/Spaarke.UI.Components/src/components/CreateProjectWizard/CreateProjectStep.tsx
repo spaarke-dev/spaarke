@@ -37,6 +37,8 @@ import {
   Button,
   Field,
   Input,
+  MessageBar,
+  MessageBarBody,
   Skeleton,
   SkeletonItem,
   Spinner,
@@ -48,7 +50,7 @@ import {
 import { SparkleRegular } from '@fluentui/react-icons';
 import { ICreateProjectFormState, EMPTY_PROJECT_FORM } from './projectFormTypes';
 import { ProjectService } from './projectService';
-import { streamAiDraftDescription } from '../CreateMatterWizard/matterService';
+import { AI_DRAFT_UNAVAILABLE_MESSAGE, streamAiDraftDescription } from '../CreateMatterWizard/matterService';
 import { DataverseLookupField } from '../LookupField';
 import { AiFieldTag } from '../AiFieldTag';
 import { SecureProjectSection } from './SecureProjectSection';
@@ -248,6 +250,9 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
 
   // ── AI draft description (task 239) ─────────────────────────────────────
   const [isGeneratingDescription, setIsGeneratingDescription] = React.useState(false);
+  const [descriptionDraftFailed, setDescriptionDraftFailed] = React.useState(false);
+  // The button needs a host to call; without one (a host that wires neither prop) it is hidden.
+  const canGenerateDescription = !!authFetch && !!bffBaseUrl;
 
   // ── AI pre-fill state ───────────────────────────────────────────────────
   const [aiState, setAiState] = React.useState<IAiPrefillState>({
@@ -387,9 +392,10 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
   }, []);
 
   // "Generate with AI": drafts the description from the name, type and practice area; the user edits the result.
-  // Any failure inside the shared helper degrades to its project fallback text, as Create Matter's button does.
+  // A failed draft (rate limit, AI disabled, timeout, network) leaves the user's text as it is and shows a warning.
   const handleGenerateDescription = React.useCallback(async () => {
     setIsGeneratingDescription(true);
+    setDescriptionDraftFailed(false);
     try {
       const result = await streamAiDraftDescription(
         {
@@ -403,7 +409,11 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
         authFetch,
         bffBaseUrl
       );
-      setFormState(prev => ({ ...prev, description: result.summary }));
+      if (result.isFallback) {
+        setDescriptionDraftFailed(true);
+      } else {
+        setFormState(prev => ({ ...prev, description: result.summary }));
+      }
     } finally {
       setIsGeneratingDescription(false);
     }
@@ -536,17 +546,24 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
                 Project Description
                 {isAiField('description') && <AiFieldTag />}
               </span>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={isGeneratingDescription ? <Spinner size="extra-tiny" /> : <SparkleRegular />}
-                onClick={handleGenerateDescription}
-                disabled={isGeneratingDescription || !formState.projectName.trim()}
-                aria-label="Generate description with AI"
-              >
-                {isGeneratingDescription ? 'Generating\u2026' : 'Generate with AI'}
-              </Button>
+              {canGenerateDescription && (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={isGeneratingDescription ? <Spinner size="extra-tiny" /> : <SparkleRegular />}
+                  onClick={handleGenerateDescription}
+                  disabled={isGeneratingDescription || !formState.projectName.trim()}
+                  aria-label="Generate description with AI"
+                >
+                  {isGeneratingDescription ? 'Generating\u2026' : 'Generate with AI'}
+                </Button>
+              )}
             </div>
+            {descriptionDraftFailed && (
+              <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalXS }}>
+                <MessageBarBody>{AI_DRAFT_UNAVAILABLE_MESSAGE}</MessageBarBody>
+              </MessageBar>
+            )}
             <Textarea
               value={formState.description}
               onChange={handleDescriptionChange}

@@ -35,7 +35,8 @@ public class WorkspaceMatterAiSummaryTests
         "Do not use placeholder text, hypothetical examples, or state that you are an AI.\n" +
         "Respond with only the summary text — no headings, labels, or JSON.";
 
-    // The raw-string prompt takes the source file's line endings (CRLF on a Windows checkout, LF on Linux CI).
+    // The raw-string prompt takes the source file's line endings; the repo attributes force CRLF for *.cs on every OS,
+    // so the expected text is compared with line endings normalised.
     private static string Norm(string? s) => (s ?? string.Empty).Replace("\r\n", "\n");
 
     /// <summary>The summary carried by the SSE "result" chunk, or null when the stream has none.</summary>
@@ -200,6 +201,62 @@ public class WorkspaceMatterAiSummaryTests
         status.Should().Be(400);
         body.Should().Contain("recordKind must be");
         prompt.Should().BeNull();
+    }
+
+    // ---- over-length prompt fields are refused ----
+
+    private static string Long(int extra = 1) => new('x', WorkspaceMatterEndpoints.MaxAiSummaryFieldLength + extra);
+
+    [Theory]
+    [InlineData("name", "matterName")]
+    [InlineData("type", "matterType")]
+    [InlineData("area", "practiceArea")]
+    public async Task Handle_MatterFieldOverTheCap_Is400_AndNothingIsSentToTheAi(string field, string expectedName)
+    {
+        var request = new AiSummaryRequest(
+            field == "name" ? Long() : "Acme v. Beta",
+            field == "type" ? Long() : "Litigation",
+            field == "area" ? Long() : "Employment");
+
+        var (status, body, prompt) = await RunAsync(request);
+
+        status.Should().Be(400);
+        body.Should().Contain($"{expectedName} must be 500 characters or fewer.");
+        prompt.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("name", "projectName")]
+    [InlineData("type", "projectType")]
+    [InlineData("area", "practiceArea")]
+    public async Task Handle_ProjectFieldOverTheCap_Is400_AndNothingIsSentToTheAi(string field, string expectedName)
+    {
+        var request = new AiSummaryRequest(
+            "", "",
+            field == "area" ? Long() : "Employment",
+            RecordKind: "project",
+            ProjectName: field == "name" ? Long() : "Data Room Migration",
+            ProjectType: field == "type" ? Long() : "Transaction");
+
+        var (status, body, prompt) = await RunAsync(request);
+
+        status.Should().Be(400);
+        body.Should().Contain($"{expectedName} must be 500 characters or fewer.");
+        prompt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Handle_FieldsExactlyAtTheCap_AreAccepted_ForBothKinds()
+    {
+        var atCap = Long(extra: 0);
+
+        var matter = await RunAsync(new AiSummaryRequest(atCap, atCap, atCap));
+        var project = await RunAsync(new AiSummaryRequest("", "", atCap, RecordKind: "project", ProjectName: atCap, ProjectType: atCap));
+
+        matter.Status.Should().Be(200);
+        matter.Prompt.Should().NotBeNull();
+        project.Status.Should().Be(200);
+        project.Prompt.Should().NotBeNull();
     }
 
     [Fact]

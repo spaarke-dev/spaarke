@@ -193,9 +193,13 @@ public static class WorkspaceMatterEndpoints
         return null;
     }
 
+    /// <summary>Longest value accepted for any prompt field (name, type, practice area); the values go into the AI prompt.</summary>
+    internal const int MaxAiSummaryFieldLength = 500;
+
     /// <summary>
     /// Returns the 400 detail for an invalid request, or null when it is valid.
-    /// A matter needs matterName (unchanged); a project needs projectName; an unknown recordKind is refused.
+    /// A matter needs matterName (unchanged); a project needs projectName; an unknown recordKind is refused;
+    /// every prompt field is capped at <see cref="MaxAiSummaryFieldLength"/> characters.
     /// </summary>
     internal static string? ValidateAiSummaryRequest(AiSummaryRequest? request)
     {
@@ -203,9 +207,24 @@ public static class WorkspaceMatterEndpoints
         if (kind is null)
             return "recordKind must be 'matter' or 'project'.";
         if (kind == AiSummaryKind.Project)
-            return string.IsNullOrWhiteSpace(request?.ProjectName) ? "projectName is required." : null;
-        return string.IsNullOrWhiteSpace(request?.MatterName) ? "matterName is required." : null;
+        {
+            if (string.IsNullOrWhiteSpace(request?.ProjectName))
+                return "projectName is required.";
+            return TooLong("projectName", request.ProjectName)
+                ?? TooLong("projectType", request.ProjectType)
+                ?? TooLong("practiceArea", request.PracticeArea);
+        }
+        if (string.IsNullOrWhiteSpace(request?.MatterName))
+            return "matterName is required.";
+        return TooLong("matterName", request.MatterName)
+            ?? TooLong("matterType", request.MatterType)
+            ?? TooLong("practiceArea", request.PracticeArea);
     }
+
+    private static string? TooLong(string field, string? value) =>
+        value is not null && value.Length > MaxAiSummaryFieldLength
+            ? $"{field} must be {MaxAiSummaryFieldLength} characters or fewer."
+            : null;
 
     /// <summary>Builds the prompt for a validated request. The matter prompt is byte-for-byte what it was before task 239.</summary>
     internal static string BuildAiSummaryPrompt(AiSummaryRequest request, AiSummaryKind kind) =>
@@ -284,7 +303,6 @@ public static class WorkspaceMatterEndpoints
         }
 
         var kind = isProject ? AiSummaryKind.Project : AiSummaryKind.Matter;
-        var recordName = isProject ? request!.ProjectName : request!.MatterName;
         var recordLower = recordLabel.ToLowerInvariant();
 
         response.ContentType = "text/event-stream";
@@ -293,9 +311,18 @@ public static class WorkspaceMatterEndpoints
         response.Headers["X-Accel-Buffering"] = "no";
         httpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
 
-        logger.LogInformation(
-            "{RecordLabel} AI summary SSE request. RecordName={RecordName}, CorrelationId={CorrelationId}",
-            recordLabel, recordName, httpContext.TraceIdentifier);
+        if (isProject)
+        {
+            logger.LogInformation(
+                "Project AI summary SSE request. ProjectName={ProjectName}, CorrelationId={CorrelationId}",
+                request!.ProjectName, httpContext.TraceIdentifier);
+        }
+        else
+        {
+            logger.LogInformation(
+                "Matter AI summary SSE request. MatterName={MatterName}, CorrelationId={CorrelationId}",
+                request!.MatterName, httpContext.TraceIdentifier);
+        }
 
         try
         {
