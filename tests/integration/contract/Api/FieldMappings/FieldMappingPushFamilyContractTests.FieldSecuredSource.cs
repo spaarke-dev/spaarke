@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json.Nodes;
 using FluentAssertions;
+using Moq;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Xunit;
 
@@ -103,25 +104,36 @@ public partial class FieldMappingPushFamilyContractTests
             .Should().Contain($"sprk_matter.{Column} into {Column}").And.NotContain(Secret);
     }
 
-    /// <summary>Must not fire (K): a push that writes no child logs no copy, though the app-only read was made.</summary>
-    [Fact]
-    public async Task Apply_WhenNoChildIsWritten_LogsNoCopy()
+    /// <summary>Must not fire (K): a push that writes no child logs no copy, though the app-only read was made: no confirmed
+    /// child is one the server derives, or the one child's write fails. MUTATION: logging every lifted rule after the loop,
+    /// whatever was written, fails the write-fails case.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Apply_WhenNoChildIsWritten_LogsNoCopy(bool theWriteFails)
     {
         await using var world = await StartWithAValueOnlyTheAppOnlyReadReturnsAsync([ChildA, ChildB, ChildC]);
+        if (theWriteFails)
+        {
+            world.Host.FieldMappings
+                .Setup(f => f.UpdateExistingRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new HttpRequestException("the write failed"));
+        }
 
         var response = await world.PostAsync(new
         {
             sourceEntity = "sprk_matter",
             sourceRecordId = MatterId,
             targetEntity = "sprk_event",
-            childIds = new[] { Stranger },
+            childIds = new[] { theWriteFails ? ChildA : Stranger },
         });
 
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.Should().Be(HttpStatusCode.OK, body);
         body.Should().NotContain(Secret);
+        JsonNode.Parse(body)!["updatedCount"]!.GetValue<int>().Should().Be(0);
         world.Host.AppOnly.Reads.Should().ContainSingle();
-        world.Host.Writes.Should().BeEmpty();
         world.Host.Logs.Should().NotContain(l => l.Message.Contains(PushLogMarker), "nothing was written, so nothing was copied");
     }
 
