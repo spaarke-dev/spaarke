@@ -109,6 +109,7 @@ Full log: `notes/decisions.md`. Owner decisions O-1–O-26: `design.md` §0.
 - 2026-11-08 — Under machine load, Git Bash `grep`/`az` calls hang, and a full `Sprk.Bff.Api.Tests` run shows dozens of unrelated failures, each taking 2–6 minutes (host start timeouts). Fix: use the Grep/Read tools and PowerShell for az. Re-run the failing classes in isolation before treating a failure as real (2026-11-08: all 5,162 passed).
 - 2026-11-08 — In PowerShell, `az … --query "length(@)"` breaks: az is a `.cmd`, so cmd mangles the `@`. Fix: `-o json | ConvertFrom-Json` and count in PowerShell. The console also shows the en dash as `�`; the stored name is correct (verify via Graph).
 - 2026-11-08 — `23610794-67de-4e6c-be61-ff80cc8cbe7f` is the External Access "Spaarke" Teams app (`src/client/external-spa/appPackage/manifest.json`), not the connector. The Dev Portal OAuth registration is under **Tools → OAuth client registration**, not **Apps**.
+- 2026-11-28 (from acclerator-r1's Word tests) — The M365 admin center (**Tools › Upload**) refuses a plugin app id that was ever uploaded through **Cowork › Customize › Plugins**, even after removal; the only error is "We couldn't validate this manifest file". Fix: give Cowork test uploads and the admin deployment different app ids. Also from those tests: Word for Windows loads instructions-only plugin skills and calls Spaarke MCP tools from them, but Python skill scripts do not run.
 
 ## 7. Key documents
 
