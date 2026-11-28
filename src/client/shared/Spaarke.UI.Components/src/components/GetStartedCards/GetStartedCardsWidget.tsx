@@ -24,6 +24,7 @@
  *   Create Matter     → 'create-matter-wizard'    (dispatched as widget_load)
  *   Create Project    → 'create-project-wizard'   (dispatched as widget_load)
  *   Assign Work       → 'assign-work'             (launcher — handled by task 042)
+ *   Create Invoice    → 'create-invoice'          (launcher — opens the Create Invoice wizard in-app; ebilling-r1 def071)
  *   Summarize Files   → 'document-upload-wizard'  (dispatched as widget_load)
  *   Find Similar      → 'find-similar-wizard'     (dispatched as widget_load)
  *   Send Email        → 'email-compose'           (dispatched as widget_load)
@@ -82,6 +83,7 @@ import {
   DocumentAddRegular,
   FolderAddRegular,
   PeopleAddRegular,
+  ReceiptRegular,
   DocumentMultipleRegular,
   SearchRegular,
   MailRegular,
@@ -111,6 +113,7 @@ export type GetStartedCardId =
   | 'create-matter-wizard'
   | 'create-project-wizard'
   | 'assign-work'
+  | 'create-invoice'
   | 'document-upload-wizard'
   | 'find-similar-wizard'
   | 'email-compose'
@@ -139,7 +142,7 @@ export interface GetStartedCardsWidgetProps {
 
 /**
  * Internal shape used to render each card. Not exported — consumers shouldn't
- * need to construct one. The widget renders a fixed list of 7 cards per FR-18.
+ * need to construct one. The widget renders a fixed list of cards (7 per FR-18, plus Create Invoice from ebilling-r1 def071).
  */
 interface CardDefinition {
   /** Card identifier — drives the `onCardClick` callback argument. */
@@ -178,6 +181,13 @@ const CARDS: readonly CardDefinition[] = Object.freeze([
     label: 'Assign Work',
     description: 'Open the Create Work Assignment wizard.',
     icon: PeopleAddRegular,
+  },
+  {
+    // ebilling-r1 def071: opens the Create Invoice wizard in-app (the Record step picks the record).
+    id: 'create-invoice',
+    label: 'Create Invoice',
+    description: 'Submit an invoice PDF against a matter, project or work assignment.',
+    icon: ReceiptRegular,
   },
   {
     id: 'document-upload-wizard',

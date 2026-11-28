@@ -38,7 +38,7 @@ import {
 
 import { InvoiceSubmissionWizard } from '../InvoiceSubmission';
 import type { InvoiceCorrectionTarget, InvoiceSubmissionStatusView } from '../InvoiceSubmission';
-import type { IDataService } from '../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { AssociationResult } from '../AssociateToStep/types';
 
 import { BlockedSubmissionPanel } from './BlockedSubmissionPanel';
@@ -47,6 +47,7 @@ import {
   correctionPrefillErrorMessage,
   correctionTargetFromPrefill,
   createInternalInvoiceSubmission,
+  createInvoiceRecordLookup,
   isBlockedStatus,
   resolveInitialInvoiceRecord,
 } from './internalInvoiceSubmission';
@@ -79,6 +80,15 @@ export interface ICreateInvoiceWizardProps {
    * Defaults to `false`.
    */
   lockAssociation?: boolean;
+  /**
+   * ebilling-r1 def071: the host's navigation service. With it the Record step gets a "Choose a record" button that picks a matter,
+   * project or work assignment with the Dataverse lookup (the list stays as the fallback). A host passes it only when its frame can
+   * actually open a lookup (the in-app host checks `Xrm.Utility.lookupObjects`; this component never touches Xrm, ADR-012). Absent: the
+   * Record step is the list only, as before. Not used by a locked or corrected launch.
+   */
+  navigationService?: INavigationService;
+  /** The app-shell `--sprk-ui-scale` (the in-app host passes it), forwarded to the wizard's modal when not embedded. */
+  uiScale?: number;
   /**
    * ebilling-r1 095f-2e2b: the invoice this submission REPLACES (a corrected invoice, launched from Invoice Review). The wizard reads the
    * invoice's correction prefill (the firm invoice number, record and firm are the invoice's own), asks for a required note, and posts
@@ -207,9 +217,14 @@ const CreateInvoiceWizard: React.FC<ICreateInvoiceWizardProps> = ({
   bffBaseUrl,
   initialAssociation,
   lockAssociation,
+  navigationService,
+  uiScale,
   correctionInvoiceId,
 }) => {
   const initialRecord = React.useMemo(() => resolveInitialInvoiceRecord(initialAssociation), [initialAssociation]);
+
+  // def071: the Dataverse record lookup, only when the host gave a navigation service (undefined otherwise: the list is the only way).
+  const lookupRecord = React.useMemo(() => createInvoiceRecordLookup(navigationService), [navigationService]);
 
   // One adapter per mount: it keeps the firms it has read for a record. Rebuilt only when the transport or the launch changes.
   const client = React.useMemo(
@@ -270,11 +285,13 @@ const CreateInvoiceWizard: React.FC<ICreateInvoiceWizardProps> = ({
     <InvoiceSubmissionWizard
       open={open}
       embedded={embedded}
+      uiScale={uiScale}
       title="Create New Invoice"
       onClose={onClose}
       // A launch from a record (lockAssociation) fixes the record: no Record step, the user cannot pick another (owner UAT 2026-11-28).
       initialRecord={initialRecord}
       lockedRecord={lockAssociation === true ? initialRecord : undefined}
+      lookupRecord={lookupRecord}
       loadRecords={client.loadRecords}
       loadFirms={client.loadFirms}
       submit={client.submit}

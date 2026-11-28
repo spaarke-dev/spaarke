@@ -21,7 +21,7 @@
  *
  * ADR-012: no `@spaarke/auth` import; the host injects the fetch and the base URL.
  */
-import type { IDataService } from '../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { ResponseFetchFn } from '../../utils/fetchTypes';
 import { isApiError, problemOf } from '../../utils/thrownFetchError';
 import {
@@ -123,6 +123,34 @@ export function resolveInitialInvoiceRecord(
 }
 
 const stripBraces = (id: string): string => id.replace(/[{}]/g, '').toLowerCase();
+
+/**
+ * The record lookup of the Record step (ebilling-r1 def071): the host's Dataverse lookup (side pane) over the three core tables, one
+ * record, resolved as the picker's option. Cancelling the lookup resolves `null`; a row of another table (which the lookup cannot
+ * return for these `entityTypes`) is treated as no choice. The number is not known from a lookup (the label is the name).
+ *
+ * Returns `undefined` when the host gave no navigation service (one that cannot open a lookup passes none): the Record step then keeps
+ * the list only, exactly as without a lookup.
+ */
+export function createInvoiceRecordLookup(
+  navigationService: INavigationService | undefined
+): (() => Promise<InvoiceCoreRecordOption | null>) | undefined {
+  if (!navigationService) return undefined;
+  const entityTypes = KIND_ORDER.map(k => CORE_KINDS[k].entity);
+  return async () => {
+    const results = await navigationService.openLookup({
+      entityType: entityTypes[0],
+      entityTypes,
+      allowMultiSelect: false,
+    });
+    if (results.length === 0) return null;
+    const picked = results[0];
+    if (!picked.id) return null;
+    const kind = KIND_ORDER.find(k => CORE_KINDS[k].entity === picked.entityType);
+    if (!kind) return null;
+    return { kind, recordId: stripBraces(picked.id), name: picked.name || picked.id };
+  };
+}
 
 const recordKey = (record: Pick<InvoiceCoreRecordOption, 'kind' | 'recordId'>): string =>
   `${record.kind}:${record.recordId.toLowerCase()}`;

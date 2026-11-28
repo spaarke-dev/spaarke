@@ -12,6 +12,8 @@
  *   sprk_creatematterwizard · sprk_createprojectwizard · sprk_createeventwizard ·
  *   sprk_createtodowizard · sprk_createworkassignmentwizard · sprk_summarizefileswizard
  *
+ * ebilling-r1 def071 adds `sprk_createinvoicewizard` (the Console's Create Invoice card).
+ *
  * Task 113 (D-26) adds three more that live in code-page solutions this library cannot import
  * (`DocumentUploadWizard`, `FindSimilarCodePage`, `WorkspaceLayoutWizard`):
  *
@@ -54,6 +56,7 @@ import TodoWizardDialog from '../CreateTodoWizard/TodoWizardDialog';
 import { resolveCurrentUserContact, withTodoCreatedBroadcast } from '../CreateTodoWizard/todoWizardHostSupport';
 import WorkAssignmentWizardDialog from '../CreateWorkAssignmentWizard/WorkAssignmentWizardDialog';
 import { SummarizeFilesDialog } from '../SummarizeFilesWizard/SummarizeFilesDialog';
+import { CreateInvoiceWizard } from '../CreateInvoiceWizard/CreateInvoiceWizard';
 import {
   DEFAULT_IN_APP_WIZARD_NAMES,
   registerInAppWizardHost,
@@ -374,6 +377,23 @@ const InAppWizard: React.FC<IInAppWizardProps> = ({
           resolveSpeContainerId={resolveSpeContainerId}
           tenantId={tenantId}
           initialFileRefs={initialFileRefs}
+        />
+      );
+    case 'sprk_createinvoicewizard':
+      // ebilling-r1 def071: the Console's "Create Invoice" card. No record context is passed (the host has none to give), so the
+      // Record step lets the user choose the record: by Dataverse lookup (the host's navigation service) with the list as the
+      // fallback. The wizard writes no Dataverse record itself, so it has no hand-off result to write and cancels like Summarize Files.
+      return (
+        <CreateInvoiceWizard
+          open
+          embedded={false}
+          uiScale={uiScale}
+          onClose={onClose}
+          authenticatedFetch={fetchForFetchTyped}
+          bffBaseUrl={bffBaseUrl}
+          dataService={dataService}
+          // Only a frame that can open `Xrm.Utility.lookupObjects` gets the lookup; otherwise the Record step is the list alone.
+          navigationService={getXrm('lookupObjects')?.Utility?.lookupObjects ? navigationService : undefined}
         />
       );
     case 'sprk_summarizefileswizard':
