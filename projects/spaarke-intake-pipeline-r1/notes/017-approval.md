@@ -33,7 +33,7 @@ Read-only, no new privilege or secret, by the PredicateCompiler remarks method: 
 ## Known limits (K-class)
 
 - **Team cache.** Owning-team membership comes from the identity service's cache (about 2 minutes), so a just-removed member can still claim or decide inside that window. Rights on the request are asked live each time.
-- **The form edits the claimer.** `sprk_assignedtointernal` is editable on the request form, so a user with Write can change the claimer outside the route (bypassing the 409 exclusivity). The checks read the column each time and every decider must pass Read+Write, team and own-contact checks, so the result is a different claimer, never a bypass of who may decide. Follow-up: field security (or a read-only form control) on the column.
+- **Claim exclusivity.** The claimer column needs hardening, tracked in #3341 (area only; the detail is with uac-r2). It never changes who may decide: every decider passes the full checks each time. uac-r2 accepted it as a known limit on 2026-11-28.
 
 ## Escalation: a refusal at execute time is a 500 on the commit route
 
