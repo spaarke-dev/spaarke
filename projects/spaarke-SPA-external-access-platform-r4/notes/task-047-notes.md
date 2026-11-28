@@ -93,6 +93,13 @@ The membership tests run the REAL `DataverseContactIdentityStore` over a hand-wr
 2. **`exceptions`-table rows persist (needs a decision).** The proof's Warning-with-exception (item 2 of the inventory) is still emitted once per 5 minutes for acme. It is Warning severity, so FR-31 c ("logs at Warning") holds, but if task 058's gate counts "acme faults" as rows in `exceptions` regardless of severity, it will still see them. Removing them needs a cooldown (skip the environment for N minutes after a membership refusal: per-environment state in the job, on the injected `TimeProvider`) or a change in the shared proof. Say if the owner wants that.
 3. **The run still reports `Success=false` every 5 minutes while acme is unfixed.** Unchanged on purpose ("the run report still records it"); the job-run record and the heartbeat Warning show it. Task 046's data fix (application user in acme, or the row's `sprk_appservicename`) removes it.
 
+**Resolved 2026-11-28 (items 2 and 3).** Owner decision: "skip ACME until provisioning-r1 indicates it is stable". provisioning-r1's read-only checks, same day, showed no change is needed:
+- acme's registry row is Ready and names its own BFF in `sprk_appservicename`, so the #2761 rule (`IsServedByThisBff`) already leaves it to that BFF.
+- In the dev App Insights, every run since 2026-11-28 02:50Z logs "Skipped 1 registry row(s) served by another BFF" and reports status=ok and failed=0.
+- No `0x80072560` in 3 days and nothing naming spaarke-acme in 2 days. The faults came from a build without #2791.
+- provisioning-r1 considers acme stable (its run completed 2026-11-26 and set Ready). It asked that the row's setup status not be changed: L2 and the provisioning skill read it.
+- No cooldown and no skip-list were added. Task 058's gate should see no acme rows.
+
 ## UAC review (FR-31)
 
 2026-11-27, uac-r2 (cross-session message), **APPROVE** 9f819b9daa from an access-control standpoint:
