@@ -147,6 +147,32 @@ public sealed class IntakeApprovalAuthorizationTests
     }
 
     [Theory]
+    [InlineData(IntakeApprovalAction.Claim)]
+    [InlineData(IntakeApprovalAction.Approve)]
+    [InlineData(IntakeApprovalAction.Reject)]
+    public async Task AContactThatAlsoRepresentsAnotherUser_IsForbidden_SoTwoUsersNeverShareAClaim(IntakeApprovalAction action)
+    {
+        // Alice's one linked contact is ALSO linked from another user. Bob holds the same contact and claimed with it; Alice must not
+        // pass the claimer check as him (claim: must not answer "already yours").
+        var bed = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
+        bed.SetClaimer(Bob.ContactId);
+        bed.Contacts[Alice.UserId] = new UserContactResolution(UserContactStatus.One, Bob.ContactId, true, null, null);
+        var before = bed.Run.Dataverse.Writes.Count;
+        var service = bed.Service();
+
+        var result = action switch
+        {
+            IntakeApprovalAction.Claim => await service.ClaimAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None),
+            IntakeApprovalAction.Approve => await service.ApproveAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None),
+            _ => await service.RejectAsync(Http(Alice), IntakeRunTestBed.RequestId, CancellationToken.None),
+        };
+
+        result.Outcome.Should().Be(IntakeApprovalOutcome.Forbidden);
+        bed.WritesSince(before).Should().BeEmpty();
+        bed.Run.Enqueued.Should().BeEmpty();
+    }
+
+    [Theory]
     [InlineData(IntakeApprovalAction.Approve)]
     [InlineData(IntakeApprovalAction.Reject)]
     public async Task NotTheClaimer_IsForbidden_FromThePreflight_AndNothingIsWritten(IntakeApprovalAction action)

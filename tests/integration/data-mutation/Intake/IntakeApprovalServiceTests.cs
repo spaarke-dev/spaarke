@@ -474,4 +474,34 @@ public sealed class IntakeApprovalServiceTests
         outcome.Status.Should().Be(DecisionActionStatus.Failed);
         outcome.PossiblyWritten.Should().Equal(new DecisionRecordRef(IntakeRunStore.RequestEntity, IntakeRunTestBed.RequestId));
     }
+
+    [Fact]
+    public async Task ApproveExecutor_APreflightReadFault_Throws_SoTheCommitRouteAnswers503StepFailed_NotARefusal()
+    {
+        // The commit route maps a preflight that throws to 503 StepFailed, nothing written; a refusal would be a 4xx (do not retry).
+        var bed = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
+        bed.SetClaimer(Alice.ContactId);
+        bed.Run.Dataverse.RunReadGate = () => throw new TimeoutException("no answer");
+        var before = bed.Run.Dataverse.Writes.Count;
+
+        var preflight = () => new ApproveIntakeExecutor(bed.Service()).PreflightAsync(ActionRequest(Alice), CancellationToken.None);
+
+        await preflight.Should().ThrowAsync<IntakeApprovalUnavailableException>();
+        bed.WritesSince(before).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RejectExecutor_ADecisionWriteFault_IsAFailedStep_NamingTheRequestAsPossiblyWritten()
+    {
+        // A timeout can land after the commit: the request is named so the record says it may have changed; a retry converges.
+        var bed = await new IntakeApprovalTestBed().AwaitingApprovalAsync();
+        bed.SetClaimer(Alice.ContactId);
+        bed.Run.Dataverse.TransactionFault = () => new TimeoutException("no answer");
+
+        var outcome = await new RejectIntakeExecutor(bed.Service()).ExecuteAsync(ActionRequest(Alice), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Failed);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.WriteFailed);
+        outcome.PossiblyWritten.Should().Equal(new DecisionRecordRef(IntakeRunStore.RequestEntity, IntakeRunTestBed.RequestId));
+    }
 }

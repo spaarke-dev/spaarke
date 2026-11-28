@@ -797,25 +797,43 @@ public abstract class IntakeApprovalExecutorBase : DecisionExecutorBase
         }
 
         var check = await _approvals.CheckAsync(request.Http, subject.Id, Action, ct).ConfigureAwait(false);
-        return check.IsDone ? null : Map(check);
+        if (check.Outcome == IntakeApprovalOutcome.Unavailable)
+        {
+            // A read could not be answered: the commit route turns a preflight that throws into 503 StepFailed, nothing written (a
+            // refusal would be a 4xx that tells the caller not to retry). The message is fixed text, no record content.
+            throw new IntakeApprovalUnavailableException();
+        }
+
+        return check.IsDone ? null : Map(check, subject);
     }
 
     protected override async Task<DecisionActionOutcome> WriteAsync(DecisionActionRequest request, CancellationToken ct)
     {
         var subject = request.Subject!;
         var result = await TransitionAsync(_approvals, request.Http, subject.Id, ct).ConfigureAwait(false);
-        return result.IsDone ? DecisionActionOutcome.Done(Code, subject) : Map(result);
+        return result.IsDone ? DecisionActionOutcome.Done(Code, subject) : Map(result, subject);
     }
 
-    private DecisionActionOutcome Map(IntakeApprovalResult result) => result.Outcome switch
+    private DecisionActionOutcome Map(IntakeApprovalResult result, DecisionRecordRef subject) => result.Outcome switch
     {
         IntakeApprovalOutcome.NotFound or IntakeApprovalOutcome.Forbidden =>
             Refuse(DecisionActionReasons.NotAuthorized, "You cannot decide this request."),
         IntakeApprovalOutcome.Disabled => Refuse(DecisionActionReasons.Disabled, result.Detail ?? "Approval is switched off right now."),
-        IntakeApprovalOutcome.Unavailable =>
-            DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed, result.Detail ?? "The decision could not be recorded; nothing was changed."),
+        // At write time a fault (a timeout included) may have landed after the commit: the request is named as possibly written, and a
+        // retry of the review re-reads and finds the decision recorded, or records it.
+        IntakeApprovalOutcome.Unavailable => DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed,
+            (result.Detail ?? "The decision could not be saved.") + " It may have been applied.", possiblyWritten: [subject]),
         _ => Refuse(DecisionActionReasons.InvalidState, result.Detail ?? "The request is not waiting for approval."),
     };
+}
+
+/// <summary>The intake approval preflight could not be answered (a read faulted after authorization); fixed text only.</summary>
+public sealed class IntakeApprovalUnavailableException : Exception
+{
+    public IntakeApprovalUnavailableException()
+        : base("The intake request could not be read right now; nothing was done.")
+    {
+    }
 }
 
 /// <summary><c>approve-intake</c>: records the output versions, moves the run to Approved and continues it (the door's Return).</summary>

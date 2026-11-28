@@ -246,7 +246,9 @@ public class IntakeApprovalService
             return Forbid(requestId, action, "contact-fault");
         }
 
-        if (contact.Status != UserContactStatus.One || contact.ContactId is not { } contactId || contactId == Guid.Empty)
+        // A contact that ALSO represents another user is no single person (the /grant forward rule refuses it too): two users sharing
+        // one contact would share the claim, and the second would pass the claimer check as the first.
+        if (contact.Status != UserContactStatus.One || contact.ContactRepresentsOthers || contact.ContactId is not { } contactId || contactId == Guid.Empty)
         {
             return Forbid(requestId, action, "no-single-contact");
         }
