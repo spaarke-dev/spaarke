@@ -570,8 +570,17 @@ public static class FieldMappingEndpoints
 
             // Task 040 (FR-23): a push applies Copy rules set to Manual Refresh, through the canonical engine; the rest are
             // counted and skipped. The Assigned-To columns are the bound registry's, for any table (the one classifier).
+            // DI-053: a rule whose target is a typed-writer column is refused here, before anything is read or written, in
+            // every mode (ordinary and family, preview and apply), and named in a warning (selection.Warnings).
             var isAssignedToColumn = PushRuleSelection.AssignedToColumnsOf(membership.Value.AccessConferringRoles);
             var selection = PushRuleSelection.Select(profileRules, request.TargetEntity, request.IncludeAssignedTo, isAssignedToColumn);
+            if (selection.Warnings.Count > 0)
+            {
+                logger.LogInformation(
+                    "Push skipped {Count} rule(s) whose target column only its typed writers write. ProfileId={ProfileId}",
+                    selection.Warnings.Count, profile.Id);
+            }
+
             var rules = selection.Rules.Select(MapRuleEntityToDto).ToArray();
             if (rules.Length == 0)
             {
@@ -586,7 +595,7 @@ public static class FieldMappingEndpoints
                     UpdatedCount = 0,
                     FailedCount = 0,
                     SkippedCount = 0,
-                    Warnings = ["None of this profile's rules is set to be pushed."],
+                    Warnings = ["None of this profile's rules is set to be pushed.", .. selection.Warnings],
                     SkippedRuleCount = selection.SkippedCount,
                     Preview = request.Preview ? true : null,
                     Changes = request.Preview ? [] : null,
@@ -640,7 +649,7 @@ public static class FieldMappingEndpoints
             var filedUnderTheSource = familyMode || IsListedFilingEdgeColumn(request.SourceEntity, request.TargetEntity, parentLookup);
 
             var skippedRuleCount = selection.SkippedCount;
-            string[] sourceRuleWarnings = [];
+            string[] sourceRuleWarnings = [.. selection.Warnings];
             IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>? sourceAttributeRows = null;
             if (!filedUnderTheSource)
             {
@@ -658,7 +667,7 @@ public static class FieldMappingEndpoints
                 var (pushable, securedSourced) = FieldSecuredSourceRule.Split(
                     selection.Rules, FieldMappingPushLookups.SecuredColumns(sourceAttributeRows));
                 skippedRuleCount += securedSourced.Count;
-                sourceRuleWarnings = SecuredSourceWarnings(securedSourced);
+                sourceRuleWarnings = [.. sourceRuleWarnings, .. SecuredSourceWarnings(securedSourced)];
                 if (securedSourced.Count > 0)
                 {
                     logger.LogInformation(
@@ -1592,9 +1601,10 @@ public static class FieldMappingEndpoints
                     // child document it reaches. Task 188 round 4e: the same for its D7 link columns (sprk_parentdocument,
                     // sprk_relatedcommunication; InheritedAccessPermission.DocumentLinkColumns), which decide whether partners see it.
                     // #2247: on every table, the owner and the creator. #2253 fix round 1 (K2): the push runs AS its caller,
-                    // so it asks as WriteIdentity.Caller: these refusals and the table-name check only. Access tables and a
-                    // secure root's columns are left to the caller's own Dataverse privileges and field security. The access
-                    // columns themselves are never a push's target (task 022c, the check above).
+                    // so it asks as WriteIdentity.Caller: these refusals and the table-name check only. The access columns
+                    // themselves are never a push's target (task 022c, the check above). DI-053: a rule whose target is a
+                    // typed-writer column (access tables, a secure root's columns, the access-column registry) never reaches
+                    // this loop from the endpoint: PushRuleSelection refuses it with the app-only predicate first.
                     if (Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
                             targetEntity, [rule.TargetField],
                             Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.WriteIdentity.Caller) is { } setBySpaarke)

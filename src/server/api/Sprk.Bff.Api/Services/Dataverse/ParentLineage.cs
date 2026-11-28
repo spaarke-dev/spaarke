@@ -1237,9 +1237,9 @@ internal static class InheritedAccessPermission
     /// held: app-only generic writes (an Update Record node, an output mapping, Repair) are refused here. A person-run write is blocked by
     /// field security (only the "Spaarke BFF-Managed Field Writers" profile holds update on the column), except for System Administrators,
     /// a platform rule that holds for every secured column. A create-time or repair field-mapping rule is skipped by
-    /// <c>RecordTableRule.MappingProtectedColumns</c>. A field-mapping PUSH to existing rows asks this as
-    /// <see cref="WriteIdentity.Caller"/> (which skips access columns) and does not read <c>MappingProtectedColumns</c>, so it relies on
-    /// field security alone (see notes 095c §16.9 fix round 2).</item>
+    /// <c>RecordTableRule.MappingProtectedColumns</c>. A field-mapping PUSH to existing rows refuses such a rule at rule selection, by
+    /// this refusal as <see cref="WriteIdentity.AppOnly"/> (DI-053, <c>PushRuleSelection.TypedWriterTargetRefusal</c>): a rule is
+    /// configuration, so no field-mapping rule writes a column of this registry on any surface.</item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>
@@ -1429,7 +1429,9 @@ internal static class InheritedAccessPermission
     /// <para><b>Identity</b> (<paramref name="identity"/>, K2): <see cref="WriteIdentity.Caller"/> (the field-mapping push,
     /// which runs as its caller) asks the table-name check, the refusals it asked before #2251 (the document codes, the
     /// owner, the creator), the writer-only columns (task 165d) and the BFF-owned columns of a communication and its thread
-    /// (fm task 054b); the three #2251-and-later sets are left to that person's own Dataverse privileges and field security.
+    /// (fm task 054b); the three #2251-and-later sets are left to that person's own Dataverse privileges and field security. A
+    /// push's RULES are configuration, so before this per-child check the push refuses, at rule selection, every rule whose target
+    /// <see cref="WriteIdentity.AppOnly"/> is refused (DI-053, <c>PushRuleSelection.TypedWriterTargetRefusal</c>).
     /// <see cref="WriteIdentity.Playbook"/> (#2250: the Update Record node and a playbook's output mapping) asks every
     /// <see cref="WriteIdentity.AppOnly"/> refusal and, last, a grant root's Assigned-To columns
     /// (<see cref="IsAssignedToGrantColumn"/>, refused with <see cref="PlaybookAssignedToWriteReasonCode"/>).</para>

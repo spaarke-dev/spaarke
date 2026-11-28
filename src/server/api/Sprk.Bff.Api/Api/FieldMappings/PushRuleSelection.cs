@@ -21,11 +21,24 @@ namespace Sprk.Bff.Api.Api.FieldMappings;
 /// attorney and paralegal columns, which confer no access) are never pushed, whatever their sync mode and whatever
 /// <c>includeAssignedTo</c> says; they are counted with the skipped rules. Only the create maps them (no re-map). This is enforced
 /// here, so it does not depend on the rules' stored sync mode.</para>
+/// <para><b>Typed-writer columns</b> (DI-053, #3326): a column only its typed writers may write is never a field-mapping target,
+/// on any surface. A rule whose target is one for the target table is never pushed, whatever its type, its sync mode and
+/// <c>includeAssignedTo</c>, for an ordinary push and for family mode, a preview and an apply. It is decided here, before
+/// anything is read or written, by the predicate the create's mapping and Repair ask
+/// (<see cref="Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite"/> as
+/// <see cref="Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.WriteIdentity.AppOnly"/>): the push writes as its caller, but the
+/// rule is configuration, not the caller's own edit. Each such rule is counted with the skipped rules and named, by its target
+/// column, in a warning with fixed text (<see cref="TypedWriterTargetWarning"/>); the rest of the push proceeds.</para>
 /// </remarks>
 internal static class PushRuleSelection
 {
     /// <summary>The rules to apply, in the order given, and how many of the profile's rules were not applied.</summary>
-    internal sealed record Selected(IReadOnlyList<FieldMappingRuleEntity> Rules, int SkippedCount);
+    internal sealed record Selected(IReadOnlyList<FieldMappingRuleEntity> Rules, int SkippedCount)
+    {
+        /// <summary>DI-053: one warning per rule not applied because its target is a typed-writer column
+        /// (<see cref="TypedWriterTargetWarning"/>), in the order given. Each is counted in <see cref="SkippedCount"/>.</summary>
+        public IReadOnlyList<string> Warnings { get; init; } = [];
+    }
 
     /// <summary>
     /// Selects the rules a push applies.
@@ -43,9 +56,18 @@ internal static class PushRuleSelection
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(isAssignedToColumn);
         var selected = new List<FieldMappingRuleEntity>();
+        var warnings = new List<string>();
         var skipped = 0;
         foreach (var rule in rules)
         {
+            if (TypedWriterTargetRefusal(targetEntity, rule.TargetField) is { } refusalCode)
+            {
+                // DI-053: a typed-writer column is never a mapping target (asked first, so every such rule is named).
+                skipped++;
+                warnings.Add(TypedWriterTargetWarning(rule.TargetField!, refusalCode));
+                continue;
+            }
+
             if (rule.MappingType != CreateTimeFieldMapping.MappingTypeCopy)
             {
                 skipped++;
@@ -68,8 +90,27 @@ internal static class PushRuleSelection
                 skipped++;
         }
 
-        return new Selected(selected, skipped);
+        return new Selected(selected, skipped) { Warnings = warnings };
     }
+
+    /// <summary>
+    /// DI-053: the refusal code when <paramref name="targetField"/> of <paramref name="targetEntity"/> is a column only its typed
+    /// writers may write, else <c>null</c> (no target named: nothing to refuse). The predicate the create's mapping and Repair
+    /// ask for a mapping target (<see cref="Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite"/>, app-only), so the
+    /// three surfaces cannot drift apart.
+    /// </summary>
+    internal static string? TypedWriterTargetRefusal(string targetEntity, string? targetField) =>
+        !string.IsNullOrWhiteSpace(targetField)
+        && Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
+            targetEntity, [targetField], Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.WriteIdentity.AppOnly) is { } refused
+            ? refused.RefusalCode ?? Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.AppOnlyDocumentWriteReasonCode
+            : null;
+
+    /// <summary>DI-053: the warning naming a rule skipped for its typed-writer target: the target column and the refusal code,
+    /// never a value. The create's wording for the same skip.</summary>
+    internal static string TypedWriterTargetWarning(string targetField, string refusalCode) =>
+        $"Field-mapping rule targeting \"{targetField}\" was skipped: that field is managed by the server and cannot be " +
+        $"set by a field-mapping rule ({refusalCode}).";
 
     /// <summary>
     /// The one Assigned-To classifier: whether (table, column) is listed for that table in <paramref name="registry"/>

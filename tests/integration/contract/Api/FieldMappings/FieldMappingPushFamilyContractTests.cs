@@ -863,9 +863,9 @@ public partial class FieldMappingPushFamilyContractTests
         public static async Task<World> StartAsync(
             Guid[] writable, AccessRights sourceRights = AccessRights.Read | AccessRights.Write,
             string target = "sprk_event", string targetSet = "sprk_events", FieldMappingRuleEntity[]? rules = null,
-            string? sourceValue = "REF-166")
+            string? sourceValue = "REF-166", string filingColumn = "sprk_regardingmatter")
         {
-            var dataverse = new ScriptedDataverse();
+            var dataverse = new ScriptedDataverse { Table = target, Set = targetSet, FilingColumn = filingColumn };
             dataverse.Children.AddRange([ChildA, ChildB, ChildC]);
             var probe = new FamilyProbe(writable) { SourceRights = sourceRights };
             var reader = new RecordFamilyReader(dataverse, new EphemeralDataProtectionProvider(), NullLogger<RecordFamilyReader>.Instance);
@@ -915,12 +915,20 @@ public partial class FieldMappingPushFamilyContractTests
     }
 
     /// <summary>
-    /// A caller-scoped Dataverse for the event table: the family walk's rows (each child filed under the matter), the target's
-    /// attribute catalogue and each child's current value. Anything else goes to the host's own scripted seam.
+    /// A caller-scoped Dataverse for the target table (the event table unless the test names another, with its filing column):
+    /// the family walk's rows (each child filed under the matter), the target's attribute catalogue and each child's current
+    /// value. Anything else goes to the host's own scripted seam.
     /// </summary>
     private sealed class ScriptedDataverse : IImpersonatedCommunicationQuery
     {
         public IImpersonatedCommunicationQuery Inner { get; set; } = null!;
+
+        public string Table { get; init; } = "sprk_event";
+
+        public string Set { get; init; } = "sprk_events";
+
+        /// <summary>The column each child names the matter in (the Filing edge the walk follows).</summary>
+        public string FilingColumn { get; init; } = "sprk_regardingmatter";
 
         public List<Guid> Children { get; } = [];
 
@@ -934,7 +942,7 @@ public partial class FieldMappingPushFamilyContractTests
         public Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(
             string entitySetName, string? odataQuery, Guid callerSystemUserId, CancellationToken ct)
         {
-            if (entitySetName == "EntityDefinitions(LogicalName='sprk_event')/Attributes")
+            if (entitySetName == $"EntityDefinitions(LogicalName='{Table}')/Attributes")
             {
                 return Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(AttributeNames
                     .Select(name => new Dictionary<string, JsonElement>
@@ -945,17 +953,17 @@ public partial class FieldMappingPushFamilyContractTests
                     }).ToList());
             }
 
-            if (entitySetName != "sprk_events")
+            if (entitySetName != Set)
                 return Inner.QueryAsync(entitySetName, odataQuery, callerSystemUserId, ct);
 
             Queries.Add(odataQuery);
-            var nameColumn = RecordFamilyReader.NameColumnOf("sprk_event");
+            var nameColumn = RecordFamilyReader.NameColumnOf(Table);
             var rows = Children.Select((id, i) =>
             {
                 var row = new Dictionary<string, JsonElement>
                 {
-                    ["sprk_eventid"] = JsonSerializer.SerializeToElement(id.ToString("D")),
-                    ["_sprk_regardingmatter_value"] = JsonSerializer.SerializeToElement(MatterId.ToString("D")),
+                    [$"{Table}id"] = JsonSerializer.SerializeToElement(id.ToString("D")),
+                    [$"_{FilingColumn}_value"] = JsonSerializer.SerializeToElement(MatterId.ToString("D")),
                     [Column] = JsonSerializer.SerializeToElement(Current.GetValueOrDefault(id)),
                 };
                 if (nameColumn is not null)

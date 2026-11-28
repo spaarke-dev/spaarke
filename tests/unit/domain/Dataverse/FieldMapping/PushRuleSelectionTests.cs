@@ -224,6 +224,45 @@ public class PushRuleSelectionTests
         selected.Rules.Should().Equal(sameName);
     }
 
+    /// <summary>
+    /// DI-053 (#3326), must fire: a rule aimed at an invoice's firm hold, firm or billed total (columns only their typed writers
+    /// write) is never selected — whatever its type, its sync mode and the opt-in — is counted with the skipped rules, and is named
+    /// by its target column in a warning that carries no value. Must not fire: the plain column of the same profile is selected.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_firmhold", false)]
+    [InlineData("sprk_vendororg", true)]
+    [InlineData(" SPRK_TotalAmount ", false)]
+    public void ARuleOntoATypedWriterColumn_IsNeverSelected_AndIsNamedInAWarning(string column, bool includeAssignedTo)
+    {
+        var plain = Rule("sprk_description");
+        var manualRefresh = Rule(column, syncMode: SyncMode.ManualRefresh);
+        var asDefault = Rule(column, CreateTimeFieldMapping.MappingTypeDefault);
+
+        var selected = PushRuleSelection.Select(
+            [plain, manualRefresh, asDefault], Invoice, includeAssignedTo, PushRuleSelection.AssignedToColumnsOf(Bound()));
+
+        selected.Rules.Should().Equal([plain], $"{column.Trim()} of an invoice is written only by its typed writers (must fire)");
+        selected.SkippedCount.Should().Be(2);
+        selected.Warnings.Should().HaveCount(2).And.OnlyContain(w =>
+            w.Contains($"\"{column}\"", StringComparison.Ordinal) && w.Contains("managed by the server", StringComparison.Ordinal));
+    }
+
+    /// <summary>DI-053, must not fire: the same column name on a table where it is not a typed-writer column is selected.</summary>
+    [Theory]
+    [InlineData("sprk_matter", "sprk_totalamount")]
+    [InlineData("sprk_billingevent", "sprk_vendororg")]
+    public void TheSameColumnNameOnAnotherTable_IsNotATypedWriterColumn(string table, string column)
+    {
+        var sameName = Rule(column);
+
+        var selected = PushRuleSelection.Select([sameName], table, includeAssignedTo: false, PushRuleSelection.AssignedToColumnsOf(Bound()));
+
+        selected.Rules.Should().Equal(sameName);
+        selected.Warnings.Should().BeEmpty();
+        PushRuleSelection.TypedWriterTargetRefusal(table, column).Should().BeNull();
+    }
+
     /// <summary>The registry as the BFF binds it: empty, then seeded by the defaults' post-configure.</summary>
     private static AccessConferringRegistry Bound()
     {

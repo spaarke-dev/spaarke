@@ -674,7 +674,7 @@ public class AccessTableAppOnlyWriterTests
         // UAC review F4 / DEF-043: the frozen core record bounds a line Duplicate's invoice; uac-r2 re-check F1: the regarding pair
         // names the subject a Duplicate is judged by (SignalReadService). A playbook's Update Record node or output mapping must
         // not re-point any of them (their writer is SignalWriter's own client, at create). Both app-only generic writers are
-        // driven here; the field-mapping push runs as its caller and is not asked (APushRule_OntoAColumnTheCallersPrivilegesDecide_IsSentAsTheCaller),
+        // driven here; the field-mapping push refuses such a rule at rule selection (DI-053, PushRuleSelection.TypedWriterTargetRefusal),
         // and every other app-only writer calls the same InheritedAccessPermission.RefuseAppOnlyWrite pinned by
         // AnAccessColumn_InAnyForm_IsRefusedOnItsTable.
         foreach (var key in new[]
@@ -1419,6 +1419,9 @@ public class AccessTableAppOnlyWriterTests
     /// is sent as the caller, whose own Dataverse privileges and field security decide it. Task 022c (unified-access-control-r2,
     /// 2026-11-12): the access columns (a root's Access Permission, container, business unit, secure flag and access
     /// inheritance) are never a mapping target, so a push skips them on every table (<c>AccessColumnPushTargetTests</c>).
+    /// DI-053 (#3326): this drives the per-child loop directly. From the endpoint such a rule never reaches it: a rule whose
+    /// target the app-only identity is refused is refused at rule selection (<c>PushRuleSelection.TypedWriterTargetRefusal</c>;
+    /// <c>FieldMappingPushAuthorizationContractTests.TypedWriterTargets.cs</c>).
     /// </summary>
     [Theory]
     [InlineData("sprk_externalrecordaccess", "sprk_accesslevel")]
