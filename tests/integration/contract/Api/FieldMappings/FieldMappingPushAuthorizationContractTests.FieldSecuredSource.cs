@@ -106,6 +106,7 @@ public partial class FieldMappingPushAuthorizationContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, text);
         host.Writes.Should().HaveCount(2).And.OnlyContain(w => (string?)w.Payload["sprk_clientreference"] == "REF-SECURED");
+        text.Should().NotContain("REF-SECURED", "task 067 fix round (F1): the response returns no value the caller's own read did not");
         JsonNode.Parse(text)!["warnings"]!.AsArray().Should().BeEmpty();
         host.Logs.Should().Contain(l => l.Level == Microsoft.Extensions.Logging.LogLevel.Information
                                         && l.Message.Contains("push: rule")

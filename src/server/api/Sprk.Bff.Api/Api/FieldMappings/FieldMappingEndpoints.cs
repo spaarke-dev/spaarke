@@ -621,6 +621,16 @@ public static class FieldMappingEndpoints
                     return ParentLookupNotResolvable(request.SourceEntity, request.TargetEntity, parentLookupCount);
                 }
             }
+            else if (!RecordFamilyReader.HasListedEdge(RecordFamilyEdges.FamilyKind.Filing, request.SourceEntity, request.TargetEntity))
+            {
+                // Task 040 (FR-34): family mode finds the children through a listed Filing edge from the source to the target (a
+                // typed lookup, or the regarding pair). Task 067: decided here, before the source is read in any way, so a pair
+                // with no such edge reads nothing of the source, as the caller or app-only.
+                logger.LogWarning(
+                    "Push refused: no Filing edge joins {SourceEntity} to {TargetEntity}, so the children cannot be found. "
+                    + "Nothing was read or updated.", request.SourceEntity, request.TargetEntity);
+                return ParentLookupNotResolvable(request.SourceEntity, request.TargetEntity, 0);
+            }
 
             // Task 065 (owner 2026-11-26): the field-secured-source rule is lifted only for rows filed under the source by a
             // listed Filing edge: family mode (its children are found through one), or an ordinary request whose parent lookup
@@ -709,6 +719,11 @@ public static class FieldMappingEndpoints
             // above) and the caller's own read of it (a row came back): the same one row is read again app-only, $select of
             // exactly its mapped columns except the access-model columns, which keep the caller's value. Every other push reads
             // only as the caller.
+            // A preview returns only what the caller's own read returned (callerValues): a lifted value is written to the
+            // children by the apply, never shown in any response. liftedFields are the source fields whose value the caller's
+            // read did not return and the app-only read did (C7 logs them, after the write).
+            var callerValues = new Dictionary<string, object?>(sourceValues, sourceValues.Comparer);
+            var liftedFields = new HashSet<string>(StringComparer.Ordinal);
             if (filedUnderTheSource)
             {
                 var accessModelTargets = AccessModelSourceColumns.TargetsOfRulesReadingOne(selection.Rules);
@@ -728,16 +743,7 @@ public static class FieldMappingEndpoints
                 foreach (var (field, value) in lifted)
                 {
                     if (value is not null && sourceValues.GetValueOrDefault(field) is null)
-                    {
-                        // C7: a value the caller's own read did not return, copied from the filing parent. Never the value.
-                        foreach (var rule in rules.Where(r => string.Equals(r.SourceField, field, StringComparison.Ordinal)))
-                        {
-                            logger.LogInformation(
-                                "[FIELD-MAPPING-SOURCE] push: rule {RuleId} copies {SourceTable}.{SourceColumn} into {TargetColumn} from " +
-                                "the filing parent without the caller's column read",
-                                rule.Id, request.SourceEntity, field, rule.TargetField);
-                        }
-                    }
+                        liftedFields.Add(field);
 
                     sourceValues[field] = value;
                 }
@@ -777,15 +783,7 @@ public static class FieldMappingEndpoints
             {
                 // Task 040 (FR-34): through the family — a Filing edge (a typed lookup, or the regarding pair), the source the
                 // child's primary parent. The server derives the children itself, as the caller; confirmed ids are intersected.
-                if (!RecordFamilyReader.HasListedEdge(
-                        RecordFamilyEdges.FamilyKind.Filing, request.SourceEntity, request.TargetEntity))
-                {
-                    logger.LogWarning(
-                        "Push refused: no Filing edge joins {SourceEntity} to {TargetEntity}, so the children cannot be found. "
-                        + "Nothing was read or updated.", request.SourceEntity, request.TargetEntity);
-                    return ParentLookupNotResolvable(request.SourceEntity, request.TargetEntity, 0);
-                }
-
+                // The listed Filing edge was required before the source was read (above).
                 if (Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectIdGuid(httpContext.User) is not { } objectId
                     || objectId == Guid.Empty)
                 {
@@ -836,7 +834,7 @@ public static class FieldMappingEndpoints
             {
                 var preview = await FieldMappingPushFamily.PreviewAsync(
                     new FieldMappingPushFamily.PreviewInput(
-                        request.TargetEntity, familyChildren, familyTruncated, rules, sourceValues, lookupBinds,
+                        request.TargetEntity, familyChildren, familyTruncated, rules, callerValues, lookupBinds,
                         skippedRuleCount, isAssignedToColumn, sourceGate, refusedChildIds),
                     TokenHelper.ExtractBearerTokenOrNull(httpContext),
                     callerSystemUserId.Value,
@@ -874,6 +872,7 @@ public static class FieldMappingEndpoints
             }
 
             // Step 4: For each child, apply mapping rules and update
+            var writtenTargets = new HashSet<string>(StringComparer.Ordinal);
             var (updatedCount, failedCount, skippedCount, errors, fieldResults) = await ApplyMappingsToChildRecordsAsync(
                 sourceGate,
                 dataverseService,
@@ -891,7 +890,19 @@ public static class FieldMappingEndpoints
                 entityService,
                 impersonatedQuery,
                 // #2799: a locked invoice-family column is checked as the caller (this probe, naming them) and written as the app.
-                lockedWriteProbe: probe);
+                lockedWriteProbe: probe,
+                writtenTargets: writtenTargets);
+
+            // Task 067 (C7): one Information line per rule that wrote, into at least one child, a value of the filing parent the
+            // caller's own read did not return: the rule id and the source and target column names, never the value. Only after
+            // the writes, so a refused, previewed or unwritten push logs nothing.
+            foreach (var rule in rules.Where(r => liftedFields.Contains(r.SourceField) && writtenTargets.Contains(r.TargetField)))
+            {
+                logger.LogInformation(
+                    "[FIELD-MAPPING-SOURCE] push: rule {RuleId} copied {SourceTable}.{SourceColumn} into {TargetColumn} from " +
+                    "the filing parent without the caller's column read",
+                    rule.Id, request.SourceEntity, rule.SourceField, rule.TargetField);
+            }
 
             failedCount += refusals.Length;
             var success = updatedCount > 0 || (failedCount == 0 && childIds.Length > 0);
@@ -1505,7 +1516,9 @@ public static class FieldMappingEndpoints
     /// task 142's writer test, which asserts the inline Assigned-To trigger after a push that wrote a root's "Assigned *"
     /// column (InternalsVisibleTo).
     /// <para>Task 022 fix round 4: <paramref name="sourceGate"/> is the mapping-source rule for the push's source. It is a
-    /// required, non-nullable parameter, so the compiler holds every caller to pass one.</para></remarks>
+    /// required, non-nullable parameter, so the compiler holds every caller to pass one.</para>
+    /// <para>Task 067 (C7): when <paramref name="writtenTargets"/> is given, the target column of each rule that a WRITTEN child's
+    /// write carried is added to it (a rule mapped on a child that was refused, or whose key was dropped, is not).</para></remarks>
     internal static async Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> ApplyMappingsToChildRecordsAsync(
         FieldMappingPushSourceGate sourceGate,
         IFieldMappingDataverseService dataverseService,
@@ -1522,7 +1535,8 @@ public static class FieldMappingEndpoints
         IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null,
         IGenericEntityService? appOnlyEntities = null,
         IImpersonatedCommunicationQuery? callerQuery = null,
-        CallerRecordAccessProbe? lockedWriteProbe = null)
+        CallerRecordAccessProbe? lockedWriteProbe = null,
+        ISet<string>? writtenTargets = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -1552,6 +1566,7 @@ public static class FieldMappingEndpoints
             {
                 var updatePayload = new Dictionary<string, object?>();
                 var recordFieldResults = new List<FieldMappingResultDto>();
+                var mappedRules = new List<FieldMappingRuleDto>();
 
                 foreach (var rule in rules.OrderBy(r => r.Priority))
                 {
@@ -1637,6 +1652,8 @@ public static class FieldMappingEndpoints
 
                     var fieldResult = ApplyMappingRule(rule, sourceValues, updatePayload, lookupBinds, logger);
                     recordFieldResults.Add(fieldResult);
+                    if (fieldResult.Status == FieldMappingStatus.Mapped)
+                        mappedRules.Add(rule);
                 }
 
                 // Task 039 (FR-38) safety net: the bind plans (lookupBinds) are built from the target's metadata, apart from the rule's
@@ -1935,6 +1952,15 @@ public static class FieldMappingEndpoints
                     }
 
                     updated++;
+                    if (writtenTargets is not null)
+                    {
+                        foreach (var mapped in mappedRules)
+                        {
+                            var bindKey = lookupBinds is not null && lookupBinds.TryGetValue(mapped, out var plan) ? plan.BindKey : null;
+                            if (updatePayload.ContainsKey(mapped.TargetField) || (bindKey is not null && updatePayload.ContainsKey(bindKey)))
+                                writtenTargets.Add(mapped.TargetField);
+                        }
+                    }
 
                     // Task 156 (owner round 4 item 5, option b): a mapping rule can write a lookup — including what this
                     // record is filed under or its matter / project — so the copies that depend on it are re-stamped in
