@@ -1958,7 +1958,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Delivered by task 195 (master #3274 at c55b9812d8; Console and page live on dev 2026-11-27). Close once owner checklist AA passes |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-25 |
 | **Source** | Owner review of the Invoice Review page on dev, 2026-11-25 (point 1 of 4; points 2-4 fixed on branch `task/ebilling-ir-review`) |
@@ -1989,7 +1989,7 @@ The worklist passes its ordered invoice ids; the page hosts the review in `Brows
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on work e18a1c2222 (page opens a given rule set; "Rule Review" form command in sprk_ruleset RibbonDiff + Spaarke.ApExport.Ribbon.openRuleReview). Not on dev: needs a page redeploy, the apexport_ribbon.js web resource and a ribbon-only import of sprk_ruleset (owner go) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-25 |
 | **Source** | Task 079 (owner chose the least-impact path, 2026-11-25; notes/079-wp3-deploy.md) |
@@ -2820,7 +2820,7 @@ A line-decision call holds the invoice's processing lock for a fixed 2 minutes a
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on work 8913c642f4 (SprkModal moves lost focus after a nav move; InvoiceReviewModal workaround removed). Closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-26 |
 | **Source** | Task 195 adversarial review (2026-11-26), finding 4 |
@@ -2871,5 +2871,63 @@ After each write, call `SecureChildShareSynchronizer.SyncChildAsync` for the one
 **Estimated effort**: half a day with tests.
 **Blockers**: none (#3270 merged 2026-11-26 at 77433e5660).
 **Related**: ontology D-229, D-106; branch `fix/ebilling-3276-billing-dr-inline-share`; uac-r2 reviews.
+
+---
+
+### ISS-057 — Create Invoice wizard: the launch record is not locked in record context
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed on work c59501b9ad; closes when it reaches master and the page and Console are redeployed |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-28 |
+| **Source** | Owner UAT on dev 2026-11-28 (relayed by ontology-r1): matter form > Billing tab > + New Invoice |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3334 |
+
+**Description**: the form launch sends `entityType`/`entityId` (secure_child_ribbon.js `WIZARDS.sprk_invoice`) and `useWizardPageBootstrap` sets `lockAssociation`, but `CreateInvoiceWizard` passed the record to `InvoiceSubmissionWizard` only as `initialRecord`, so the Record step still showed (a one-item searchable list). The owner wants the record fixed in record context.
+
+**Entry-points**: `src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/CreateInvoiceWizard.tsx` (the `lockedRecord` prop).
+
+**Fix**: pass `lockedRecord` when `lockAssociation` (no Record step; the wizard opens on the File step). Tests updated; 9 fail without the fix.
+
+**Estimated effort**: done. **Blockers**: none. **Related**: tasks 052, 095f; DEF-071, DEF-072.
+
+---
+
+### DEF-071 — Create Invoice: no Console Get Started / Quick Start entry and no in-app launch
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed on work 80e996f6b0 (Quick Start card, in-app host case, Record-step lookup). Not on dev: master PR, then Console and page redeploys |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-28 |
+| **Source** | Owner UAT on dev 2026-11-28 (relayed by ontology-r1) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3335 |
+
+**Description**: the owner wants "Create Invoice" in the Console's Get Started / Quick Start, opened in-app (ADR-050). The card list is in SpaarkeAi `ContextPaneController.tsx` and `QuickStartModal.tsx`; `Wizard/InAppWizardHost.tsx` has no case for `sprk_createinvoicewizard` (the `sprk_createtodowizard` case is the pattern). With no record context the Record step should offer a lookup, not a first-page list. Failure without it: an invoice can be started only from a record form.
+
+**Entry-points**: `src/solutions/SpaarkeAi/src/**/ContextPaneController.tsx`, `QuickStartModal.tsx`; `src/client/shared/Spaarke.UI.Components/src/components/Wizard/InAppWizardHost.tsx`; `InvoiceSubmission/InvoiceSubmissionWizard.tsx` (record step).
+
+**Estimated effort**: 1-2 days with tests; Console redeploy. **Blockers**: none. **Related**: ISS-057, ADR-050.
+
+---
+
+### DEF-072 — Create Invoice: a record with no linked firm fails only at submit
+
+| Field | Value |
+|---|---|
+| **Status** | Open — waits on the owner's choice of option |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-28 |
+| **Source** | Owner UAT on dev 2026-11-28 (relayed by ontology-r1) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3336 |
+
+**Description**: with no firm linked to the record, the wizard lets the user upload and fill the details, then fails at submit with `NO_FIRM_LINKED` (`internalInvoiceSubmission.ts`). The server accepts only a firm assigned to the record (D-106). The owner wants the user able to choose a firm.
+
+**Options**: (1) show the no-firm state before the upload, with what to do, and no new write path; (2) link a firm from inside the wizard through the existing record-firm assignment path, then continue (a new write from the wizard; uac-r2 reviews the access).
+
+**Entry-points**: `internalInvoiceSubmission.ts` (`NO_FIRM_LINKED`); `InvoiceSubmissionService.SubmitAsync`.
+
+**Estimated effort**: (1) half a day; (2) 1-2 days plus review. **Blockers**: owner decision. **Related**: D-106, ISS-057.
 
 ---

@@ -142,38 +142,12 @@ export const InvoiceReviewModal: React.FC<InvoiceReviewModalProps> = ({
   }, [clientUrl]);
 
   // Functional update: the shell calls this from the render the click happened in, after the (up to 1 s) dirty check.
-  const lastDir = React.useRef<'prev' | 'next'>('next');
   const onNavigate = React.useCallback(
     (dir: 'prev' | 'next') => {
-      lastDir.current = dir;
       setIndex(i => Math.min(Math.max(i + (dir === 'next' ? 1 : -1), 0), Math.max(total - 1, 0)));
     },
     [total]
   );
-
-  // Keyboard focus after a move (the shell is not changed here; its own fix is filed separately). The button just pressed becomes
-  // disabled at an end, and the old frame is removed (see `key` below), so a real browser drops focus to the body. When that has
-  // happened, put it back on an enabled control of the header: the nav button in the direction of travel, else the other one, else
-  // the close button. Focus that is somewhere real (inside the frame, on the close button) is left alone.
-  const frameWrapRef = React.useRef<HTMLDivElement>(null);
-  const movedOnce = React.useRef(false);
-  React.useEffect(() => {
-    if (!movedOnce.current) {
-      movedOnce.current = true; // not on the first render
-      return;
-    }
-    const dialog = frameWrapRef.current?.closest('[role="dialog"]');
-    if (!dialog) return;
-    const active = document.activeElement;
-    const lost = !active || active === document.body || (active instanceof HTMLButtonElement && active.disabled);
-    if (!lost) return;
-    const byLabel = (label: string) => dialog.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-    const forward = byLabel('Next record');
-    const backward = byLabel('Previous record');
-    const order = lastDir.current === 'next' ? [forward, backward] : [backward, forward];
-    const target = [...order, byLabel('Close')].find(b => b && !b.disabled);
-    target?.focus();
-  }, [index]);
 
   return (
     <>
@@ -187,7 +161,7 @@ export const InvoiceReviewModal: React.FC<InvoiceReviewModalProps> = ({
         uiScale={uiScale}
         nav={{ index, total, onNavigate, onBeforeNavigate: beforeNavigate }}
       >
-        <div ref={frameWrapRef} className={styles.frameWrap}>
+        <div className={styles.frameWrap}>
           {/* `key={url}`: each invoice gets a FRESH frame. Changing one frame's `src` adds a browser history entry per move, so Back
               would put the frame on the previous invoice while the header kept its count (and skip the dirty check). A new frame's first
               load adds no entry. */}

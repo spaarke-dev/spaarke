@@ -14,6 +14,8 @@
  *   1. Record  — choose an accessible core record (matter / project / work assignment), from `loadRecords`. The host is
  *                asked for the records linked to the invoice's firm (D-106: the one firm, or the chosen one), and again
  *                when the choice changes. A capped or partly failed read is said on screen, not hidden.
+ *              With `lookupRecord` (a host that can open a Dataverse lookup) the step also has a "Choose a record" button, so a record
+ *              outside the first page of the list can be picked; the list stays as the fallback and the choice is shown as selected.
  *              With `lockedRecord` (the host fixed the record) there is NO Record step: the host's `loadRecords` is still
  *              asked for the firm's records, and the first step after the firm step shows a check instead of the upload
  *              until the locked record is among a complete list (see {@link InvoiceSubmissionWizardProps.lockedRecord}).
@@ -119,6 +121,13 @@ const useStyles = makeStyles({
   lockedGate: {
     outlineStyle: 'none',
   },
+  lookupRow: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    columnGap: tokens.spacingHorizontalM,
+    rowGap: tokens.spacingVerticalXS,
+  },
   recordList: {
     maxHeight: '260px',
     overflowY: 'auto',
@@ -155,6 +164,8 @@ export interface InvoiceSubmissionWizardProps extends InvoiceSubmissionCallbacks
    * Default false.
    */
   hideTitle?: boolean;
+  /** Optional (def071): the app-shell `--sprk-ui-scale`, forwarded to the shell's modal when not embedded (the in-app host passes it). */
+  uiScale?: number;
   /** Wizard title. Default "Submit invoice". */
   title?: string;
   /** Called on Cancel, the close button, and Done on the result screen. */
@@ -194,6 +205,14 @@ export interface InvoiceSubmissionWizardProps extends InvoiceSubmissionCallbacks
    * If both `lockedRecord` and `initialRecord` are given, `lockedRecord` wins and `initialRecord` is ignored.
    */
   lockedRecord?: InvoiceCoreRecordOption;
+  /**
+   * Optional (ebilling-r1 def071): opens the host's record lookup (a Dataverse lookup side pane) and resolves with the record the user
+   * chose, or `null` when the user cancelled. ABSENT: the Record step is exactly as before (the list only; the external SPA has no
+   * Xrm and passes none). PRESENT, with no `lockedRecord` or `correction`: the Record step shows a "Choose a record" button above the
+   * list. A chosen record is shown as selected and counts for Next even when the list does not offer it; a cancel keeps the previous
+   * selection; a rejection shows a message and keeps the list. The server still decides whether the record can take the invoice.
+   */
+  lookupRecord?: () => Promise<InvoiceCoreRecordOption | null>;
   /**
    * Optional (ebilling-r1 095f-2e2b): submit a CORRECTED invoice, replacing the invoice this names. The host has read the invoice's
    * correction prefill; the wizard does not read it. ABSENT: the wizard behaves exactly as before. PRESENT:
@@ -259,6 +278,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   open = true,
   embedded = false,
   hideTitle = false,
+  uiScale,
   title = 'Submit invoice',
   onClose,
   onSubmitted,
@@ -268,6 +288,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   doneLabel = 'Done',
   initialRecord,
   lockedRecord: lockedRecordProp,
+  lookupRecord,
   correction,
   keepPolling,
   renderAccepted,
@@ -341,6 +362,11 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   const [recordsError, setRecordsError] = React.useState<string | null>(null);
   const [recordFilter, setRecordFilter] = React.useState('');
   const [selected, setSelected] = React.useState<InvoiceCoreRecordOption | null>(initialRecord ?? null);
+  // def071: a record chosen through `lookupRecord` (and the firm it was chosen under) stays selected when the list is read again and
+  // does not offer it: the list is only a first page, the lookup reaches the rest. Cleared when the user picks from the list.
+  const lookedUpRef = React.useRef<{ key: string; firmKey: string } | null>(null);
+  const [lookingUp, setLookingUp] = React.useState(false);
+  const [lookupError, setLookupError] = React.useState<string | null>(null);
   // Which firm the current `records` / `recordsError` answer was for ('' = no firm). Only the locked-record check reads it: a
   // list or error that belongs to another firm is never counted (it is "still loading").
   const [recordsFirmKey, setRecordsFirmKey] = React.useState<string | null>(null);
@@ -376,7 +402,17 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         setRecordsTruncated(result.truncated === true);
         setRecordsPartial(result.partial === true);
         // A record picked under another firm (or no firm) that is not offered now is dropped.
-        setSelected(prev => (prev && result.records.some(r => recordKey(r) === recordKey(prev)) ? prev : null));
+        const looked = lookedUpRef.current;
+        setSelected(prev => {
+          if (!prev) return null;
+          if (result.records.some(r => recordKey(r) === recordKey(prev))) return prev;
+          // A record the user looked up under this firm is kept although the list does not offer it. One looked up before any firm
+          // was known (firmKey '': the adapter reads a record's firms only on submit) is kept too: the firms the wizard then
+          // loads, and the firm step it shows after `firm_required`, are that record's own.
+          return looked && looked.key === recordKey(prev) && (looked.firmKey === '' || looked.firmKey === firmKey)
+            ? prev
+            : null;
+        });
         setRecordsFirmKey(firmKey);
       })
       .catch(err => {
@@ -421,6 +457,27 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     if (!needle) return records;
     return records.filter(r => `${r.name} ${r.number ?? ''} ${KIND_LABEL[r.kind]}`.toLowerCase().includes(needle));
   }, [records, recordFilter]);
+
+  // The host's record lookup (def071). A cancel (null) keeps the previous selection; a rejection says so and keeps the list.
+  const lookupRecordRef = React.useRef(lookupRecord);
+  lookupRecordRef.current = lookupRecord;
+  const handleLookupRecord = React.useCallback(async (): Promise<void> => {
+    const lookup = lookupRecordRef.current;
+    if (!lookup) return;
+    setLookingUp(true);
+    setLookupError(null);
+    try {
+      const chosen = await lookup();
+      if (chosen) {
+        lookedUpRef.current = { key: recordKey(chosen), firmKey: recordFirmId ?? '' };
+        setSelected(chosen);
+      }
+    } catch {
+      setLookupError('The record lookup could not be opened. Choose a record from the list instead.');
+    } finally {
+      setLookingUp(false);
+    }
+  }, [recordFirmId]);
 
   // ── File step ───────────────────────────────────────────────────────────
   const [file, setFile] = React.useState<IUploadedFile | null>(null);
@@ -618,6 +675,29 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
           Choose the record this invoice is for
         </Text>
 
+        {lookupRecord && (
+          <div className={styles.lookupRow}>
+            <Button
+              appearance="secondary"
+              onClick={() => void handleLookupRecord()}
+              disabled={lookingUp}
+              data-testid="choose-record-button"
+            >
+              Choose a record
+            </Button>
+            {selected && (
+              <Text size={300} className={styles.recordLabel} data-testid="selected-record">
+                {`Selected: ${recordLabel(selected)} · ${KIND_LABEL[selected.kind]}`}
+              </Text>
+            )}
+          </div>
+        )}
+        {lookupError && (
+          <MessageBar intent="warning" role="alert" data-testid="record-lookup-error">
+            <MessageBarBody>{lookupError}</MessageBarBody>
+          </MessageBar>
+        )}
+
         {notice && !needsFirmStep && (
           <MessageBar intent="warning" role="alert">
             <MessageBarBody>{notice}</MessageBarBody>
@@ -662,7 +742,10 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
               <RadioGroup
                 aria-label="Records"
                 value={selected ? recordKey(selected) : ''}
-                onChange={(_e, data) => setSelected(records.find(r => recordKey(r) === data.value) ?? null)}
+                onChange={(_e, data) => {
+                  lookedUpRef.current = null;
+                  setSelected(records.find(r => recordKey(r) === data.value) ?? null);
+                }}
               >
                 {visibleRecords.map(record => (
                   <Radio
@@ -866,7 +949,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   ];
 
   // The shell fixes its steps at mount: wait for the firm list (see above).
-  if (firms === null) {
+  // Embedded there is no modal to keep: a bare spinner stands in until the list is known.
+  if (firms === null && embedded) {
     return open ? (
       <div className={styles.compact}>
         <Spinner size="small" label="Loading" />
@@ -874,14 +958,32 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     ) : null;
   }
 
+  // In a modal the shell stays mounted while the list is read (the first read, and the read after `firm_required`): a bare spinner
+  // would show outside the modal frame, and unmounting the shell would close and reopen the dialog and lose its focus. It holds a
+  // single "Loading" step, and `resetKey` rebuilds it in place with the real steps once the list is known.
+  const loadingSteps: IWizardStepConfig[] = [
+    {
+      id: 'loading',
+      label: 'Loading',
+      renderContent: () => (
+        <div className={styles.stepContent}>
+          <Spinner size="small" label="Loading" />
+        </div>
+      ),
+      canAdvance: () => false,
+    },
+  ];
+
   return (
     <div className={styles.compact}>
       <WizardShell
         open={open}
         embedded={embedded}
         hideTitle={hideTitle}
+        uiScale={uiScale}
         title={title}
-        steps={steps}
+        steps={firms === null ? loadingSteps : steps}
+        resetKey={firms === null ? 'loading' : `ready-${firmsReload}`}
         onClose={handleShellClose}
         onFinish={handleFinish}
         finishLabel="Submit invoice"

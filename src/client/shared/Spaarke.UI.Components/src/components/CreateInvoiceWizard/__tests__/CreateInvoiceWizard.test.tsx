@@ -131,11 +131,12 @@ function mount(
 const next = () => screen.getByRole('button', { name: /^next$/i });
 const submitButton = () => screen.getByRole('button', { name: /^submit invoice$/i });
 const pdf = () => new File(['%PDF-1.4'], 'invoice.pdf', { type: 'application/pdf' });
+/** The File step is showing (a locked launch starts there, after any firm step). */
+const uploadStep = () => screen.findByText('Upload the invoice PDF');
 
-/** From the Record step (the launch record already chosen) to the submitted invoice. */
+/** From the File step (a locked launch has no Record step) to the submitted invoice. */
 async function fillAndSubmit(container: HTMLElement) {
-  await waitFor(() => expect(next()).toBeEnabled());
-  fireEvent.click(next());
+  await uploadStep();
   const input = container.querySelector('input[type="file"]') as HTMLInputElement;
   fireEvent.change(input, { target: { files: [pdf()] } });
   await waitFor(() => expect(next()).toBeEnabled());
@@ -151,8 +152,10 @@ describe('CreateInvoiceWizard — the internal submission', () => {
   it('submits through the internal route and shows the server result; the client creates nothing', async () => {
     const server = makeServer();
     const t = mount(server);
-    // The launch record is already chosen and the only one offered (locked).
-    expect(await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ })).toBeChecked();
+    // A locked launch has no Record step: it opens on the File step and offers no record to pick (owner UAT 2026-11-28).
+    await uploadStep();
+    expect(screen.queryByRole('radiogroup', { name: /Records/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Choose the record this invoice is for/)).not.toBeInTheDocument();
     await fillAndSubmit(t.container);
 
     expect(await screen.findByText('Invoice received')).toBeInTheDocument();
@@ -176,8 +179,7 @@ describe('CreateInvoiceWizard — the internal submission', () => {
   it('the firm invoice number is required before the submit button works (D-91)', async () => {
     const server = makeServer();
     const t = mount(server);
-    await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ });
-    fireEvent.click(next());
+    await uploadStep();
     fireEvent.change(t.container.querySelector('input[type="file"]') as HTMLInputElement, {
       target: { files: [pdf()] },
     });
@@ -260,7 +262,6 @@ describe('CreateInvoiceWizard — the internal submission', () => {
         : original(url, init)
     );
     const t = mount(server);
-    await screen.findByRole('radio', { name: /Acme/ });
     await fillAndSubmit(t.container);
     expect(await screen.findByText(/firm you chose is not linked to this record/i)).toBeInTheDocument();
     expect(screen.queryByText('Invoice received')).not.toBeInTheDocument();
@@ -274,7 +275,6 @@ describe('CreateInvoiceWizard — a held submission (FR-19, D-24)', () => {
   it('shows the findings and Override + Return to firm when the server says the caller may override', async () => {
     const server = makeServer({ statuses: held });
     const t = mount(server);
-    await screen.findByRole('radio', { name: /Acme/ });
     await fillAndSubmit(t.container);
     expect(await screen.findByText(/Reason: ebilling\.submission\.blocked/)).toBeInTheDocument();
     expect(await screen.findByText('Partner rate may not exceed 650 per hour')).toBeInTheDocument();
@@ -285,7 +285,6 @@ describe('CreateInvoiceWizard — a held submission (FR-19, D-24)', () => {
   it('without the server signal there is no Override option at all; Return to firm remains', async () => {
     const server = makeServer({ statuses: held, blocked: heldView({ canOverride: false }) });
     const t = mount(server);
-    await screen.findByRole('radio', { name: /Acme/ });
     await fillAndSubmit(t.container);
     await screen.findByText('Partner rate may not exceed 650 per hour');
     expect(screen.queryByRole('button', { name: /override/i })).not.toBeInTheDocument();
@@ -300,7 +299,6 @@ describe('CreateInvoiceWizard — a held submission (FR-19, D-24)', () => {
       ],
     });
     const t = mount(server);
-    await screen.findByRole('radio', { name: /Acme/ });
     await fillAndSubmit(t.container);
 
     fireEvent.click(await screen.findByRole('button', { name: /^override$/i }));
@@ -328,7 +326,6 @@ describe('CreateInvoiceWizard — a held submission (FR-19, D-24)', () => {
       decide: () => reply(403, { errorCode: 'ebilling.override.not_permitted' }),
     });
     const t = mount(server);
-    await screen.findByRole('radio', { name: /Acme/ });
     await fillAndSubmit(t.container);
     fireEvent.click(await screen.findByRole('button', { name: /^override$/i }));
     fireEvent.change(within(formModal()).getByLabelText(/reason/i), { target: { value: 'because' } });
@@ -357,7 +354,6 @@ describe('CreateInvoiceWizard — a held submission (FR-19, D-24)', () => {
       },
     });
     const t = mount(server);
-    await screen.findByRole('radio', { name: /Acme/ });
     await fillAndSubmit(t.container);
     fireEvent.click(await screen.findByRole('button', { name: /return to firm/i }));
     fireEvent.change(within(formModal()).getByLabelText(/reason/i), { target: { value: 'Wrong matter' } });

@@ -15,6 +15,9 @@
  *     open the same dialog code page on the open batch (mode "email" or "marksent"). The page calls the BFF:
  *     POST /api/finance/export-batches/{id}/email and .../mark-sent-to-ap (task 151c-1a).
  *
+ *   - "Rule Review" (Rule Set form, an existing record; DEF-069, #3112) opens the Rule Review code page (web resource
+ *     sprk_rulereviewpage) in a dialog on the open rule set (openRuleReview), so an administrator need not find it in the list again.
+ *
  * DISPLAY ONLY: the enable rules below only decide when a button is offered. The server decides every export, payment and
  * download (FR-41, FR-42): a selection that slips past a rule is refused by the server, per invoice, in the dialog.
  *
@@ -36,7 +39,7 @@ Spaarke.ApExport = Spaarke.ApExport || {};
 Spaarke.ApExport.Ribbon = Spaarke.ApExport.Ribbon || {};
 
 (function (ns) {
-    ns.VERSION = "1.1.0";
+    ns.VERSION = "1.2.0";
 
     var LOG = "[ApExport.Ribbon v" + ns.VERSION + "]";
 
@@ -58,6 +61,11 @@ Spaarke.ApExport.Ribbon = Spaarke.ApExport.Ribbon || {};
     /** Same size as the wizard dialogs (sprk_wizard_commands.js). */
     ns.DIALOG_OPTIONS = { target: 2, position: 1, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" } };
 
+    /** The Rule Review code page (src/solutions/RuleReview, built to sprk_rulereviewpage.html) and its dialog: larger than the AP dialogs (a list and a rule editor). */
+    ns.RULE_REVIEW_PAGE = "sprk_rulereviewpage";
+    ns.RULE_REVIEW_TITLE = "Rule Review";
+    ns.RULE_REVIEW_DIALOG_OPTIONS = { target: 2, position: 1, width: { value: 90, unit: "%" }, height: { value: 90, unit: "%" } };
+
     /** A record id without braces, lower case. */
     ns.cleanId = function (id) {
         return String(id || "").replace(/[{}]/g, "").toLowerCase();
@@ -66,6 +74,11 @@ Spaarke.ApExport.Ribbon = Spaarke.ApExport.Ribbon || {};
     /** The navigateTo `data` string the page reads (parseDataParams): mode and comma-separated ids. */
     ns.launchData = function (mode, ids) {
         return "mode=" + encodeURIComponent(mode) + "&ids=" + encodeURIComponent(ids.join(","));
+    };
+
+    /** The navigateTo `data` string the Rule Review page reads (parseDataParams): the rule set id. */
+    ns.ruleReviewLaunchData = function (ruleSetId) {
+        return "ruleSetId=" + encodeURIComponent(ns.cleanId(ruleSetId));
     };
 
     /** The navigateTo `data` string for a mode opened on one batch: mode and batch id. */
@@ -303,6 +316,40 @@ Spaarke.ApExport.Ribbon = Spaarke.ApExport.Ribbon || {};
             ).then(onClose, onClose);
         } catch (error) {
             console.error(LOG, "openFromBatchForm failed:", error);
+            return Promise.resolve();
+        }
+    };
+
+    /**
+     * Command on the Rule Set form (DEF-069, GitHub #3112): open the Rule Review code page (web resource sprk_rulereviewpage) in a dialog
+     * on the open rule set, then refresh the form (a publish or an assignment on the page changes the rule set). The id goes in the
+     * navigateTo `data` as `ruleSetId`, which the page reads (RuleReview `services/launch.ts`). The page decides access (admin-only,
+     * D-76), so this command only launches it. Hosted here because this is the e-billing ribbon script and it already holds the
+     * dialog launch (cleanId, recordIdOf, alert, DIALOG_OPTIONS); the namespace is the script's, not a claim that this is an AP export.
+     */
+    ns.openRuleReview = function (primaryControl) {
+        try {
+            var id = recordIdOf(primaryControl);
+            if (!id) {
+                alert(ns.RULE_REVIEW_TITLE, "Save this rule set first.");
+                return Promise.resolve();
+            }
+            var onClose = function () {
+                try {
+                    var refreshed = primaryControl.data && primaryControl.data.refresh ? primaryControl.data.refresh(false) : null;
+                    Promise.resolve(refreshed).then(function () {
+                        if (primaryControl.ui && primaryControl.ui.refreshRibbon) primaryControl.ui.refreshRibbon();
+                    });
+                } catch (error) {
+                    console.warn(LOG, "The form could not be refreshed:", error);
+                }
+            };
+            return Xrm.Navigation.navigateTo(
+                { pageType: "webresource", webresourceName: ns.RULE_REVIEW_PAGE, data: ns.ruleReviewLaunchData(id) },
+                Object.assign({}, ns.RULE_REVIEW_DIALOG_OPTIONS, { title: ns.RULE_REVIEW_TITLE })
+            ).then(onClose, onClose);
+        } catch (error) {
+            console.error(LOG, "openRuleReview failed:", error);
             return Promise.resolve();
         }
     };

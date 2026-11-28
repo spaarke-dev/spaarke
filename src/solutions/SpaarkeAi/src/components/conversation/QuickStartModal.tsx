@@ -35,6 +35,8 @@
  *     no corresponding Get-Started card — those consumer types are reached
  *     from the Assistant's own draft-in-chat `surface_launch` dispatch, a
  *     different entry point than this card grid.)
+ *   - `create-invoice` (ebilling-r1 def071) uses `launchCreateInvoiceWizard`, which opens the wizard in the mounted
+ *     in-app host (no hand-off envelope: it carries no files or record).
  *   - The remaining six cards reuse the EXACT SAME `@spaarke/ui-components`
  *     launchers (`launchCreateProjectWizard`, `launchAssignWorkWizard`,
  *     `launchSummarizeFilesWizard`, `launchFindSimilarWizard`,
@@ -81,6 +83,7 @@ import type { LaunchSurfaceOutcome } from '@spaarke/ui-components';
 import {
   launchSurface,
   launchPlaybookIntent,
+  launchCreateInvoiceWizard,
   SprkAnalysisWorkType,
   // spaarke-modal-system task 050 (FR-14): the shared modal shell — replaces the
   // bespoke Dialog envelope + the interim P1 ModalWindowControls wiring. UAT
@@ -323,6 +326,13 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
             RECORD_CARD_ENTITY[cardId]!,
             onRecordCreated
           );
+          break;
+
+        case 'create-invoice':
+          // ebilling-r1 def071: the Create Invoice wizard opens IN-APP (the mounted InAppWizardHost, ADR-050 launch rule (a)), not in a
+          // navigateTo page. No record context here, so its Record step lets the user pick the record. It creates no record the host
+          // could file (the server creates the invoice after processing), so there is no onRecordCreated report and no hand-off.
+          launchCreateInvoiceWizard({ bffBaseUrl });
           break;
 
         case 'document-upload-wizard':

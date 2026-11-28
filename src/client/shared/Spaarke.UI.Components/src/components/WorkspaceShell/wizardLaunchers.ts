@@ -104,6 +104,8 @@ const IN_APP_WIZARD_NAMES = [
   'sprk_createeventwizard',
   'sprk_createtodowizard',
   'sprk_createworkassignmentwizard',
+  // ebilling-r1 def071: the Create Invoice wizard (lives in this library) opens in the Console too.
+  'sprk_createinvoicewizard',
   // Task 113: Summarize Files lives in this library too ...
   'sprk_summarizefileswizard',
   // ... but these three are code-page solutions (`DocumentUploadWizard`, `FindSimilarCodePage`,
@@ -142,6 +144,7 @@ export const DEFAULT_IN_APP_WIZARD_NAMES: readonly InAppWizardName[] = [
   'sprk_createeventwizard',
   'sprk_createtodowizard',
   'sprk_createworkassignmentwizard',
+  'sprk_createinvoicewizard',
   'sprk_summarizefileswizard',
 ];
 
@@ -391,6 +394,22 @@ export function launchAssignWorkWizard(options: BaseLauncherOptions): void {
     webresourceName: 'sprk_createworkassignmentwizard',
     data: `bffBaseUrl=${encodeURIComponent(options.bffBaseUrl)}`,
     title: 'Create Work Assignment',
+  });
+}
+
+/**
+ * Launch the Create Invoice wizard (`sprk_createinvoicewizard`) with no record context (ebilling-r1 def071).
+ *
+ * The Console's Quick Start "Create Invoice" card calls this. A mounted `InAppWizardHost` opens the wizard in-app (the Record
+ * step then lets the user pick the record, by Dataverse lookup or from the list); with no host mounted it falls back to the same
+ * `navigateTo` dialog every other launcher uses. A launch from a record (the ribbon, Visual Host) does not use this: it passes the
+ * record and locks it, through the ribbon script's own `navigateTo`.
+ */
+export function launchCreateInvoiceWizard(options: BaseLauncherOptions): void {
+  fireNavigateTo({
+    webresourceName: 'sprk_createinvoicewizard',
+    data: `bffBaseUrl=${encodeURIComponent(options.bffBaseUrl)}`,
+    title: 'Create New Invoice',
   });
 }
 

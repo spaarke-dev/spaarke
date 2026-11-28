@@ -43,6 +43,9 @@ export type { SprkModalDismiss, SprkModalBodyScroll, SprkModalNav, SprkModalProp
 // — that is React 18+; this shell must stay React-16/17-safe (NFR-04).
 let sprkModalTitleIdCounter = 0;
 
+/** How long after a ‹ › press an index change still counts as that move, for putting lost focus back (ISS-055). */
+const MOVE_FOCUS_WINDOW_MS = 2000;
+
 // Task 202 follow-up (modal swap handover). A host sometimes replaces one SprkModal with a different one in the same
 // place (RuleWizard: a "loading" modal until its catalog arrives, then the wizard's own modal). The second modal opens
 // while focus sits on the first one's Close button, so that button, not the control that opened the first, is what it
@@ -343,11 +346,43 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // Browse guard (`nav.onBeforeNavigate`): without one, navigate synchronously; with one, navigate only
   // when it allows it. A throwing / rejecting guard blocks the move (fail closed) and is reported with a
   // console.warn, so a broken guard shows up as a diagnosable failure rather than a dead ‹ › button.
+  // Keyboard focus after a move (ISS-055): the button just pressed becomes `disabled` when the move reaches either end, and a
+  // real browser then drops focus to the body. After each move, if focus was lost (on the body, or on a now-disabled nav button),
+  // put it on the nav button in the direction of travel, else the other one, else the close button. Focus that is somewhere real
+  // is left alone.
+  const prevButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const nextButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  // The move expires: a host whose onNavigate changes nothing (a click ignored while it is busy) must not leave a direction behind
+  // for a later, programmatic index change to act on. 2 s covers a guard's dirty check (up to 1 s).
+  const movedRef = React.useRef<{ dir: 'prev' | 'next'; at: number } | null>(null);
+  const navIndex = nav?.index;
+  React.useEffect(() => {
+    const moved = movedRef.current;
+    movedRef.current = null;
+    if (!moved || Date.now() - moved.at > MOVE_FOCUS_WINDOW_MS) return;
+    const dir = moved.dir;
+    const prev = prevButtonRef.current;
+    const next = nextButtonRef.current;
+    const doc = surfaceRef.current?.ownerDocument ?? document;
+    const active = doc.activeElement;
+    const lost =
+      !active || active === doc.body || (active === prev && prev.disabled) || (active === next && next.disabled);
+    if (!lost) return;
+    const close = surfaceRef.current?.querySelector<HTMLButtonElement>('button[aria-label="Close"]') ?? null;
+    const order = dir === 'next' ? [next, prev, close] : [prev, next, close];
+    order.find(b => b && !b.disabled)?.focus();
+  }, [navIndex]);
+
+  const navigateTo = (dir: 'prev' | 'next') => {
+    movedRef.current = { dir, at: Date.now() };
+    nav?.onNavigate(dir);
+  };
+
   const handleNavigate = (dir: 'prev' | 'next') => {
     if (!nav || nav.disabled) return;
     const guard = nav.onBeforeNavigate;
     if (!guard) {
-      nav.onNavigate(dir);
+      navigateTo(dir);
       return;
     }
     const reportGuardFailure = (err: unknown) =>
@@ -360,7 +395,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
       return;
     }
     void Promise.resolve(verdict).then(allowed => {
-      if (allowed) nav.onNavigate(dir);
+      if (allowed) navigateTo(dir);
     }, reportGuardFailure);
   };
 
@@ -397,6 +432,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                   <Button
                     appearance="subtle"
                     size="small"
+                    ref={prevButtonRef}
                     icon={<ChevronLeft20Regular />}
                     disabled={nav.disabled || nav.index <= 0}
                     onClick={() => handleNavigate('prev')}
@@ -410,6 +446,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                   <Button
                     appearance="subtle"
                     size="small"
+                    ref={nextButtonRef}
                     icon={<ChevronRight20Regular />}
                     disabled={nav.disabled || nav.index >= nav.total - 1}
                     onClick={() => handleNavigate('next')}
