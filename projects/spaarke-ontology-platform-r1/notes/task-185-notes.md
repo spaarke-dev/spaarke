@@ -199,3 +199,10 @@ Every host in the checklist has now been run, or recorded as not testable on dev
 - **New minor defects:**
   - the shared composer drops an unresolvable recipient pick silently;
   - focus is not handed back in the viewer's iframe composer.
+
+### Create Invoice items: routed to ebilling-r1 (2026-11-28)
+ebilling-r1 took all four items and files them under its own project.
+1. **Record lock: in progress on their branch.** The form launch sends the record and the lock flag. CreateInvoiceWizard passed the record to the submission wizard only as `initialRecord`, never as `lockedRecord`.
+2. **Console card + in-app launch:** their next item, with a record lookup when there is no context.
+3. **No linked firm:** they are putting the options to the owner. They will at least show the empty state at the Firm step instead of failing at submit.
+4. **White header: platform limit.** Every form-launched wizard (To Do, Event, Report Card, Invoice) opens through `sprk_secure_child_ribbon.js` openPage with the navigateTo dialog options, and that header is platform chrome a web resource cannot style. In the Console the in-app launch (item 2) avoids it.
