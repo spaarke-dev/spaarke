@@ -367,3 +367,9 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 - **Status**: filed as #3317 (https://github.com/spaarke-dev/spaarke/issues/3317). Pre-existing, outside 036's diff; sibling of #3181.
 - **Where**: `Api/Filters/CommunicationRecordAuthorizationFilter.cs` `AuthorizeTaskCreateAsync` asks AppendTo only; `TaskActionCore.ReadRegardingNameAsync` then copies the name app-only. Routes: `POST /api/communications/{id}/create-task` and `.../proposals/{reviewLogId}/create-task/apply`.
 - **Fix**: `Read | AppendTo` there, plus a regression pair like `Issue3181_*`. Changes who may create a task from a communication: needs the owner's go.
+
+## D-036-2 — `IEventsCapability` is a 1:1 interface with no test double (found 2026-11-27, merging master after 036)
+
+- **Status**: filed as #3320 (https://github.com/spaarke-dev/spaarke/issues/3320). Decide at task 090.
+- **What happened**: the ADR-010 ratchet failed at 174 against 173 on the branch. Master is fine (171 against 172). Two r2 interfaces had entered within master's headroom without entries: `IPlaybookRunAi` (accepted: a PublicContracts facade with doubles) and `IEventsCapability`. Ceiling raised to 174 on the branch, both documented in `ADR010_DITests.cs`.
+- **Fix at wrap-up**: register `EventsCapability` as a concrete and lower by 1, or add the double that justifies the seam.
