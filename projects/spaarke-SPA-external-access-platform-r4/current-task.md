@@ -7,9 +7,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Active** | No task in progress. 044, 045 and 047 are DONE and merged. Records: `notes/task-044-notes.md`, `task-045-notes.md`, `task-047-notes.md`. |
+| **Active** | No task in progress. 044, 045 and 047 are DONE and merged. 046 is DONE with no fix needed (2026-11-28; on this branch, not yet on master). Records: `notes/task-044-notes.md`, `task-045-notes.md`, `task-046-notes.md`, `task-047-notes.md`. |
 | **In flight** | 044 + 047 squash `4f9e371445` (PR #3311) and 045 squash `f0f1e810bd` (PR #3322, reviewed by ontology-r1 and uac-r2) are on uac-r2's NEXT dev BFF candidate list. They go live only on the owner's go naming the SHA in uac-r2's session. |
-| **Next action** | Next task per TASK-INDEX on the owner's go: 048 (Teams mobile), 046 (owner-gated acme checks; see below), then 058. 016 stays wip. |
+| **Next action** | Next task per TASK-INDEX on the owner's go: 048 (Teams mobile), then 058. 016 stays wip. |
 
 ## Live on dev
 - **BFF:** `b84fa5f061` (= `af8a5547ef` + the mcp-r2 file probe), LIVE since 2026-11-28 ~04:15Z (uac-r2); the gate is ~04:43Z; rollback `af8a5547ef`. It does NOT contain 044/045/047.
@@ -20,12 +20,11 @@
   - acme's registry row names its own BFF, so the dev BFF skips it. The fix is uac-r2's #2761 / #2791, live since 2026-11-13 20:40Z; there has been no acme fault since (40,910 fault rows from 2026-10-14 to 11-13).
   - provisioning-r1 says acme is stable. Its setup status must not be changed.
   - Detail: `notes/task-047-notes.md` "Resolved 2026-11-28".
-- 046's data fix is moot: #2791 resolved the fault. The owner decides whether 046 and #2578 close as "fixed by #2791".
+- 046 closed with no fix needed and #2578 closed as fixed by #2791 (owner, 2026-11-28: "if they aren't needed then close them"). #2163 was already closed as its duplicate.
 - provisioning-r1 FYI, not this project's: at 03:45Z a dev path met an acme SPE container (both stamps use the Model 1 container type), and the ownership guard refused it, as intended. Which dev path enumerated it is unknown.
 - Registration default (`DATAVERSE_URL`): it keeps the Warning (owner, 2026-11-27).
 
 ## Owner questions open
-- Does 046 close as "no fix needed" (acme is already skipped)?
 - Track the raw filing-reference footer seen in an older PRJ-000046 system email?
 - Track the residual export-hardening gaps privately?
 - Docx preview as an Idea?
