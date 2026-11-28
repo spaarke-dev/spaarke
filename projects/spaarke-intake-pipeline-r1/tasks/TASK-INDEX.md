@@ -20,12 +20,12 @@
 | 011 | `sprk_processingjob` run extension + `sprk_backgroundjob` description (FR-06) | 1 | ✅ [done] | none | P1-A | sonnet / high |
 | 012 | `requestType` on RoutingContext + intake harness registry (FR-08) | 1 | ✅ [done] | 005 | P1-A | opus / high |
 | 013 | Orchestrator IJobHandler: stages, resume, atomic claim, terminal-last, kill switches (FR-07) | 1 | ✅ (22d2ff128d + Task 182 entry; dev ownership live; ArchTests 2845/2845; follow-up #3310) | 004, 010, 011, 012 | P1-B | opus / high |
-| 014 | Engine dispatch + completion: blob staging, ids-only dispatch, completion handler, timeout | 1 | 🔲 [open] | 013, 001, 002 | P1-C | sonnet / xhigh |
+| 014 | Engine dispatch + completion: blob staging, ids-only dispatch, completion handler, timeout | 1 | ✅ [done] | 013, 001, 002 | P1-C | sonnet / xhigh |
 | 015 | NDA harness: outputs + clause table, check_outputs, version stamp, prior markup preserved (FR-09) | 1 | 🔲 [open] | 014, 004, 008 | P1-E | opus / high |
 | 016 | Manual-triage path (FR-10) | 1 | 🔲 [open] | 013 | P1-D | sonnet / high |
-| 017 | Approval: team Work Item, claim, one approve/reject endpoint, Decision Record (FR-11) | 1 | 🔲 [open] | 013, 010 | P1-C | opus / high |
-| 018 | MDA Approve/Reject/Claim ribbon on `sprk_servicerequest` (FR-11) | 1 | 🔲 [open] | 017 | P1-D | sonnet / high |
-| 019 | Console approval card on the Work Item (FR-11) | 1 | 🔲 [open] | 017 | P1-D | sonnet / high |
+| 017 | Approval on the Decide lane: intake Signal, claim, approve-intake / reject-intake, review Decision Record (FR-11; rewritten 2026-11-28) | 1 | 🔲 [open] | 013, 010, 014 | P1-C | opus / high |
+| 018 | MDA Approve/Reject/Claim ribbon on `sprk_servicerequest` (FR-11; POML to be revised for the Decide lane after 017) | 1 | 🔲 [open] | 017 | P1-D | sonnet / high |
+| 019 | Console approval card on the Work Item (FR-11; POML to be revised for the Decide lane after 017) | 1 | 🔲 [open] | 017 | P1-D | sonnet / high |
 | 020 | Stage status on every step + opt-in status emails (FR-12) | 1 | 🔲 [open] | 013, 010, 006 | P1-E | sonnet / high |
 | 021 | Front Door door: request + run on submit, Front Door return (FR-13) | 1 | 🔲 [open] | 013, 010 | P1-F | opus / high |
 | 022 | Console "Submit as a request" + POST /api/intake/requests (FR-14) | 1 | 🔲 [open] | 013, 010 | P1-G | sonnet / high |
@@ -74,7 +74,7 @@ At most 6 agents per wave. Run the build check between waves.
 **Phase 1**
 - Wave 1-1 (parallel, 3 agents): 010, 011, 012. Prereq: 005 for 012; ontology coordination for 010. — goal-eligible: NO (Dataverse schema on dev needs owner OK)
 - Wave 1-2 (1 agent): 013. Prereq: 004, 010–012. — goal-eligible: NO (single task, architectural)
-- Wave 1-3 (parallel, 2 agents): 014, 017. Prereq: 013 (+001, 002 for 014). They touch different shared files. — goal-eligible: NO (auth)
+- Wave 1-3 (parallel, 2 agents): 014, 017. Prereq: 013 (+001, 002 for 014). They touch different shared files. — goal-eligible: NO (auth). 2026-11-28: 014 done; 017 stopped at its escalation trigger and was rewritten for the Decide lane (now after 014, runs alone).
 - Wave 1-4 (parallel, 4 agents): 016, 023, 018, 019. Prereq: 013, 017. — goal-eligible: NO (023 admin authorization; 018/019 need UI verification)
 - Wave 1-5 (parallel, 3 agents): 015, 020, 024. Prereq: 014, 008 (015); 006 (020). — goal-eligible: NO (auth in 024, judgment in 015)
 - Wave 1-6 (1 agent): 021. Prereq: 013, 010. Serial: shares the intake DI module with 020/022. — goal-eligible: NO (single task)
