@@ -167,7 +167,7 @@ public class ContentDedupDetector
             await _notificationService.CreateNotificationAsync(
                 userId: systemUserId.Value,
                 title: "Duplicate document detected",
-                body: $"\"{fileName}\" matches the content of an existing document, so it was not filed again. Open the existing document instead.",
+                body: $"\"{fileName}\" matches the content of an existing document, so it is already in Spaarke and was not saved again.",
                 category: "documents",
                 cancellationToken: ct);
         }
