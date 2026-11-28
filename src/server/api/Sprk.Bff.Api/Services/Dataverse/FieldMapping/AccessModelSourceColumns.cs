@@ -12,11 +12,13 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// the caller can read on that parent's columns. These columns hold identity proofs, invitation state, standing grants and the
 /// secure flags that decide who sees a record, so they stay behind the caller's view even from the filing parent.</para>
 /// <para><b>Matched by name on every table</b> (trimmed, ordinal ignoring case), so a column of the same name on another table
-/// is denied too. <see cref="IdentityCollisionPrefix"/> denies every column that starts with it.</para>
-/// <para><b>One source of truth.</b> No field-security profile in the repo names these sets, so this constant is the authority.
-/// <c>tests/Spaarke.ArchTests/AccessModelSourceColumnsGuardTests.cs</c> fails when a column the repo's solution XML marks
-/// field-secured on contact, systemuser or any table that carries <c>sprk_issecure</c> is neither on this list nor in that
-/// guard's pinned list of business columns. Consulted by <see cref="MappingSourceCallerMask"/> (create and send), the
+/// is denied too. <see cref="IdentityCollisionPrefix"/> denies every column that starts with it, and every column the
+/// access-column registry names (<see cref="AccessRegistryColumns"/>) is denied by name as well.</para>
+/// <para><b>One source of truth.</b> No field-security profile in the repo names these sets, so this constant (with the
+/// registry it derives from) is the authority. <c>tests/Spaarke.ArchTests/AccessModelSourceColumnsGuardTests.cs</c> fails when
+/// a column the repo's solution XML marks field-secured on contact, systemuser, sprk_document, sprk_communication or any table
+/// that carries <c>sprk_issecure</c> (in any solution file) is neither on this list nor in that guard's pinned list of business
+/// columns. Consulted by <see cref="MappingSourceCallerMask"/> (create and send), the
 /// field-mapping push and Repair.</para>
 /// <para>ADR-010: static, no DI registration.</para>
 /// </remarks>
@@ -49,16 +51,36 @@ internal static class AccessModelSourceColumns
         // systemuser: the home tenant and object
         "sprk_hometenantid",
         "sprk_homeobjectid",
+
+        // sprk_document: the submission marker that narrows who sees it, and its file binding (drive, item, bound item)
+        "sprk_restrictedbysubmission",
+        "sprk_graphdriveid",
+        "sprk_graphitemid",
+        "sprk_graphitemidbound",
     };
 
-    /// <summary>Whether <paramref name="column"/> is an access-model column (by exact name or by the identity-collision prefix).</summary>
+    /// <summary>
+    /// Every column the access-column registry names (<see cref="InheritedAccessPermission.AccessColumns"/>: the columns only
+    /// the BFF's typed writers set, on any table), by name, trimmed. Derived from that registry, so a column added there is
+    /// denied here too.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> AccessRegistryColumns = InheritedAccessPermission.AccessColumns.Values
+        .SelectMany(columns => columns)
+        .Where(column => !string.IsNullOrWhiteSpace(column))
+        .Select(column => column.Trim())
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Whether <paramref name="column"/> is an access-model column: by exact name, by the identity-collision prefix, or
+    /// named in the access-column registry (<see cref="AccessRegistryColumns"/>), on any table.</summary>
     internal static bool Contains(string? column)
     {
         if (string.IsNullOrWhiteSpace(column))
             return false;
 
         var name = column.Trim();
-        return Exact.Contains(name) || name.StartsWith(IdentityCollisionPrefix, StringComparison.OrdinalIgnoreCase);
+        return Exact.Contains(name)
+               || name.StartsWith(IdentityCollisionPrefix, StringComparison.OrdinalIgnoreCase)
+               || AccessRegistryColumns.Contains(name);
     }
 
     /// <summary>Whether any of <paramref name="columns"/> is an access-model column.</summary>
