@@ -81,3 +81,14 @@ Tests (`TaskWriteToolsTests`): must-fire, the app-only create double records the
 - **K3** The tool trims `subject`; REST does not. The parity test sends already-trimmed input.
 - **K4** A complete replay says Completed even if the task was reopened since. A status write that landed followed by a later fault reports "could not be completed" until the next call heals it (`alreadyCompleted: true`).
 - **K5** A replay is answered from the cache for 24 hours without re-checking access. It returns only the caller's own inputs and the task id, so nothing is disclosed.
+
+## uac-r2 review (2026-11-27)
+
+- **Result:** no F-class findings; approved from the access side (diff 20b8606ba9..5e38b387ef).
+- **Confirmed:**
+  - `HasRequiredRights` requires every bit, so `Read | AppendTo` needs both.
+  - An absent and a denied regarding record get the same 403 in the same time (NFR-01).
+  - The retry key is per caller: `tenant:{tid}` + `{oid}:{sha256(key)}`.
+  - A replay returns only the caller's own inputs and id.
+  - "Outcome unknown" for Failed, Ok-with-no-value and a fault is correct.
+- **#3317:** confirmed, on both communication routes. uac-r2 owns the filter and takes the D-3181 extension question to the owner. r2 has no action on it.
