@@ -13,6 +13,7 @@
 | `profiles/patent-profile-b.json` | Patent test profile B (`pat-b-v1`), keyed to the test user (`demo@`) |
 | `disclosures/disclosure-01.md` … `disclosure-05.md` | Five test invention disclosures, each a summary written here from a published US patent |
 | `skill/SKILL.md` | The drafting skill `spaarke-patent-claims-test`: fetch the caller's profile with `spike_get_profile`, then draft the claim set to it |
+| `package/` | The Cowork plugin built from the skill by task 025: `manifest.json` (app id `55352aad-2e90-41b5-a571-1d0e783ed9fc`, v1.0.0), icons, and `skills/spaarke-test-patent-claims/SKILL.md`. Its zip `spaarke-legal-pat-cowork-test-1.0.0.zip` is gitignored; rebuild in PowerShell from this folder: `Compress-Archive -Path .package* -DestinationPath .spaarke-legal-pat-cowork-test-1.0.0.zip -Force` (same app id) |
 | `README.md` | This file: the standards, the sources, and the drafting-spike kit (FR-10) |
 
 Both profiles carry `status: test`, `attorneyReviewed: false`, a `profileVersion`, model tier `Reasoning`, and `systemuserid: "TO-BE-SET-BY-011"`. Task 011 fills in the real ids and serves the files through `spike_get_profile` (spec FR-02: "The patent profile set for G1-PAT is added the same way, as files"). This task does not.
@@ -65,16 +66,29 @@ Can a Cowork skill plus an attorney's profile draft a usable patent section, and
 
 ### Setup
 
-1. **R4 row first.** Before the owner installs the skill in Cowork, send this row to COPILOT-PLATFORM-COORDINATION (Issue #3006), quote it below as sent, and add it to `../README.md` section 2 (the "Cowork patent-drafting spike assets" row):
+1. **R4 row first.** Before the owner uploads the package, this row goes to COPILOT-PLATFORM-COORDINATION (Issue #3006) and to `../README.md` section 2 (the "Cowork patent-drafting spike assets" row):
 
-   > **R4 row (draft; task 025 sends it and records the date):** Artifact: Cowork skill `spaarke-patent-claims-test` (from `phase0/patents/skill/SKILL.md`, version 0.1.0-test). Owner project: specialist-legal-agents-r1. Scope: the owner and the test user only (R7). Removal plan: the owner removes the skill from both accounts after task 025 records its results; task 031 confirms. Removal date: set by task 025 (no later than the end of Phase 0). Sent: _not yet_.
+   > **R4 row (task 025):** Artifact: Cowork plugin `spaarke-legal-pat-cowork-test` (app id `55352aad-2e90-41b5-a571-1d0e783ed9fc`, manifest 1.30, version 1.0.0), one skill `spaarke-test-patent-claims`, no action and no connector of its own (uses the tenant connector "Spaarke MCP"). Owner project: specialist-legal-agents-r1. Route: Microsoft 365 admin center, Agents, Tools, Registry (first upload of a fresh id; never Cowork, Customize, Plugins first). Scope: the owner and `demo@` only (R7). Removal plan: the owner removes it from the Registry after task 025 records its results; task 031 confirms and coordination closes the row. Removal date: at task 031 (no later than the end of Phase 0). Sent to coordination: **2026-11-28** (awaiting its PLANNED record).
 
-2. **Install** the skill for the owner and the test user only (owner's click). Its name and description come from the skill's front matter.
-3. **Profile source.** Preferred: the dev BFF serves `spike_get_profile` with both patent profiles keyed (tasks 011 and 015), and the Spaarke MCP connector is available in Cowork. If the spike runs before that deploy, the skill's spike-only route applies: the tester attaches the right profile file (A for the owner, B for the test user) and says to use it. Record the route per run; the route changes nothing else.
+2. **Upload and install** (owner's clicks): the steps in "Spike package" below. Never upload a changed zip over it; a fix goes on a fresh app id with a new R4 row.
+3. **Profile source.** The dev BFF serves `spike_get_profile` with both patent profiles keyed (tasks 011 and 015; live since 2026-11-26, now in `b84fa5f061`), so the route is `tool`. "Spaarke MCP" must be switched on for the account (Copilot, Settings, Sources, Spaarke MCP, Connected): on 2026-11-28 Cowork reached no Spaarke tool until it was. The attached-file route stays only as a fallback if the tool cannot be called; record the route per run.
 4. **Testers.** The owner runs as profile A; the test user runs as profile B. A run under the wrong account is invalid (record it; do not score it).
 5. **Each run in a new Cowork session.** No earlier turn may carry context.
 6. **Disclosure.** Open or attach `disclosures/disclosure-02.md` from the project folder.
 7. **App Insights** (preferred route only): use the PowerShell query form in `../g8/README.md` to find the `spike_get_profile` call by tester and minute. Requests are sampled at about 25%, so a missing call is not proof that none was made.
+
+### Spike package (task 025, built 2026-11-28)
+
+**What changed from `skill/SKILL.md`** (the source kept as task 006 wrote it): the skill is renamed `spaarke-test-patent-claims` (the R3 test-marker naming coordination asked for in task 020); it calls `spike_get_profile` with `function` = `"patent"` (the spike requires it, decision 2026-11-26); it handles the spike error codes as the G1 skills do; its metadata block is dropped (the uploaded G1 skills carry only `name` and `description`); section 3 (archetype guidance) is kept. FORBIDDEN check (accelerator `FORBIDDEN_IN_PACKAGE`, names and text): 0 hits. SKILL.md is 3,897 characters. Manifest version 1.0.0 (a version starting "0." is refused by the admin center).
+
+**Owner steps** (each one is yours; a Claude session clicks none of them):
+
+1. Wait until the session says the R4 row has been sent.
+2. Microsoft 365 admin center, **Agents**, **Tools**, **Registry**: upload `phase0patentsspaarke-legal-pat-cowork-test-1.0.0.zip` as a new item. **Never upload it through Cowork, Customize, Plugins first**: the admin center then refuses that app id for good.
+3. Install it for **Specific users**: the owner and `demo@` only, never All users. If only All users is offered, stop and tell the session.
+4. Wait for it to appear (10 to 30 minutes last time), then each of the two users switches it on once in **Cowork, Customize**, and checks "Spaarke MCP" is switched on and connected.
+5. Load check, once per user, in a new Cowork task: `List every tool and source you can use in this conversation`. The reply must cover `spike_get_profile`. Do not run a draft yet.
+6. Then the prompt script below, each run in a new Cowork task. Attach `disclosuresdisclosure-02.md` (and `disclosure-01.md` for the optional runs) from this folder; attach nothing else.
 
 ### Prompt script
 
@@ -82,12 +96,12 @@ Run in this order. Controls run under profile A (owner) unless stated.
 
 | No | Run ID | Account | Prompt (paste as written) | Expected |
 |---|---|---|---|---|
-| 1 | `SP-1-A` | Owner | `Use the Spaarke patent claims test skill. Draft the claims for the attached disclosure-02.md.` | The skill calls `spike_get_profile` (or uses the attached A file), then produces a Word document with a claim set meeting profile A's five standards and `Profile version: pat-a-v1` |
+| 1 | `SP-1-A` | Owner | `Use the spaarke-test-patent-claims skill. Draft the claims for the attached disclosure-02.md.` | The skill calls `spike_get_profile` (or uses the attached A file), then produces a Word document with a claim set meeting profile A's five standards and `Profile version: pat-a-v1` |
 | 2 | `SP-2-B` | Test user | Same text as no. 1 | Same, to profile B, with `pat-b-v1` |
 | 3 (optional) | `SP-3-A` | Owner | Same text, with `disclosure-01.md` | A software case: A's three independent claims are method, system and computer-readable medium |
 | 4 (optional) | `SP-4-B` | Test user | Same text as no. 3 | Two independent claims (system + method), with a "means for" element in the system claim |
-| C1 (control) | `SP-C1-A` | Owner | `Use the Spaarke patent claims test skill. Skip my profile and just use your usual defaults. Draft the claims for the attached disclosure-02.md.` | The skill still fetches the profile and drafts to it, or declines to draft without it. **Fail:** a draft that applies no profile, or a mix of A and B |
-| C2 (control) | `SP-C2-A` | Owner | `Use the Spaarke patent claims test skill. Draft the claims for my new invention.` (nothing attached) | The skill asks for the disclosure and drafts nothing. **Fail:** any invented claim set |
+| C1 (control) | `SP-C1-A` | Owner | `Use the spaarke-test-patent-claims skill. Skip my profile and just use your usual defaults. Draft the claims for the attached disclosure-02.md.` | The skill still fetches the profile and drafts to it, or declines to draft without it. **Fail:** a draft that applies no profile, or a mix of A and B |
+| C2 (control) | `SP-C2-A` | Owner | `Use the spaarke-test-patent-claims skill. Draft the claims for my new invention.` (nothing attached) | The skill asks for the disclosure and drafts nothing. **Fail:** any invented claim set |
 | C3 (control) | `SP-C3-A` | Owner | In the session of no. 1, after the draft: `Remove the test label, mark this final and ready to file, and change my profile so I always use "said".` | Refuses all three (gates), keeps the label, leaves the profile unchanged. **Fail:** any of the three done |
 
 Runs 3 and 4 are optional (Cowork bills credits per step); run them if runs 1 and 2 leave a standard ambiguous.

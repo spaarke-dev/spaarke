@@ -24,7 +24,7 @@
 | 022 | G1-NDA runs: pilots, full runs and verdict | 3 | 🔲 [open] | 003, 020 | Group C | sonnet / high | STANDARD |
 | 023 | G5 routing runs and G2 checks | 3 | 🔲 [open] | 020 | Group C | sonnet / high | STANDARD |
 | 024 | G6 coexistence runs; results to accelerator-r1 | 3 | 🔲 [open] | 005 | Group C | sonnet / high | STANDARD |
-| 025 | Cowork patent-drafting spike | 3 | 🔲 [open] | 006 | Group C | sonnet / high | STANDARD |
+| 025 | Cowork patent-drafting spike | 3 | 🔄 [wip] | 006 | Group C | sonnet / high | STANDARD |
 | 026 | G1-PAT repeat for variants still in contention | 3 | 🔲 [open] | 022 | alone | sonnet / high | STANDARD |
 | 030 | Go/no-go record: phase0/G1-decision.md | 4 | 🔲 [open] | 007, 021, 022, 023, 024, 025, 026 | alone | opus / high | STANDARD |
 | 031 | Clean-up: tenant, DEV and inventory | 4 | 🔲 [open] | 030 | alone | sonnet / high | STANDARD |
