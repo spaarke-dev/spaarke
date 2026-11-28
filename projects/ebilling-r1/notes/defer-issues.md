@@ -2898,7 +2898,7 @@ After each write, call `SecureChildShareSynchronizer.SyncChildAsync` for the one
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on work 80e996f6b0 (Quick Start card, in-app host case, Record-step lookup). Not on dev: master PR, then Console and page redeploys |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-28 |
 | **Source** | Owner UAT on dev 2026-11-28 (relayed by ontology-r1) |

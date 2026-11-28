@@ -260,3 +260,14 @@ Merged to master 2026-11-27 21:28Z (#3274, merge commit c55b9812d8). Both parts 
 - [ ] **Nothing stuck after closing:** after closing, the Console responds to clicks and keys as normal (nothing stays greyed or unreachable). Open a different billing item next: the modal opens fresh on that one ("3 of 3", say), not on the one you closed.
 - [ ] **Count cards on one row:** at 1280 px wide or more, the five cards (All lines, Processing, To decide, Clean, Decided) sit on one row as shorter cards; count, label and the "done today" line stay readable.
 - [ ] **Navigator still there:** the Navigator side pane still registers on the page inside the modal, as it did in the old dialog.
+
+When AA passes, DEF-070 (#3124, next/previous in Invoice Review) closes.
+
+## AB. Create Invoice and Rule Review fixes (work/ebilling-r1, 2026-11-28): NOT on dev yet
+
+These need a master PR (your go), then the Console (automatic on the master push), the `sprk_createinvoicewizard` and `sprk_rulereviewpage` pages, the `sprk_/scripts/apexport_ribbon.js` web resource, and a ribbon import of the Rule Set table (your go). I'll say when each is live.
+
+- [ ] **Invoice locked to the record (ISS-057, #3334):** on a matter, Billing tab > "+ New Invoice". The wizard opens on the file upload: there is no "Choose the record" step and no way to pick another record. Same from a project and a work assignment.
+- [ ] **Create Invoice in the Console (DEF-071, #3335):** in the Console, open Quick Start. A "Create Invoice" card is there. It opens the wizard in the Console's own modal (Console-styled title bar, not the white Dataverse dialog). The Record step has "Choose a record": it opens the Dataverse lookup over matters, projects and work assignments; the one you pick shows as "Selected: name · kind" and Next becomes available. Cancelling the lookup keeps what was selected. The list below still works too.
+- [ ] **Keyboard at the ends of any browse modal (ISS-055, #3262):** in any modal with ‹ › (Invoice Review, record browse in the portal, wizard browse), press Enter on › until the last record: focus moves to ‹ instead of leaving the dialog; the same at the first record with ‹. If both arrows are off, focus is on Close.
+- [ ] **Rule Review from a rule set (DEF-069, #3112):** open a rule set record. The command bar has "Rule Review"; it is not there on a new, unsaved rule set. It opens the Rule Review page in a dialog straight on that rule set (not the list). Back in the page shows the list. Closing the dialog refreshes the rule set form. A user without the billing administrator right sees the page's read-only notice.
