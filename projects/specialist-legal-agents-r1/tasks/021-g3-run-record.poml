@@ -4,7 +4,7 @@
     <title>G3 run: profile resolution, run key and agent identity</title>
     <phase>3 Test runs</phase>
     <gate>after 015 and 020</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Phase 3 integration testing with explicit constraints</rigor-reason>
     <model-tier>sonnet</model-tier>

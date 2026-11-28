@@ -1,7 +1,7 @@
 # Phase 0 test G3: profile resolution from the caller's identity
 
 > **Program:** specialist-legal-agents-r1 (design.md §8 G3; spec FR-02, FR-03, NFR-04, NFR-05).
-> **Status:** spike branch built and tested (task 011). Deployed to the dev BFF (`d307d67e36` 2026-11-26, `5cd40984b0` 2026-11-27); not yet run against Copilot. The header tables below are empty until the owner runs the surfaces.
+> **Status:** spike branch built and tested (task 011). On the dev BFF since 2026-11-26; live now: `b84fa5f061` (spike `af8a5547ef` + mcp-r2 file probe, 2026-11-28). Not yet run against Copilot for G3: the run sheet (task 021) is below; the header tables stay empty until the owner runs it.
 > **Who does what:** the owner deploys the spike branch to DEV (on a go that names the SHA), sends the prompts and removes the branch afterwards; this session reads App Insights. Claude sessions never click tenant or admin actions.
 
 ## The spike branch
@@ -10,7 +10,7 @@
 |---|---|
 | Branch | `spike/specialist-agents-phase0` (never merged; no PR) |
 | Cut from | `origin/master` at `6a2a569ac9` (2026-11-26) |
-| Spike commit | live on dev: `5cd40984b0` since 2026-11-27 ~13:14Z (adds the G5 stubs; rollback target `d307d67e36`). Before that `d307d67e36`, which was pushed to `origin/spike/specialist-agents-phase0`; first cut `ddccee88a6`, then master merged as `603e03e6ab` and the review fixes as `d307d67e36`. `origin/master` is an ancestor (checked 2026-11-26) |
+| Spike commit | branch tip `af8a5547ef` (master `d9595dd98e` merged, spike patch unchanged); dev runs `b84fa5f061` = `af8a5547ef` + mcp-r2 file probe since 2026-11-28 ~04:15Z (see "Dev deploy"). Earlier: `5cd40984b0` 2026-11-27 (adds the G5 stubs). Before that `d307d67e36`, which was pushed to `origin/spike/specialist-agents-phase0`; first cut `ddccee88a6`, then master merged as `603e03e6ab` and the review fixes as `d307d67e36`. `origin/master` is an ancestor (checked 2026-11-26) |
 | Worktree | `C:\wt-sla-spike` |
 | Route | the existing `/mcp/legal-operations` (A10 connector token, `mcp` rate limit, kill switch); no new route, no package |
 
@@ -70,6 +70,45 @@ Proven by tests on the spike branch against the production MCP host (real Kestre
 | Lookup is exact | no fallback, no default | pass | `Find_IsExactOnFunctionAndSystemUserId_AndNeverFallsBack` |
 | Header line | names only; never a value, the bearer token or a cookie | pass | `HeaderLogging_RecordsHeaderNamesOnly_NeverAValue_TheBearerToken_OrACookie` |
 | Tests catch a lookup bug | a lookup that falls back to the first profile, or ignores the user | caught by 4 and 6 tests respectively (mutation check, reverted) | |
+
+## Run sheet (task 021, prepared 2026-11-28)
+
+**What G3 needs from the owner:** a handful of `spike_get_profile` calls from each surface and caller kind, at known times. That call is read-only, runs no model on our side and costs nothing; it is what writes the header-name line. The session then reads App Insights and fills the tables below. No NDA, no document and no review is involved, so these runs do not touch G1.
+
+**Before you start**
+
+- Dev BFF runs the spike tools (`b84fa5f061` or a later spike tip; the session confirms).
+- "Spaarke MCP" is switched on and connected for the account (Copilot, Settings, Sources).
+- For demo's agent rows: demo has signed in to that agent's connection (the card "Sign in to Spaarke MCP G1a" and so on; 2026-11-28 G1c showed it).
+- Write down the time (UTC, to the minute) when you send each prompt. App Insights keeps about 25% of requests, which is why each cell has several calls.
+
+**Prompts** (paste exactly; each row in a **new** chat or Cowork task unless it says "same chat"):
+
+| Row | Surface | Caller kind | Account | Prompt, sent 3 times in the same chat | What it tests |
+|---|---|---|---|---|---|
+| G3-1 | Copilot Chat, no agent | tenant connector "Spaarke MCP" | owner | `Call the Spaarke tool spike_get_profile with function nda and tell me only the profileVersion` | headers on the connector path; same `profileVersion` across one run |
+| G3-2 | Copilot Chat, no agent | tenant connector | owner | same, in a **second** new chat | does any header change between two runs (run key)? |
+| G3-3 | Copilot Chat, agent `spaarke-legal-g1a-nda-test` | agent action | owner | same | headers on the agent-action path |
+| G3-4 | Copilot Chat, agent `spaarke-legal-g1b-nda-test` | agent action | owner | same, **once** | does any header differ between two agents (agent identity)? |
+| G3-5 | Copilot Chat, agent `spaarke-legal-g1a-nda-test` | agent action | demo | same | identity: demo gets `g1-b-v1`, never `g1-a-v1` |
+| G3-6 | Cowork | tenant connector | owner | same, in one Cowork task | headers on Cowork |
+| G3-7 (optional) | Copilot in Word, blank new document | tenant connector | owner | same | headers on Word, if Word reaches the tool at all |
+| G3-8 (optional) | Copilot in Teams | tenant connector | owner | same | headers on Teams, if reachable |
+
+Expected answers: the owner always sees `g1-a-v1`, demo always `g1-b-v1`. Any other value, or a profile shown with no tool call, stop and tell the session.
+
+If an approval card appears, click **Cancel** and tell the session what it names. Use a blank document in Word, never a real NDA.
+
+**Send the session:** for each row, the times you sent the prompts and the `profileVersion` the reply showed. Screenshots are not needed.
+
+**What the session then does** (read-only): runs the App Insights query below for each time window, reads the `MCP spike tool spike_get_profile request header names (…)` lines and the per-call telemetry line (outcome, `profileVersion`, latency), and fills "Headers seen", "Answers" and the latency check (p95 of the `spike_get_profile` calls against NFR-04; this check moved here from task 015).
+
+```powershell
+$id = az resource show -g spe-infrastructure-westus2 -n spe-insights-dev-67e2xz --resource-type Microsoft.Insights/components --query properties.AppId -o tsv
+az monitor app-insights query --apps $id --offset 6h --analytics-query "traces | where message startswith 'MCP spike tool' | project timestamp, message, operation_Id | order by timestamp asc"
+```
+
+**Fail-closed on dev:** `NO_PROFILE` and `CALLER_UNRESOLVED` need a signed-in account with no test profile, or no account at all. Phase 0 has only the owner and demo, both with profiles, so those two cases stay covered by the spike-branch tests (table above) and are not re-run live, unless the owner names a third dev account to use.
 
 ## Headers seen (fill in after the DEV run)
 
