@@ -42,6 +42,16 @@ export type SourceType = 'OutlookEmail' | 'OutlookAttachment' | 'WordDocument';
 export type SaveFlowState = 'idle' | 'selecting' | 'uploading' | 'processing' | 'complete' | 'error' | 'duplicate';
 
 /**
+ * Task 143 (owner A1): the phase of a job whose content was identical to a document already in Spaarke (server
+ * `OfficeService.ContentDuplicatePhase`). Nothing was created. The job names that document only to a caller who may see it;
+ * for anyone else it completes with no document, and the pane says the item is already in Spaarke.
+ */
+export const CONTENT_DUPLICATE_PHASE = 'DeduplicatedToExisting';
+
+/** What the pane says when a save's content is already in Spaarke in a document the job does not name. */
+export const ALREADY_IN_SPAARKE_MESSAGE = 'This item is already in Spaarke. Nothing new was saved.';
+
+/**
  * Processing options for the save operation.
  */
 export interface ProcessingOptions {
@@ -423,8 +433,8 @@ export interface UseSaveFlowResult {
   error: ErrorMessage | null;
   /** Clear error */
   clearError: () => void;
-  /** Duplicate detection info */
-  duplicateInfo: { documentId: string; message: string } | null;
+  /** Duplicate detection info. No `documentId` when the existing document is not named to this caller (task 143). */
+  duplicateInfo: { documentId?: string; message: string } | null;
   /** Whether save is in progress */
   isSaving: boolean;
   /** Whether form is valid (association selected) */
@@ -722,7 +732,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState<ErrorMessage | null>(null);
   const [duplicateInfo, setDuplicateInfo] = useState<{
-    documentId: string;
+    documentId?: string;
     message: string;
   } | null>(null);
   const [savedDocumentId, setSavedDocumentId] = useState<string | null>(null);
@@ -751,6 +761,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     terminalOutcomeAppliedRef.current = true;
     return true;
   }, []);
+  // Task 143 (owner A1): the stream has reported CONTENT_DUPLICATE_PHASE (its snapshot precedes its job-complete event, which
+  // carries no phase). Reset when tracking starts.
+  const contentDuplicatePhaseSeenRef = useRef(false);
   // FR-11 (task 024): whether the save in flight is a VERSION save, and how many version-save attempts have
   // FAILED in this pane session (see VersionIdempotencyParts.failedAttempts). Deliberately NOT reset by
   // reset(): the counter must only grow, or a later identical re-send could reproduce a failed attempt's
@@ -958,6 +971,14 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     onError?.(errorMsg);
   }, [onError]);
 
+  // Task 143 (owner A1): a job Completed with no document whose content was already in Spaarke (CONTENT_DUPLICATE_PHASE).
+  // The existing document is withheld from this caller, so there is nothing to open; it is the duplicate state without
+  // "View Existing Document", not "Save Not Confirmed" (the save did finish, and created nothing).
+  const showAlreadyInSpaarke = useCallback(() => {
+    setDuplicateInfo({ message: ALREADY_IN_SPAARKE_MESSAGE });
+    setFlowState('duplicate');
+  }, []);
+
   // Handle SSE event
   const handleSseEvent = useCallback(
     (event: SseEvent) => {
@@ -969,6 +990,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
       if (eventType === 'progress' || eventType === 'message') {
         // Progress update: { progress: number, currentPhase: string }
+        if (data.currentPhase === CONTENT_DUPLICATE_PHASE) contentDuplicatePhaseSeenRef.current = true;
         setJobStatus(prev => {
           if (!prev) return null;
           const progress = typeof data.progress === 'number' ? data.progress : prev.progress;
@@ -1020,6 +1042,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           setSavedDocumentUrl(documentUrl || null);
           setFlowState('complete');
           notifyComplete(documentId, documentUrl || '');
+        } else if (contentDuplicatePhaseSeenRef.current) {
+          showAlreadyInSpaarke();
         } else {
           failUnconfirmedCompletion();
         }
@@ -1045,7 +1069,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       }
       // Ignore heartbeat events
     },
-    [claimTerminalOutcome, cleanup, failUnconfirmedCompletion, notifyComplete, onError]
+    [claimTerminalOutcome, cleanup, failUnconfirmedCompletion, notifyComplete, onError, showAlreadyInSpaarke]
   );
 
   // Poll for job status
@@ -1160,6 +1184,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             setSavedDocumentUrl(documentUrl || null);
             setFlowState('complete');
             notifyComplete(documentId, documentUrl || '');
+          } else if (status.status === 'Completed' && rawStatus.currentPhase === CONTENT_DUPLICATE_PHASE) {
+            showAlreadyInSpaarke();
           } else if (status.status === 'Completed') {
             failUnconfirmedCompletion();
           } else if (status.status === 'Failed') {
@@ -1202,7 +1228,16 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         }
       }
     },
-    [apiBaseUrl, claimTerminalOutcome, cleanup, failUnconfirmedCompletion, getAccessToken, notifyComplete, onError]
+    [
+      apiBaseUrl,
+      claimTerminalOutcome,
+      cleanup,
+      failUnconfirmedCompletion,
+      getAccessToken,
+      notifyComplete,
+      onError,
+      showAlreadyInSpaarke,
+    ]
   );
 
   // Start SSE connection with polling fallback.
@@ -1218,6 +1253,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       // Reset retry counter and the terminal-outcome claim at start of tracking
       pollingRetryCountRef.current = 0;
       terminalOutcomeAppliedRef.current = false;
+      contentDuplicatePhaseSeenRef.current = false;
 
       // Initialize job status with standard stages
       const initialStages: StageStatus[] = [

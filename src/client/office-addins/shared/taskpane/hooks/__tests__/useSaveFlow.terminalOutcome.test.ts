@@ -224,3 +224,81 @@ describe('useSaveFlow — the SSE path uses the server’s event names (task 060
     expect(result.current.error?.recoverable).toBe(false);
   });
 });
+
+describe('useSaveFlow — a save already in Spaarke whose job does not name the document (task 143, owner A1)', () => {
+  // The job of a save whose content matched an existing document names that document only to a caller who may see it.
+  // For anyone else it is Completed with phase DeduplicatedToExisting and no artifact: the pane says the item is already
+  // in Spaarke (the duplicate state, nothing to open) — not "Save Not Confirmed", and not a saved document.
+  const DUPLICATE_PHASE = 'DeduplicatedToExisting';
+
+  it('polling: a Completed content-duplicate job with no artifact shows the duplicate state with no document', async () => {
+    serverAnswers({ status: 'Completed', currentPhase: DUPLICATE_PHASE, progress: 100, result: {} });
+    const { result, onComplete, onError } = renderSaveFlow();
+
+    await act(async () => {
+      await result.current.startSave(wordContext());
+    });
+
+    await waitFor(() => expect(result.current.flowState).toBe('duplicate'));
+    expect(result.current.duplicateInfo).toEqual({
+      message: 'This item is already in Spaarke. Nothing new was saved.',
+    });
+    expect(result.current.error).toBeNull();
+    expect(onError).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('polling: a content-duplicate job that names the document completes on it, exactly as before', async () => {
+    serverAnswers({
+      status: 'Completed',
+      currentPhase: DUPLICATE_PHASE,
+      progress: 100,
+      result: { artifact: { type: 'Document', id: DOCUMENT_ID } },
+    });
+    const { result, onComplete } = renderSaveFlow();
+
+    await act(async () => {
+      await result.current.startSave(wordContext());
+    });
+
+    await waitFor(() => expect(result.current.flowState).toBe('complete'));
+    expect(result.current.savedDocumentId).toBe(DOCUMENT_ID);
+    expect(onComplete).toHaveBeenCalledWith(DOCUMENT_ID, '');
+  });
+
+  it('SSE: the snapshot reports the duplicate phase, then job-complete with no document shows the duplicate state', async () => {
+    serverAnswers({ status: 'Running' });
+    const { result, onComplete, onError } = renderSaveFlow();
+    await act(async () => {
+      await result.current.startSave(wordContext());
+    });
+
+    act(() => sseOptions().onEvent({ event: 'progress', data: { progress: 100, currentPhase: DUPLICATE_PHASE } }));
+    act(() => sseOptions().onEvent({ event: 'job-complete', data: { jobId: 'job-1' } }));
+
+    await waitFor(() => expect(result.current.flowState).toBe('duplicate'));
+    expect(result.current.duplicateInfo?.documentId).toBeUndefined();
+    expect(onError).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('SSE: a duplicate phase seen on an EARLIER save does not carry over to the next one', async () => {
+    serverAnswers({ status: 'Running' });
+    const { result } = renderSaveFlow();
+    await act(async () => {
+      await result.current.startSave(wordContext());
+    });
+    act(() => sseOptions().onEvent({ event: 'progress', data: { progress: 100, currentPhase: DUPLICATE_PHASE } }));
+    act(() => sseOptions().onEvent({ event: 'job-complete', data: { jobId: 'job-1' } }));
+    await waitFor(() => expect(result.current.flowState).toBe('duplicate'));
+
+    act(() => result.current.reset());
+    await act(async () => {
+      await result.current.startSave(wordContext());
+    });
+    act(() => sseOptions().onEvent({ event: 'job-complete', data: { jobId: 'job-1' } }));
+
+    await waitFor(() => expect(result.current.flowState).toBe('error'));
+    expect(result.current.error?.message).toMatch(/could not confirm which document/i);
+  });
+});

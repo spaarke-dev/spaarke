@@ -2706,7 +2706,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     );
   };
 
-  // Render duplicate state
+  // Render duplicate state. Task 143 (owner A1): with no document named (one this caller may not see), nothing to open.
+  const duplicateDocumentId = duplicateInfo?.documentId;
   const renderDuplicateState = () => (
     <Card className={styles.duplicateCard}>
       <MessageBar intent="info">
@@ -2718,12 +2719,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       <div className={styles.duplicateActions}>
         {/* Task 088: this used to hand a document ID to a callback that expected a URL — a broken link. It now
             opens the existing document's Spaarke record, through the same opener and gate as View Document. */}
-        {openRecordAvailable && duplicateInfo && (
-          <Button
-            appearance="primary"
-            icon={<OpenRegular />}
-            onClick={() => openDocumentRecord(duplicateInfo.documentId)}
-          >
+        {openRecordAvailable && duplicateDocumentId && (
+          <Button appearance="primary" icon={<OpenRegular />} onClick={() => openDocumentRecord(duplicateDocumentId)}>
             View Existing Document
           </Button>
         )}
