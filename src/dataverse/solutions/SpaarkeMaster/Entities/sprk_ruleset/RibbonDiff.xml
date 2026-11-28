@@ -1,14 +1,47 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <CustomActions />
+  <CustomActions>
+    <CustomAction Id="sprk.sprk_ruleset.Form.RuleReview.CustomAction" Location="Mscrm.Form.sprk_ruleset.MainTab.Actions.Controls._children" Sequence="100">
+      <CommandUIDefinition>
+        <Button Id="sprk.sprk_ruleset.Form.RuleReview.Button" Command="sprk.sprk_ruleset.Form.RuleReview.Command" LabelText="$LocLabels:sprk.sprk_ruleset.RuleReview.LabelText" Alt="$LocLabels:sprk.sprk_ruleset.RuleReview.LabelText" ToolTipTitle="$LocLabels:sprk.sprk_ruleset.RuleReview.LabelText" ToolTipDescription="$LocLabels:sprk.sprk_ruleset.RuleReview.ToolTipDescription" Image16by16="$webresource:sprk_/icons/cmd/document-viewer.svg" Image32by32="$webresource:sprk_/icons/cmd/document-viewer.svg" ModernImage="$webresource:sprk_/icons/cmd/document-viewer.svg" Sequence="100" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
   </Templates>
-  <CommandDefinitions />
+  <CommandDefinitions>
+    <CommandDefinition Id="sprk.sprk_ruleset.Form.RuleReview.Command">
+      <EnableRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.sprk_ruleset.FormExisting.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.openRuleReview">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.sprk_ruleset.FormExisting.DisplayRule">
+        <FormStateRule State="Existing" />
+      </DisplayRule>
+    </DisplayRules>
     <EnableRules />
   </RuleDefinitions>
-  <LocLabels />
+  <LocLabels>
+    <LocLabel Id="sprk.sprk_ruleset.RuleReview.LabelText">
+      <Titles>
+        <Title description="Rule Review" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.sprk_ruleset.RuleReview.ToolTipDescription">
+      <Titles>
+        <Title description="Open the Rule Review page on this rule set" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
 </RibbonDiffXml>

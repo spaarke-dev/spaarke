@@ -39,16 +39,18 @@ const useStyles = makeStyles({
 export interface AppProps {
   api: RuleSetApi;
   firmLookup: FirmLookup;
+  /** DEF-069: a rule set to open at launch (`services/launch.ts`); absent, the page opens on the list. Back still reaches the list. */
+  initialRuleSetId?: string;
 }
 
-export const App: React.FC<AppProps> = ({ api, firmLookup }) => {
+export const App: React.FC<AppProps> = ({ api, firmLookup, initialRuleSetId }) => {
   const s = useStyles();
   const [access, setAccess] = React.useState<PageAccess>('unknown');
   const [disabled, setDisabled] = React.useState(false);
   const [listRefused, setListRefused] = React.useState(false);
   const [ruleSets, setRuleSets] = React.useState<RuleSetSummary[] | null>(null);
   const [listNotice, setListNotice] = React.useState<Notice | null>(null);
-  const [openId, setOpenId] = React.useState<string | null>(null);
+  const [openId, setOpenId] = React.useState<string | null>(initialRuleSetId ?? null);
   const firmNames = useFirmNames(firmLookup, (ruleSets ?? []).map(r => r.firmId));
 
   /** Every failure of every call comes through here: the billing-admin 403 is read-only, a disabled flag is its own notice. */

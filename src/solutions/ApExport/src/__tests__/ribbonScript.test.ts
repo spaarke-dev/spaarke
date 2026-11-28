@@ -415,7 +415,7 @@ describe('Billing Export form: Email to AP and Mark Sent to AP (script)', () => 
 
   it('the script version is bumped for the new commands', () => {
     const version = /ns\.VERSION = "([^"]+)"/.exec(SCRIPT)?.[1];
-    expect(version).toBe('1.1.0');
+    expect(version).toBe('1.2.0');
   });
 });
 
@@ -567,5 +567,74 @@ describe('Sent to AP Date on the views', () => {
   it('the Approved view has no batch, so it gets no linked column', () => {
     const xml = view('sprk_Invoice', '467cbd98-eb63-4f05-b7fb-3bc71f14bac9');
     expect(xml).not.toContain('sprk_senttoapdate');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Rule Set form: Rule Review (DEF-069, GitHub #3112). The command lives in this e-billing ribbon script (it already holds the dialog
+// launch); the page reads `ruleSetId` (RuleReview `services/launch.ts`).
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+const RULESET = '3f2a9c1e-5b7d-4e08-9a41-c0d2e6f81b37';
+
+interface IRuleReviewRibbon {
+  ruleReviewLaunchData(id: string): string;
+  openRuleReview(primaryControl: unknown): Promise<void>;
+}
+
+describe('Rule Set form: Rule Review (script)', () => {
+  it('ruleReviewLaunchData carries the rule set id, without braces, lower case', () => {
+    const ribbon = harness({}).ribbon as unknown as IRuleReviewRibbon;
+    expect(ribbon.ruleReviewLaunchData(`{${RULESET.toUpperCase()}}`)).toBe(`ruleSetId=${RULESET}`);
+  });
+
+  it('openRuleReview opens sprk_rulereviewpage in a dialog on the open rule set, then refreshes the form and its ribbon', async () => {
+    const h = harness({});
+    const f = form(RULESET);
+    await (h.ribbon as unknown as IRuleReviewRibbon).openRuleReview(f);
+    await flush();
+    expect(h.pages).toHaveLength(1);
+    expect(h.pages[0].page).toEqual({ pageType: 'webresource', webresourceName: 'sprk_rulereviewpage', data: `ruleSetId=${RULESET}` });
+    expect(h.pages[0].options).toMatchObject({ target: 2, title: 'Rule Review' });
+    expect(f.refreshed).toEqual(['data', 'ribbon']);
+  });
+
+  it('openRuleReview on a new form asks to save first and opens nothing', async () => {
+    const h = harness({});
+    await (h.ribbon as unknown as IRuleReviewRibbon).openRuleReview(form(null));
+    expect(h.pages).toEqual([]);
+    expect(h.alerts.map(a => a.text)).toEqual(['Save this rule set first.']);
+  });
+});
+
+const RULESET_RIBBON = fs
+  .readFileSync(
+    path.join(__dirname, '..', '..', '..', '..', 'dataverse', 'solutions', 'SpaarkeMaster', 'Entities', 'sprk_ruleset', 'RibbonDiff.xml'),
+    'utf8'
+  )
+  .replace(/^﻿/, '');
+
+describe('Rule Set form: Rule Review (RibbonDiff wiring)', () => {
+  it('is one button on the Rule Set main form, with the sprk.sprk_ruleset. ids and a label', () => {
+    expect(RULESET_RIBBON.match(/<Button /g)).toHaveLength(1);
+    expect(RULESET_RIBBON).toContain('Location="Mscrm.Form.sprk_ruleset.MainTab.Actions.Controls._children"');
+    expect(RULESET_RIBBON).toContain('Command="sprk.sprk_ruleset.Form.RuleReview.Command"');
+    expect(RULESET_RIBBON).toContain('<Title description="Rule Review" languagecode="1033" />');
+    const ids = Array.from(RULESET_RIBBON.matchAll(/\bId="([^"]+)"/g), m => m[1]).filter(i => i !== 'Mscrm.Templates');
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) expect(id.startsWith('sprk.sprk_ruleset.')).toBe(true);
+  });
+
+  it('is shown only for an existing record (FormStateRule Existing), and is not on a grid', () => {
+    expect(RULESET_RIBBON).toContain('<DisplayRule Id="sprk.sprk_ruleset.FormExisting.DisplayRule" />');
+    expect(RULESET_RIBBON).toMatch(/<DisplayRule Id="sprk\.sprk_ruleset\.FormExisting\.DisplayRule">\s*<FormStateRule State="Existing" \/>/);
+    expect(RULESET_RIBBON).not.toContain('HomepageGrid');
+    expect(RULESET_RIBBON).not.toContain('SubGrid');
+  });
+
+  it('calls openRuleReview with the form context, from the script the AP commands use', () => {
+    expect(RULESET_RIBBON).toMatch(
+      /<JavaScriptFunction Library="\$webresource:sprk_\/scripts\/apexport_ribbon\.js" FunctionName="Spaarke\.ApExport\.Ribbon\.openRuleReview">\s*<CrmParameter Value="PrimaryControl" \/>/
+    );
   });
 });

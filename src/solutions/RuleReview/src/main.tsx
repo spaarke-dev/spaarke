@@ -13,7 +13,7 @@
  */
 
 import * as React from 'react';
-import { createXrmNavigationService, getXrm } from '@spaarke/ui-components';
+import { createXrmNavigationService, getXrm, parseDataParams } from '@spaarke/ui-components';
 import { useCodePageBootstrap } from '../../_ebilling-shared/codePageBootstrap';
 import { CodePageMessage, CodePageSpinner, CodePageSurface } from '../../_ebilling-shared/codePageChrome';
 import { mountWizardPage } from '@spaarke/ui-components/utils/mountWizardPage';
@@ -22,8 +22,11 @@ import { setRuntimeConfig, getBffBaseUrl } from './config/runtimeConfig';
 import { ensureAuthInitialized, authenticatedFetch } from './services/authInit';
 import { createRuleSetApi } from './services/ruleSetApi';
 import { createFirmLookup } from './services/firmLookup';
+import { parseRuleSetLaunch } from './services/launch';
 
 function Root() {
+  // DEF-069: the rule set form's "Rule Review" command passes `ruleSetId`; read once at launch. Absent or invalid, the list opens as before.
+  const initialRuleSetId = React.useMemo(() => parseRuleSetLaunch(parseDataParams()), []);
   const { theme, ready, bootstrapError, retry } = useCodePageBootstrap({
     label: 'RuleReview',
     registerNavigator: true,
@@ -58,7 +61,7 @@ function Root() {
   } else if (!services) {
     body = <CodePageSpinner testId="rulereview-loading" label="Loading Rule Review..." density="roomy" />;
   } else {
-    body = <App api={services.api} firmLookup={services.firmLookup} />;
+    body = <App api={services.api} firmLookup={services.firmLookup} initialRuleSetId={initialRuleSetId} />;
   }
 
   return (
