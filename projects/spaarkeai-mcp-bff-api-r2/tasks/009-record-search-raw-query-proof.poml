@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Record search: no query built from raw query text (proof)</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api and security; adds guard tests and fixes RecordSearchService (.cs) if the proof fails</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security proof (injection into OData filter / FetchXML) over a service the model will call with free text; tags include security</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Services/Ai/RecordSearch/** and its new tests; no other Group A task touches them</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, security, testing, integration-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Prove with a KEEP-path test that IRecordSearchService builds no OData filter or FetchXML from the raw query text (the text reaches only Azure AI Search's searchText and the embedding call) and that every filter value is escaped; if the proof fails, fix RecordSearchService so it holds.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Azure AI Search query construction and injection-safe filter building.</role>
+  <goal>A regression test pins that request.Query never appears in SearchOptions.Filter or any FetchXML/OData string, and that filter inputs (recordTypes, organizations, people, referenceNumbers) are escaped; a seeded break makes it fail.</goal>
+
+  <context>
+    <background>Spec FR-02 acceptance ("a test proves no OData or FetchXML is built from raw query text") and FR-15. Legacy inventory: searchRecords "free-text query; query construction not checked". RecordSearchService.cs: the query feeds the embedding (:205-210) and searchText (:273-274); filters are built at :358-397 with EscapeODataValue (:676). Task 022 enables spaarke_find_records only after this proof (FR-15).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchService.cs (only if the proof fails)</file>
+      <file role="new">tests/integration/regression/RecordSearch/RecordSearchQueryConstructionTests.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RecordSearch/RecordSearchServiceTests.cs (existing fakes for the search client)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Ai/RecordSearchRowAuthorizationContractTests.cs (row authorization; must pass unchanged)</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="project">The test captures the SearchOptions (Filter, SearchText, VectorQueries) the service sends for hostile inputs, including queries containing ' eq ', ' or ', quotes, parentheses, "&lt;fetch", "$filter=" and "any(" and filter values containing single quotes; it asserts the query text appears only in SearchText and the embedding input, never in Filter, and every filter literal is escaped.</constraint>
+    <constraint source="project">If RecordSearchService or any code it calls builds a Dataverse query (OData or FetchXML) from request.Query, fix it to use parameterised/escaped construction and add the case to the test; REST responses of POST /api/ai/search/records stay unchanged for non-hostile inputs.</constraint>
+    <constraint source="project">Seeding proof (security guard): temporarily interpolate request.Query into the filter, confirm the new test fails, restore; record the result in the task notes.</constraint>
+    <constraint source="ADR-015">No query text is logged; the existing log of request.Query.Length (:183) stays length-only.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries (the search client), and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Trace every path from request.Query in RecordSearchService (and anything it calls) to an outgoing query; note it in the task notes.</step>
+    <step order="2">Write RecordSearchQueryConstructionTests; run against the current code.</step>
+    <step order="3">If it fails, fix the construction; run the seeding proof; run RecordSearchServiceTests, RecordSearchEndpointsTests and RecordSearchRowAuthorizationContractTests.</step>
+    <step order="4">Measure the publish-size delta if code changed.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the trace finds a Dataverse query built from request.Query on a live path, report it as a found security defect to the main session before fixing (uac-r2 review), then fix in scope.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RecordSearch/RecordSearchServiceTests.cs (behaviour, not query construction) and tests/integration/contract/Api/Ai/RecordSearchRowAuthorizationContractTests.cs (row authorization); neither asserts what reaches SearchOptions.Filter.</existing>
+    <extension>The unit file is not on a KEEP path (ADR-038) and the row-authorization contract test covers a different invariant; the new regression test reuses their search-client fakes rather than adding new ones.</extension>
+    <cost-of-doing-nothing>FR-02's "a test proves no OData or FetchXML is built from raw query text" acceptance fails, and FR-15 blocks spaarke_find_records (task 022).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/regression/RecordSearch/RecordSearchQueryConstructionTests.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchService.cs (only if a fix is needed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each hostile query, the captured SearchOptions.Filter contains no part of the query text, and SearchText equals the query (or is null in vector-only mode).</criterion>
+    <criterion testable="true">Filter values containing a single quote are escaped (doubled) in the captured Filter.</criterion>
+    <criterion testable="true">Negative (seeding proof): interpolating the query into the filter makes the test fail; restored code passes.</criterion>
+    <criterion testable="true">RecordSearchServiceTests, RecordSearchEndpointsTests and RecordSearchRowAuthorizationContractTests pass unchanged.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-02, FR-15. Two adversarial-verifier passes (security). uac-r2 reviews.
+
+Completed 2026-11-25. Proof verdict: clean. No OData or FetchXML is built from request.Query; it reaches only searchText (rrf, keywordOnly; "*" in vectorOnly) and the embedding input. Added tests/integration/regression/RecordSearch/RecordSearchQueryConstructionTests.cs (26 cases: 8 hostile queries x 3 modes with exact-filter equality, plus escaping of recordTypes in both branches, organizations, people, referenceNumbers). Seeding proof: query appended to the filter fails 26/26; no-op EscapeODataValue fails the 2 escaping tests; restored code passes. RecordSearchServiceTests (29), RecordSearchEndpointsTests (40) and RecordSearchRowAuthorizationContractTests (1) pass unchanged. No BFF change, so no publish-size delta. Out of scope (F2, to file): stale "records index has no tenantId" comments in IRecordSearchService.cs and RecordSearchService.cs. Verifier passes: 0 here, main session runs two. review pending: unified-access-control-r2. Detail: notes/009-decisions.md.
+rework: none task 009</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

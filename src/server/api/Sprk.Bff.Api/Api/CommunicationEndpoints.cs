@@ -170,8 +170,8 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
 
         // GET /{id}/status was DELETED by unified-access-control-r2 task 161 (owner round 10 item 1): it had no caller
-        // anywhere in the repository and is in no published API description (src/solutions/CopilotAgent/
-        // spaarke-bff-openapi.yaml publishes only /send from this group), and it answered any signed-in caller with
+        // anywhere in the repository and is in no published API description (the legacy Copilot agent OpenAPI
+        // document, since removed, published only /send from this group), and it answered any signed-in caller with
         // any communication's status, Graph message id, sent time and sender, read app-only (sweep finding S-79).
         // A deleted route cannot be mis-gated later; CommunicationRecordAuthorizationContractTests pins its absence.
 

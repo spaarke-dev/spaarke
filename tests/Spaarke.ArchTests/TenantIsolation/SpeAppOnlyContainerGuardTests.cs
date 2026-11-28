@@ -73,7 +73,6 @@ public class SpeAppOnlyContainerGuardTests
         "Infrastructure/Graph/GraphClientFactory.cs",
         "Infrastructure/Graph/CiamGraphClientFactory.cs",  // CIAM tenant users (external sign-in), not SPE
         "Configuration/GraphOptions.cs",
-        "Configuration/AgentTokenOptions.cs",
     };
 
     /// <summary>A call OR a method-group use (<c>_factory.ForApp</c> passed as a delegate) — either hands out the client.</summary>

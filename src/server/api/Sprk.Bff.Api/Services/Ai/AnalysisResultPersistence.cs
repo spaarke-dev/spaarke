@@ -67,6 +67,99 @@ public class AnalysisResultPersistence
     }
 
     /// <summary>
+    /// spaarkeai-mcp-bff-api-r2 task 037a (D-037-engine): THE save of a node run's result to its analysis, moved unchanged out of the
+    /// Analysis wrapper's node branch so the wrapper and the engine (a run that carries an <c>AnalysisId</c>) save the same way.
+    /// <list type="bullet">
+    /// <item>A failed run (<see cref="NodeRunResultCollector.RunFailed"/>): its streamed text, if any, becomes the working document; the
+    /// analysis is not finalized.</item>
+    /// <item>A finished run: the Deliver Output node's text, else the streamed text, becomes the working document (none is written
+    /// when there is no text), then the analysis is finalized with the run's token counts.</item>
+    /// </list>
+    /// Task 037 review F-A: the working document is written through <see cref="IWorkingDocumentService.TryUpdateWorkingDocumentAsync"/>,
+    /// which reports a failure, clipped to <see cref="WorkingDocumentMaxChars"/> with <see cref="WorkingDocumentTruncatedMarker"/>
+    /// (<see cref="ClipToWorkingDocumentLimit"/>). When that write fails the analysis is NOT finalized (it would read as Completed with an
+    /// empty working document), and <see cref="NodeRunSaveOutcome.ContentSaved"/> is <c>false</c>. The finalize is the existing
+    /// <see cref="FinalizeAnalysisAsync"/> write. Other faults propagate, as they did in the wrapper.
+    /// </summary>
+    /// <param name="analysisId">The <c>sprk_analysis</c> to save to: the analysis its caller created or was handed, never a caller-chosen one.</param>
+    /// <param name="run">The run's events, observed to the end (or to its failure).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<NodeRunSaveOutcome> SaveNodeRunAsync(Guid analysisId, NodeRunResultCollector run, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        var (deliverOutput, streamed, hasFailedNodes, runFailed, tokensIn, tokensOut) = run.Snapshot();
+
+        if (runFailed)
+        {
+            // On run-level failure, persist what we have.
+            var failedRunSaved = string.IsNullOrEmpty(streamed)
+                || await WriteWorkingDocumentAsync(analysisId, streamed, cancellationToken);
+
+            return new NodeRunSaveOutcome(streamed, NodeRunSaveOutcome.FailedStatus, null, null, tokensIn, tokensOut, failedRunSaved);
+        }
+
+        // Prefer the Deliver Output node's rendered result; fall back to the content streamed by every node.
+        var finalContent = !string.IsNullOrEmpty(deliverOutput) ? deliverOutput : streamed;
+
+        var status = NodeRunSaveOutcome.CompletedStatus;
+        bool? partialStorage = null;
+        string? storageMessage = null;
+        if (hasFailedNodes && !string.IsNullOrEmpty(finalContent))
+        {
+            status = NodeRunSaveOutcome.CompletedWithWarningsStatus;
+            partialStorage = true;
+            storageMessage = NodeRunSaveOutcome.PartialResultsMessage;
+        }
+        else if (string.IsNullOrEmpty(finalContent))
+        {
+            status = NodeRunSaveOutcome.FailedStatus;
+        }
+
+        // Persist to working document (skip if no content to write)
+        if (!string.IsNullOrEmpty(finalContent)
+            && !await WriteWorkingDocumentAsync(analysisId, finalContent, cancellationToken))
+        {
+            // F-A: the content was not written, so the analysis is not marked Completed (an empty "completed" analysis reads as "no
+            // results"); it stays as created, which the results reader reports as unsaved.
+            return new NodeRunSaveOutcome(finalContent, status, partialStorage, storageMessage, tokensIn, tokensOut, ContentSaved: false);
+        }
+
+        await FinalizeAnalysisAsync(analysisId, tokensIn, tokensOut, cancellationToken);
+
+        return new NodeRunSaveOutcome(finalContent, status, partialStorage, storageMessage, tokensIn, tokensOut);
+    }
+
+    /// <summary>The length limit of <c>sprk_analysis.sprk_workingdocument</c> (docs/data-model/json-field-schemas.md).</summary>
+    internal const int WorkingDocumentMaxChars = 100_000;
+
+    /// <summary>What a clipped working document ends with, so a reader sees that the output was cut.</summary>
+    internal const string WorkingDocumentTruncatedMarker = "\n\n[truncated — the full output exceeded the analysis size limit]";
+
+    /// <summary>
+    /// <paramref name="content"/> as it fits <see cref="WorkingDocumentMaxChars"/>: unchanged when it fits, else its start followed by
+    /// <see cref="WorkingDocumentTruncatedMarker"/>, never ending between the two halves of a surrogate pair (pure).
+    /// </summary>
+    internal static string ClipToWorkingDocumentLimit(string content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (content.Length <= WorkingDocumentMaxChars)
+        {
+            return content;
+        }
+
+        var keep = WorkingDocumentMaxChars - WorkingDocumentTruncatedMarker.Length;
+        if (char.IsHighSurrogate(content[keep - 1]))
+        {
+            keep--;
+        }
+
+        return string.Concat(content.AsSpan(0, keep), WorkingDocumentTruncatedMarker);
+    }
+
+    private Task<bool> WriteWorkingDocumentAsync(Guid analysisId, string content, CancellationToken cancellationToken) =>
+        _workingDocumentService.TryUpdateWorkingDocumentAsync(analysisId, ClipToWorkingDocumentLimit(content), cancellationToken);
+
+    /// <summary>
     /// Store Document Profile outputs in Dataverse with dual storage and soft failure handling.
     /// Stores outputs in both sprk_analysisoutput (always) and sprk_document fields (with retry).
     /// </summary>

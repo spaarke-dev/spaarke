@@ -115,6 +115,76 @@ public enum AnalysisLookupRole
 /// <summary>One Lookup column of <c>sprk_analysis</c>, as the live metadata sweep returned it, and its role.</summary>
 public sealed record AnalysisLookupColumn(string Column, string TargetLogicalName, AnalysisLookupRole Role, string Reason);
 
+/// <summary>What <see cref="AnalysisAuthorizationFilter.AuthorizeAnalysisCreateAsync"/> decided (spaarkeai-mcp-bff-api-r2 task 031).</summary>
+/// <remarks><see cref="UserContextRequired"/> is the zero value, so <c>default</c> is never <see cref="Allowed"/>.</remarks>
+public enum AnalysisCreateAuthorizationOutcome
+{
+    /// <summary>No request context, or no signed-in caller with a resolvable Entra <c>oid</c>. Nothing was read.</summary>
+    UserContextRequired = 0,
+
+    /// <summary>The body is malformed: the route's 400, before any rights query.</summary>
+    Invalid = 1,
+
+    /// <summary>Refused, with the <c>reasonCode</c> the route's 403 carries.</summary>
+    Refused = 2,
+
+    /// <summary>Every check passed.</summary>
+    Allowed = 3,
+}
+
+/// <summary>
+/// The answer of <see cref="AnalysisAuthorizationFilter.AuthorizeAnalysisCreateAsync"/> (spaarkeai-mcp-bff-api-r2 task 031): an outcome,
+/// the <c>reasonCode</c> of a refusal, the route's 400 text for a malformed body, and, when allowed, what the checks decided. It
+/// carries no <see cref="IResult"/> a non-HTTP host can see, so the MCP tool renders it in its own error shape (ADR-019). Only the
+/// shared decision builds one (private constructor).
+/// </summary>
+public sealed record AnalysisCreateAuthorization
+{
+    private AnalysisCreateAuthorization(
+        AnalysisCreateAuthorizationOutcome outcome, string? reasonCode, string? message, IResult? rejection,
+        Guid? authorizedPlaybookId, Guid? authorizedDocumentId)
+    {
+        Outcome = outcome;
+        ReasonCode = reasonCode;
+        Message = message;
+        Rejection = rejection;
+        AuthorizedPlaybookId = authorizedPlaybookId;
+        AuthorizedDocumentId = authorizedDocumentId;
+    }
+
+    /// <summary>No request context or no signed-in caller (ADR-028 A10): <see cref="DataverseUserClientErrorCodes.UserContextRequired"/>.</summary>
+    public static readonly AnalysisCreateAuthorization UserContextRequired =
+        new(AnalysisCreateAuthorizationOutcome.UserContextRequired, DataverseUserClientErrorCodes.UserContextRequired, null, null, null, null);
+
+    public AnalysisCreateAuthorizationOutcome Outcome { get; }
+
+    /// <summary>The refusal's <c>reasonCode</c> (the route's 403 code); <c>null</c> when allowed or invalid.</summary>
+    public string? ReasonCode { get; }
+
+    /// <summary>For <see cref="AnalysisCreateAuthorizationOutcome.Invalid"/>: the route's 400 detail (fixed text naming the field, never a value).</summary>
+    public string? Message { get; }
+
+    /// <summary>When allowed: the playbook the playbook-use decision authorised for this caller (null when the body named none).</summary>
+    public Guid? AuthorizedPlaybookId { get; }
+
+    /// <summary>When allowed: the document the "analysis.attach" check (and the external document narrowing) allowed for this caller.</summary>
+    public Guid? AuthorizedDocumentId { get; }
+
+    public bool IsAllowed => Outcome == AnalysisCreateAuthorizationOutcome.Allowed;
+
+    /// <summary>The route's own 400 for a malformed body, rendered by the filter unchanged.</summary>
+    internal IResult? Rejection { get; }
+
+    internal static AnalysisCreateAuthorization Invalid(IResult rejection, string? message) =>
+        new(AnalysisCreateAuthorizationOutcome.Invalid, null, message, rejection, null, null);
+
+    internal static AnalysisCreateAuthorization Refused(string reasonCode) =>
+        new(AnalysisCreateAuthorizationOutcome.Refused, reasonCode, null, null, null, null);
+
+    internal static AnalysisCreateAuthorization Allowed(Guid? playbookId, Guid documentId) =>
+        new(AnalysisCreateAuthorizationOutcome.Allowed, null, null, null, playbookId, documentId);
+}
+
 /// <summary>
 /// Authorization filter for the Analysis endpoints. Follows ADR-008 (endpoint filters for resource-level
 /// authorization) and ADR-003 (fail closed).
@@ -794,21 +864,103 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
     /// associates to the new row app-only (caller-chosen ids it consumes — the same "may this caller use this
     /// configuration row" question the playbook-use decision answers). <c>ActionId</c> is not consumed by the handler.
     /// </summary>
+    /// <remarks>
+    /// spaarkeai-mcp-bff-api-r2 task 031: the decision is <see cref="DecideCreateAsync"/>, which the MCP tool reaches through
+    /// <see cref="AuthorizeAnalysisCreateAsync"/>; this filter only binds the body and renders the decision exactly as it did
+    /// (frozen by <c>AnalysisCreateContractBaselineTests</c>): a malformed body is its existing 400, a refusal the evaluator's 403
+    /// (<see cref="ProblemDetailsHelper.Forbidden"/>, the evaluator's own Forbidden-mode rendering), and an allowed request records
+    /// what was decided and runs the handler.
+    /// </remarks>
     private async ValueTask<object?> AuthorizeCreateAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
+        var httpContext = context.HttpContext;
         var request = context.Arguments.OfType<CreateAnalysisRequest>().FirstOrDefault();
 
+        // InvokeAsync answered a caller with no oid (401) before any mode ran.
+        var decision = await DecideCreateAsync(
+            httpContext, CallerResolution.ResolveObjectId(httpContext.User)!, request, _logger, httpContext.RequestAborted);
+
+        switch (decision.Outcome)
+        {
+            case AnalysisCreateAuthorizationOutcome.Invalid:
+                return decision.Rejection;
+
+            case AnalysisCreateAuthorizationOutcome.Allowed:
+                // Field-mapping-server-write-path-r1 task 031 fix round 1 (F1; UAC-r2 condition (c)): the playbook-use decision is
+                // recorded for THIS request's playbook id, and only when every check passed. The handler reads the record to exempt
+                // that one playbook (by its id) from the create's AppendTo question (RecordCreationRequest.RouteAuthorizedLookups).
+                // Task 043 (owner 2026-11-04): the same "let through" also records the body document, which the Document check
+                // (AttachDocumentCheck: the caller's Read + AppendTo, then THE external document narrowing) decided for this caller.
+                // The handler hands that decision to the field mapping of a Document to Analysis profile, so the narrowing is not
+                // asked twice.
+                if (decision.AuthorizedPlaybookId is { } decided)
+                {
+                    RecordPlaybookUseAuthorized(httpContext, decided);
+                }
+
+                RecordDocumentAttachAuthorized(httpContext, decision.AuthorizedDocumentId!.Value);
+                return await next(context);
+
+            default:
+                // The evaluator's Forbidden-mode deny, rendered by the same helper it uses (the reason code names no record).
+                return ProblemDetailsHelper.Forbidden(
+                    decision.ReasonCode ?? FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: httpContext.TraceIdentifier);
+        }
+    }
+
+    /// <summary>
+    /// spaarkeai-mcp-bff-api-r2 task 031 (spec FR-06): THE create rule of <c>POST /api/ai/analysis/create</c> for a host that is not
+    /// that route — the MCP tool <c>spaarke_start_analysis</c>. It runs <see cref="DecideCreateAsync"/>, the one implementation the
+    /// route's filter runs, as the caller of <paramref name="httpContext"/>: the body validation (400s), then the Create privilege on
+    /// sprk_analysis, "analysis.attach" (Read + AppendTo) on the document, the playbook-use decision and Read on every scope row,
+    /// through the ONE per-route evaluator. A refusal carries the <c>reasonCode</c> the route's 403 carries; an allowed decision
+    /// carries the playbook id and document id the route's filter would record (and nothing else may supply them, so the create's
+    /// AppendTo exemption and its field mapping get exactly what the checks decided).
+    /// <para>Fails closed (ADR-028 A10): a null context, a principal with no authenticated identity, no request services, or no
+    /// Entra <c>oid</c> is <see cref="AnalysisCreateAuthorization.UserContextRequired"/> before any Dataverse call (REST answers each
+    /// with a 401 that carries no reasonCode). Never falls back to app-only. Never throws except when <paramref name="ct"/> is
+    /// cancelled: a fault declaring or evaluating a check is the route's <c>system_failure</c> refusal.</para>
+    /// </summary>
+    public static async Task<AnalysisCreateAuthorization> AuthorizeAnalysisCreateAsync(
+        HttpContext? httpContext, CreateAnalysisRequest? request, CancellationToken ct)
+    {
+        if (httpContext?.User is not { } user || !user.Identities.Any(i => i.IsAuthenticated) || httpContext.RequestServices is null)
+        {
+            return AnalysisCreateAuthorization.UserContextRequired;
+        }
+
+        var userId = CallerResolution.ResolveObjectId(user);
+        if (string.IsNullOrEmpty(userId))
+        {
+            return AnalysisCreateAuthorization.UserContextRequired;
+        }
+
+        return await DecideCreateAsync(
+            httpContext, userId, request, httpContext.RequestServices.GetService<ILogger<AnalysisAuthorizationFilter>>(), ct);
+    }
+
+    /// <summary>
+    /// POST /create's decision (owner/main-session round 25 item 2: G5, matching promote), shared by the route's filter
+    /// (<see cref="AuthorizeCreateAsync"/>) and <see cref="AuthorizeAnalysisCreateAsync"/>. The row is created APP-ONLY, so the
+    /// caller is checked first: the Create privilege on sprk_analysis; "analysis.attach" on the body document; the playbook-use
+    /// decision for a body PlaybookId; and Read on every skill, knowledge and tool row the handler associates to the new row
+    /// app-only (caller-chosen ids it consumes — the same "may this caller use this configuration row" question the playbook-use
+    /// decision answers). <c>ActionId</c> is not consumed by the handler. Renders nothing: the filter and the tool render the outcome.
+    /// </summary>
+    private static async Task<AnalysisCreateAuthorization> DecideCreateAsync(
+        HttpContext httpContext, string userId, CreateAnalysisRequest? request, ILogger? logger, CancellationToken ct)
+    {
         // The DocumentAccess mode's existing 400 for a body with no document, then the handler's own validation — so
         // every malformed body gets exactly the 400 it got before, and before any rights query.
         if (request is null || request.DocumentId == Guid.Empty)
         {
-            return NoDocumentIdentifier();
+            return AnalysisCreateAuthorization.Invalid(NoDocumentIdentifier(), NoDocumentIdentifierDetail);
         }
 
         var invalid = AnalysisEndpoints.ValidateCreateRequest(request);
         if (invalid is not null)
         {
-            return invalid;
+            return AnalysisCreateAuthorization.Invalid(invalid, (invalid as Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult)?.ProblemDetails.Detail);
         }
 
         FinanceAuthorizationTargets targets;
@@ -823,7 +975,7 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
             if (request.PlaybookId is { } playbookId)
             {
                 var playbookCheck = await PlaybookAuthorizationFilter.BuildPlaybookUseCheckAsync(
-                    context.HttpContext.RequestServices, playbookId, "body.playbookId", context.HttpContext.RequestAborted);
+                    httpContext.RequestServices, playbookId, "body.playbookId", ct);
                 if (playbookCheck is not null)
                 {
                     checks.Add(playbookCheck);
@@ -836,30 +988,39 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
 
             targets = FinanceAuthorizationTargets.Authorize(checks.ToArray());
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            return await EvaluateFaultAsync(context, next, ex, FinanceDenial.Forbidden);
+            // A fault while DECLARING the checks (the playbook lookup, a missing registration) denies with system_failure (fail
+            // closed), as the evaluator answered the throwing declaration it was handed before. The log carries no record text.
+            logger?.LogWarning(ex, "[ANALYSIS-AUTH] {Mode}: declaring the checks faulted; denying (fail closed)", AuthorizationMode.AnalysisCreate);
+            return AnalysisCreateAuthorization.Refused(FinanceAuthorizationFilter.SystemFailureReasonCode);
         }
 
-        // Field-mapping-server-write-path-r1 task 031 fix round 1 (F1; UAC-r2 condition (c)): the playbook-use decision is
-        // recorded for THIS request's playbook id, and only when the evaluator lets the request through (it calls next only
-        // after every check above passed). The decision itself is unchanged; the handler reads the record to exempt that one
-        // playbook (by its id) from the create's AppendTo question (RecordCreationRequest.RouteAuthorizedLookups).
-        // Task 043 (owner 2026-11-04): the same "let through" also records the body document, which the Document check above
-        // (AttachDocumentCheck: the caller's Read + AppendTo, then THE external document narrowing) decided for this caller. The
-        // handler hands that decision to the field mapping of a Document to Analysis profile, so the narrowing is not asked twice.
-        var documentId = request.DocumentId;
-        var allowed = new EndpointFilterDelegate(ctx =>
+        Spaarke.Core.Auth.AuthorizationService? authorizationService;
+        try
         {
-            if (request.PlaybookId is { } decided && decided != Guid.Empty)
-            {
-                RecordPlaybookUseAuthorized(ctx.HttpContext, decided);
-            }
+            authorizationService = httpContext.RequestServices.GetService<Spaarke.Core.Auth.AuthorizationService>();
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "[ANALYSIS-AUTH] {Mode}: AuthorizationService could not be resolved; denying (fail closed)", AuthorizationMode.AnalysisCreate);
+            authorizationService = null;
+        }
 
-            RecordDocumentAttachAuthorized(ctx.HttpContext, documentId);
-            return next(ctx);
-        });
-        return await EvaluateAsync(context, allowed, targets, FinanceDenial.Forbidden);
+        if (authorizationService is null)
+        {
+            logger?.LogError("[ANALYSIS-AUTH] {Mode}: AuthorizationService is not registered; denying (fail closed)", AuthorizationMode.AnalysisCreate);
+            return AnalysisCreateAuthorization.Refused(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        }
+
+        var denyReason = await FinanceAuthorizationFilter.DecideDeclaredChecksAsync(authorizationService, httpContext, userId, targets, ct);
+        if (denyReason is not null)
+        {
+            return AnalysisCreateAuthorization.Refused(denyReason);
+        }
+
+        return AnalysisCreateAuthorization.Allowed(
+            request.PlaybookId is { } decided && decided != Guid.Empty ? decided : null, request.DocumentId);
     }
 
     /// <summary>The <see cref="HttpContext.Items"/> key of the create filter's playbook-use record: a private object, so nothing

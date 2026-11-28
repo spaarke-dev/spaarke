@@ -236,21 +236,12 @@ public class FinanceSummaryService : IFinanceSummaryService
     {
         _logger.LogInformation("Generating finance summary for matter {MatterId}", matterId);
 
-        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinanceSummaryService));
-
-        // Query latest ToDate snapshot
-        var snapshot = await QueryLatestToDateSnapshotAsync(serviceClient, matterId, ct);
+        var (snapshot, signals, recentInvoices) = await ReadFinanceDataAsync(matterId, ct);
         if (snapshot == null)
         {
             // No snapshot means no financial data yet
             return null;
         }
-
-        // Query active signals (last 30 days, not dismissed)
-        var signals = await QueryActiveSignalsAsync(serviceClient, matterId, ct);
-
-        // Query recent invoices (last 5)
-        var recentInvoices = await QueryRecentInvoicesAsync(serviceClient, matterId, ct);
 
         var summary = new FinanceSummaryDto
         {
@@ -264,12 +255,33 @@ public class FinanceSummaryService : IFinanceSummaryService
             GeneratedAt = DateTime.UtcNow
         };
 
+        // ADR-015 / NFR-05: ids and counts only; never a spend amount.
         _logger.LogInformation(
-            "Finance summary generated for matter {MatterId}. CurrentSpend={CurrentSpend:C}, " +
-            "ActiveSignals={SignalCount}, RecentInvoices={InvoiceCount}",
-            matterId, summary.CurrentSpend, signals.Count, recentInvoices.Count);
+            "Finance summary generated for matter {MatterId}. ActiveSignals={SignalCount}, RecentInvoices={InvoiceCount}",
+            matterId, signals.Count, recentInvoices.Count);
 
         return summary;
+    }
+
+    /// <summary>
+    /// The three Dataverse reads a summary is made of: the latest ToDate snapshot (null: no financial data yet, and the other two are not
+    /// read), the active signals (last 30 days, not dismissed) and the last five invoices. The one seam where the service touches Dataverse,
+    /// so a test can drive the summary's own logging without a Dataverse connection.
+    /// </summary>
+    internal virtual async Task<(SpendSnapshotData? Snapshot, List<SpendSignalDto> Signals, List<RecentInvoiceDto> RecentInvoices)> ReadFinanceDataAsync(
+        Guid matterId, CancellationToken ct)
+    {
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinanceSummaryService));
+
+        var snapshot = await QueryLatestToDateSnapshotAsync(serviceClient, matterId, ct);
+        if (snapshot == null)
+        {
+            return (null, [], []);
+        }
+
+        var signals = await QueryActiveSignalsAsync(serviceClient, matterId, ct);
+        var recentInvoices = await QueryRecentInvoicesAsync(serviceClient, matterId, ct);
+        return (snapshot, signals, recentInvoices);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -449,7 +461,7 @@ public class FinanceSummaryService : IFinanceSummaryService
     /// <summary>
     /// Internal DTO for snapshot data used in summary composition.
     /// </summary>
-    private record SpendSnapshotData
+    internal record SpendSnapshotData
     {
         public decimal InvoicedAmount { get; init; }
         public decimal? BudgetAmount { get; init; }

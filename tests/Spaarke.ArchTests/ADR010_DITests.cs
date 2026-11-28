@@ -426,7 +426,23 @@ public class ADR010_DITests
         // routes, and the MCP tools in tasks 022–024). The tools' tests fake its outcomes to prove the isError and Partial mapping
         // without a Dataverse world. Accepted on NAMED IMMINENT consumers, as IDecisionLookupSearch is. Falsifiable: if 022–024
         // complete without a double of it, register the concrete and lower by 1.
-        const int knownOneToOneCeiling = 172;
+        // ───────── Ceiling RAISED 172 → 173, 2026-11-27 (spaarkeai-mcp-bff-api-r2 task 037a; +1 interface) ─────────
+        // IAnalysisStartAi -> AnalysisStartService. SEAM JUSTIFICATION: it is a Services/Ai/PublicContracts facade (ADR-013, CLAUDE.md §10
+        // bullet 3), the same category as IPlaybookRunAi and IFileSummarizeAi above: the MCP tool spaarke_start_analysis may name only
+        // PublicContracts types, and the create core moved out of Api/Ai/AnalysisEndpoints so the route, that tool and the Copilot
+        // playbook start (DetachedPlaybookRunner) share ONE create (D-037-engine). The runner's tests fake its outcomes (Created, and the
+        // refusals that must start nothing) without the route's authorization and RecordCreationService world. Measured: master 172,
+        // this task adds exactly this one.
+        // ───────── Ceiling RAISED 173 → 174, 2026-11-27 (spaarkeai-mcp-bff-api-r2 task 036 merge; entries for two earlier interfaces) ─────────
+        // "Measured: master 172" above was wrong: master's list then had 171 entries (headroom 1), and two r2 interfaces had entered
+        // within that headroom without entries. Listed by diffing master 60933c82be (171) against this branch (174):
+        //   IPlaybookRunAi -> DetachedPlaybookRunner (task 030). A Services/Ai/PublicContracts facade (ADR-013, CLAUDE.md §10 bullet 3):
+        //     the MCP playbook tools may name only PublicContracts types. Doubled in tests (PlaybookRunResultsToolTests Mock<IPlaybookRunAi>,
+        //     PlaybookRunToolsContractTests.LinkThrows). Accepted.
+        //   IEventsCapability -> EventsCapability (task 006). ⚠️ WEAK: one capability for two hosts (REST EventEndpoints, the four MCP
+        //     task tools), named in the MCP ledger and EventsCapabilityCoreCallerGuardTests, but no test doubles it today. Grandfathered,
+        //     not endorsed. Falsifiable: decided at r2 wrap-up (task 090, #3320) — register the concrete and lower by 1, or add the double.
+        const int knownOneToOneCeiling = 174;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

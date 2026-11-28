@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Dataverse MCP: research re-check and deployment-guide admin paragraph</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Research note and one documentation paragraph; no code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation; the platform research itself is delegated to the researcher agent (CLAUDE.md §15)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md in Phase 0 and its own note; no overlap</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, documentation, research</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-verify the Dataverse MCP platform facts (endpoint, built-in tools, Business Skills status, metering) against Microsoft Learn with the researcher agent and write a dated note; then add the admin paragraph to the customer deployment guide: do not allow the Dataverse MCP client for end users in environments running Spaarke, or allow it read-only for named analysts, with the design §4.7 reasons.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Power Platform administration and Spaarke customer deployment.</role>
+  <goal>notes/dataverse-mcp-recheck-2026-11.md exists with dated, sourced facts and any delta from knowledge/dataverse-mcp/; SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md has the admin paragraph.</goal>
+
+  <context>
+    <background>Spec FR-18 and design §4.7 (owner Q8, 2026-11-25): Spaarke's end-user surfaces use only the Spaarke MCP server; built-in Dataverse MCP stays a dev/admin tool. Reasons: writes bypass the BFF write path (ADR-002), reads are governed only by Dataverse roles (no UAC, privileged redaction or SPE access rules), it competes for tool choice, and calls outside Copilot Studio are metered.</background>
+    <relevant-files>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (add the admin paragraph in the post-provisioning or security section)</file>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r2/notes/dataverse-mcp-recheck-2026-11.md</file>
+      <file role="canonical-reference">knowledge/dataverse-mcp/ (2026-05 facts to re-check)</file>
+      <file role="canonical-reference">.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file role="canonical-reference">.claude/agents/researcher.md</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="project">Launch the researcher agent with an explicit model (sonnet, per .claude/constraints/agent-cost.md) and a brief that names the four facts to verify; it checks knowledge/ first, then Microsoft Learn. If the executing session cannot launch agents (a dispatched sub-agent), it does the same check itself with the microsoft-learn MCP tools, knowledge/ first. Every fact in the note carries a source URL and the date read.</constraint>
+    <constraint source="project">The guide paragraph states the owner's position only (end users: not allowed, or read-only for named analysts); it gives no setting the agent has not verified in the research note.</constraint>
+    <constraint source="project">If the research finds a fact that changes the design §4.7 reasoning (for example, Dataverse MCP writes now run through a configurable server-side gate), record it in the note and escalate before writing the paragraph.</constraint>
+    <constraint source="project">Edit only the guide paragraph; the guide's legacy-agent §7.12 content belongs to customer-provisioning-orchestration-r1 (see task 002) and is not changed here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/plugin-structure.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/constraints/agent-cost.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/design.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Brief the researcher agent (model sonnet) on: endpoint shape, the built-in tool list, Business Skills status (preview/GA), metering and licence coverage; ask for dated sources and deltas from knowledge/dataverse-mcp/.</step>
+    <step order="2">Write notes/dataverse-mcp-recheck-2026-11.md from its findings.</step>
+    <step order="3">Add the admin paragraph to SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md.</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="5">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a re-verified fact contradicts the design §4.7 reasons, STOP and escalate to the owner before writing the guide paragraph.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>knowledge/dataverse-mcp/ (2026-05 facts) and design §4.7; CAPABILITY-INDEX: no row (documentation only).</existing>
+    <extension>The note extends the existing knowledge with a dated re-check; it is a project note, not a new reusable component.</extension>
+    <cost-of-doing-nothing>FR-18 acceptance ("the research note is in notes/, with dated sources") fails, and the guide paragraph would rest on six-month-old platform facts.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="agent">researcher (model sonnet)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/dataverse-mcp-recheck-2026-11.md</output>
+    <output type="docs">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The note covers endpoint, built-in tools, Business Skills status and metering, each with a source URL and the date read, and lists every delta from knowledge/dataverse-mcp/.</criterion>
+    <criterion testable="true">The guide paragraph says end users must not be allowed the Dataverse MCP client in environments running Spaarke, or only read-only for named analysts, and gives the four design §4.7 reasons.</criterion>
+    <criterion testable="true">Negative: no other section of the deployment guide is changed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Completed 2026-11-25. Re-check note written; guide section 12.9 added; no contradiction with design 4.7. Out-of-scope follow-up: knowledge/dataverse-mcp/NOTES.md and dataverse-mcp-usage skill use removed tool names. rework: none task 004. Spec FR-18. The researcher agent may update its own .claude/agent-memory/researcher files; that is its own boundary, not this task's edit.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

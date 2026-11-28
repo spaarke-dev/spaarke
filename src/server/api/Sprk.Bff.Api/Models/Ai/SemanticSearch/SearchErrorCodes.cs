@@ -173,6 +173,18 @@ public static class SearchErrorCodes
     /// </summary>
     public const string RecordSearchFailed = "RECORD_SEARCH_FAILED";
 
+    // ========================================================================
+    // Document search failures (POST /api/ai/search, /count). Issue #3212: the 500 used to carry
+    // the exception's message as its detail; it now carries fixed text and one of these codes,
+    // as the record route does with RECORD_SEARCH_FAILED.
+    // ========================================================================
+
+    /// <summary><c>POST /api/ai/search</c> failed unexpectedly (500). The detail is fixed text, never the exception's.</summary>
+    public const string SemanticSearchFailed = "SEMANTIC_SEARCH_FAILED";
+
+    /// <summary><c>POST /api/ai/search/count</c> failed unexpectedly (500). The detail is fixed text, never the exception's.</summary>
+    public const string SemanticSearchCountFailed = "SEMANTIC_SEARCH_COUNT_FAILED";
+
     /// <summary>GitHub #3307: the named index is allowed but is not a records index, so record search cannot run on it.</summary>
     public const string IndexNotRecordsIndex = "INDEX_NOT_RECORDS_INDEX";
 }

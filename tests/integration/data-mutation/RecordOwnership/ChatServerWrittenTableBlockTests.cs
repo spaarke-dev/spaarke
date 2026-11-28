@@ -2,7 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Api.Agent;
+using Sprk.Bff.Api.Services.Ai.Handoff;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Tests.Services.Ai.Handlers;

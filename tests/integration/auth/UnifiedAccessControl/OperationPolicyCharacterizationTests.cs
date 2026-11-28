@@ -158,7 +158,7 @@ public class OperationPolicyCharacterizationTests
     [InlineData("entity.associate_document")]  // requires AppendTo
     [InlineData("finance.attach_invoice")]     // requires AppendTo
     [InlineData("finance.link_invoice")]       // requires Write + Append
-    [InlineData("event.attach_regarding")]     // requires AppendTo (task 159)
+    [InlineData("event.attach_regarding")]     // requires Read + AppendTo (task 159; #3181): Read alone still lacks AppendTo
     public async Task MutatingOperation_WithReadOnlyRights_DeniedForInsufficientRights(string operation)
     {
         var result = await Rule().EvaluateAsync(Context(operation), Snapshot(AccessRights.Read));

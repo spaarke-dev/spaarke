@@ -358,6 +358,12 @@ public sealed class McpAuthTests
         nameof(ToolShapes.UnlistedPolicyTool), nameof(ToolShapes.MethodLevelAuthorizeTool),
         // O-14: a tool that is not read-only must be app-only (_meta.ui.visibility exactly ["app"]): none, model+app, model and empty all refuse.
         ToolShapes.WriteNoVisibility, ToolShapes.WriteModelAndApp, ToolShapes.WriteModelOnly, ToolShapes.WriteEmptyVisibility,
+        // r2 NFR-06 (task 031): a model-visible write passes only as a declared reversible write. One part missing refuses: no
+        // required key, the key optional, the key not a string, destructive, not idempotent, or the hints left unset.
+        ToolShapes.ReversibleWriteNoKey, ToolShapes.ReversibleWriteKeyOptional, ToolShapes.ReversibleWriteKeyNotString,
+        ToolShapes.ReversibleWriteDestructive, ToolShapes.ReversibleWriteNotIdempotent, ToolShapes.ReversibleWriteHintsUnset,
+        // Verifier fix F2 (closed list): a PERFECT reversible-write shape under a name that is not in ModelCallableWrites still refuses.
+        ToolShapes.ReversibleWriteUnlisted,
     };
 
     [Theory]
@@ -368,13 +374,42 @@ public sealed class McpAuthTests
 
         var act = () => McpToolAuthorization.ValidateTool(tool, definition);
 
-        act.Should().Throw<InvalidOperationException>().WithMessage($"*'{shape}'*");
+        // The tool's own name: the NFR-06 shapes carry the listed name, so each refuses for its own reason, not for being unlisted.
+        act.Should().Throw<InvalidOperationException>().WithMessage($"*'{tool.ProtocolTool.Name}'*");
+    }
+
+    [Fact(DisplayName = "031 fix F2: the unlisted reversible write is refused FOR being unlisted, and the listed one is not (must-fire / must-not-fire)")]
+    public void ValidateTool_ReversibleWrite_MustBeNamedInTheClosedList()
+    {
+        var (unlisted, unlistedDefinition) = ToolShapes.Build(ToolShapes.ReversibleWriteUnlisted);
+        var (listed, listedDefinition) = ToolShapes.Build(ToolShapes.ReversibleWrite);
+
+        var refuse = () => McpToolAuthorization.ValidateTool(unlisted, unlistedDefinition);
+        var accept = () => McpToolAuthorization.ValidateTool(listed, listedDefinition);
+
+        refuse.Should().Throw<InvalidOperationException>().WithMessage("*ModelCallableWrites*");
+        accept.Should().NotThrow();
+        McpToolAuthorization.ModelCallableWrites.Should().Contain(listed.ProtocolTool.Name);
+        McpToolAuthorization.ModelCallableWrites.Should().NotContain(unlisted.ProtocolTool.Name);
+    }
+
+    [Fact(DisplayName = "031 fix F2: an app-only write needs no entry in the closed list (r1's gating is unchanged)")]
+    public void ValidateTool_AppOnlyWrite_IsNotInTheClosedList_AndPasses()
+    {
+        var (tool, definition) = ToolShapes.Build(ToolShapes.WriteAppOnly);
+
+        McpToolAuthorization.ModelCallableWrites.Should().NotContain(tool.ProtocolTool.Name);
+        var act = () => McpToolAuthorization.ValidateTool(tool, definition);
+
+        act.Should().NotThrow();
     }
 
     [Theory]
     [InlineData(nameof(ToolShapes.Sanctioned))]
     [InlineData(nameof(ToolShapes.AdminTool))]
     [InlineData(ToolShapes.WriteAppOnly)]
+    [InlineData(ToolShapes.ReversibleWrite)]
+    [InlineData(ToolShapes.ReversibleWriteModelAndApp)]
     public void ValidateTool_AuthorizedReadOnlyTitledTool_IsAccepted(string shape)
     {
         var (tool, definition) = ToolShapes.Build(shape);
@@ -441,9 +476,59 @@ public sealed class McpAuthTests
         public const string WriteModelOnly = nameof(WriteModelOnly);
         public const string WriteEmptyVisibility = nameof(WriteEmptyVisibility);
         public const string WriteAppOnly = nameof(WriteAppOnly);
+        public const string ReversibleWrite = nameof(ReversibleWrite);
+        public const string ReversibleWriteModelAndApp = nameof(ReversibleWriteModelAndApp);
+        public const string ReversibleWriteNoKey = nameof(ReversibleWriteNoKey);
+        public const string ReversibleWriteKeyOptional = nameof(ReversibleWriteKeyOptional);
+        public const string ReversibleWriteKeyNotString = nameof(ReversibleWriteKeyNotString);
+        public const string ReversibleWriteDestructive = nameof(ReversibleWriteDestructive);
+        public const string ReversibleWriteNotIdempotent = nameof(ReversibleWriteNotIdempotent);
+        public const string ReversibleWriteHintsUnset = nameof(ReversibleWriteHintsUnset);
+        public const string ReversibleWriteUnlisted = nameof(ReversibleWriteUnlisted);
+
+        /// <summary>The one name in <c>McpToolAuthorization.ModelCallableWrites</c> today: the accept shapes and each refuse shape's own fault use it.</summary>
+        private const string Listed = Sprk.Bff.Api.Api.Mcp.LegalOperations.Analysis.StartAnalysisTool.ToolName;
+
+        /// <summary>An input schema with an <c>idempotencyKey</c> property of <paramref name="keyType"/>, required when <paramref name="required"/>.</summary>
+        private static JsonElement KeySchema(bool required = true, string keyType = "string", bool hasKey = true) =>
+            JsonSerializer.SerializeToElement(new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = hasKey
+                    ? new JsonObject { [McpToolAuthorization.IdempotencyKeyArgument] = new JsonObject { ["type"] = keyType } }
+                    : new JsonObject { ["other"] = new JsonObject { ["type"] = "string" } },
+                ["required"] = required ? new JsonArray(hasKey ? McpToolAuthorization.IdempotencyKeyArgument : "other") : new JsonArray(),
+            });
+
+        private static McpServerTool Reversible(
+            string name, JsonElement schema, bool? destructive = false, bool? idempotent = true, string[]? visibility = null)
+        {
+            var tool = McpServerTool.Create(
+                Sanctioned.Run,
+                new McpServerToolCreateOptions
+                {
+                    Name = name,
+                    Title = "A title",
+                    ReadOnly = false,
+                    Destructive = destructive,
+                    Idempotent = idempotent,
+                    Meta = visibility is null ? null : new JsonObject { ["ui"] = new JsonObject { ["visibility"] = new JsonArray(visibility.Select(v => (JsonNode)JsonValue.Create(v)!).ToArray()) } },
+                });
+            tool.ProtocolTool.InputSchema = schema;
+            return tool;
+        }
 
         public static (McpServerTool Tool, Type Definition) Build(string shape) => shape switch
         {
+            ReversibleWrite => (Reversible(Listed, KeySchema()), typeof(Sanctioned)),
+            ReversibleWriteModelAndApp => (Reversible(Listed, KeySchema(), visibility: ["model", "app"]), typeof(Sanctioned)),
+            ReversibleWriteUnlisted => (Reversible(shape, KeySchema()), typeof(Sanctioned)),
+            ReversibleWriteNoKey => (Reversible(Listed, KeySchema(hasKey: false)), typeof(Sanctioned)),
+            ReversibleWriteKeyOptional => (Reversible(Listed, KeySchema(required: false)), typeof(Sanctioned)),
+            ReversibleWriteKeyNotString => (Reversible(Listed, KeySchema(keyType: "integer")), typeof(Sanctioned)),
+            ReversibleWriteDestructive => (Reversible(Listed, KeySchema(), destructive: true), typeof(Sanctioned)),
+            ReversibleWriteNotIdempotent => (Reversible(Listed, KeySchema(), idempotent: false), typeof(Sanctioned)),
+            ReversibleWriteHintsUnset => (Reversible(Listed, KeySchema(), destructive: null, idempotent: null), typeof(Sanctioned)),
             nameof(NoAuthorizeTool) => (Make(NoAuthorizeTool.Run, shape), typeof(NoAuthorizeTool)),
             nameof(ExternalPolicyTool) => (Make(ExternalPolicyTool.Run, shape), typeof(ExternalPolicyTool)),
             nameof(NamedSchemeTool) => (Make(NamedSchemeTool.Run, shape), typeof(NamedSchemeTool)),

@@ -455,6 +455,21 @@ export interface IEmailComposerProps {
   associations?: ICommunicationAssociation[];
   /** Default `true` — renders `associations[]` as read-only Fluent Tags via `AssociationChips`. */
   showAssociations?: boolean;
+  /**
+   * Default `true`. `false` keeps the "Related to" chips but makes them NOT removable (no ×): a host that files the email
+   * under a record it fixed (the MCP host's regarding matter) must not let the user detach it.
+   */
+  associationsRemovable?: boolean;
+  /**
+   * Default `true`. `false` hides the "Bcc" toggle and field (the host's send route carries no Bcc). A host that hides it
+   * must refuse a request that still carries `bcc`, rather than drop it.
+   */
+  showBcc?: boolean;
+  /**
+   * Default `true`. `false` hides the "External | Internal Only" control (the host's send route carries no
+   * `isInternalOnly`); a compose send then carries `isInternalOnly: false`.
+   */
+  showInternalOnly?: boolean;
 
   // — "Internal Only" (task 068; owner 2026-10-14) — both optional/additive —
   /**

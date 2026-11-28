@@ -16,6 +16,86 @@
 
 ---
 
+## ✅ AMENDMENT 2026-11-26 (ACCEPTED) — a playbook run a user started may finish after its request (§3 B1, §5 MUST NOT)
+
+> **Path**: CLAUDE.md §6.5 **path B**. **Source**: owner decision D-030-run-model
+> (`projects/spaarkeai-mcp-bff-api-r2/notes/decisions.md`), 2026-11-26.
+> **Status**: **accepted.** The owner approved the approach (Option A) and gave security sign-off on this text on 2026-11-26;
+> `unified-access-control-r2` reviewed it (no blocking finding). It lands with `spaarkeai-mcp-bff-api-r2` task 030 and takes effect when that merges.
+> **Scope**: one narrow exception to §5's token rule and to B1. The placement decision is **unchanged**, and so is
+> §6's impersonation.
+
+**Why.** Microsoft 365 Copilot (Chat and Cowork) expects an MCP tool call to answer in under 30 seconds
+(Microsoft's connector requirements). Spaarke's MCP host keeps no state between requests, so each tool call's request
+ends when the tool answers. A JPS playbook run takes minutes and acts as the user who started it: it reads
+documents and Dataverse through on-behalf-of (OBO) tokens exchanged from that user's request.
+
+The owner ruled that runs must finish inside Copilot, not be handed to the Spaarke Console. The rule before this
+amendment left three routes, and each fails:
+- **§6 impersonation:** it covers Dataverse only, not SharePoint Embedded document reads. It is not usable until
+  #988–#990 land, and it would need an engine change, which ADR-039 freezes.
+- **App-only:** ADR-028 A10 forbids it for a user's action. It would read data wider than the user may see.
+- **Cutting the run at the request's end:** this sends the user out of Copilot.
+
+**The exception: a detached caller run.** A JPS playbook run that a user started through an authenticated BFF request
+**MAY** continue in the same BFF process after that request has answered. It carries that user's own access token,
+so every read is still limited to what the user may see. Every one of these conditions must hold:
+
+1. **Which work.** Only a JPS playbook run the user started. Today the only such work is MCP `spaarke_run_playbook`.
+   Any other kind of work needs a new row in this amendment, with the owner's approval.
+2. **One helper.** The run goes through the BFF's one shared detached-run helper, added by task 030.
+   - No other production code may build a detached `HttpContext` or copy the caller's `Authorization` header out
+     of a request.
+   - Existing code that does is the ratchet baseline:
+     - Compose's `ComposeProfileDispatcher` (#3224). It moves to the helper when next touched.
+     - `DecisionRouteCores` and `AssignTaskNotifier`. These scratch contexts carry no header.
+3. **Memory only.** The token lives only in that process's memory, on the detached context.
+   - It is never written to a store, a cache key, a queue, a log, telemetry, the run record or an exception message.
+   - The OBO tokens that MSAL derives stay in the caches they use today. That includes MSAL's own OBO cache, which
+     already holds refresh tokens today; this amendment adds no new store or lifetime to it.
+   - It is never handed to another host: no queue, job, Function or other process.
+4. **No leak into the original request.** The helper suppresses `ExecutionContext` flow before it detaches. Detaching
+   must not change the original request's `IHttpContextAccessor` (the defect in #3224).
+5. **Bounded.** The run is capped at **50 minutes**, and it ends when the app shuts down. The cap, not the token's
+   expiry, is what bounds the run.
+   - Token expiry is no guide: the caller's token may have only minutes left when the run starts.
+   - Delegated downstream tokens (Graph, Dataverse) are obtained at the start, while the request is still
+     authenticated.
+   - If a downstream token cannot be renewed during the run, the run ends as failed (`auth_expired`), possibly before
+     the cap. So does an expired assertion, or a consent or Conditional Access challenge. The run is never retried
+     app-only.
+   - Each user may have at most a small fixed number of detached runs in progress at once. A start beyond it is
+     refused with a clear reason. This limits how much exposure one user or one stolen token can build up.
+6. **Authorized first.** The run's authorization completes inside the original request, before the run starts
+   (ADR-028). The run acts only on the inputs that were authorized.
+7. **Visible.** The run's state is recorded on the run record, which the user can read. A run ended by the cap or by a
+   graceful shutdown is recorded as cancelled at once. A run lost to a crash, which leaves no final write, reads as
+   interrupted once the cap plus a margin has passed (about 60 minutes after it started); until then it reads as running.
+
+**Known limits (accepted):**
+- **Access is checked once, at start.** Access changes made during the run don't stop it: a removed share, a new No
+  Access entry or a newly set Restricted value. Reads that go through the BFF's app-only paths (the SharePoint
+  Embedded broker's document reads) still return data for up to the 50-minute cap. Dataverse reads made with the
+  user's token see such a change at once. Closing this gap would need an access recheck at each node in the engine,
+  and ADR-039 freezes the engine, so the cap is the bound.
+- **Which user.** Runs are keyed to the user's Entra object id alone. This holds because the MCP host accepts only
+  Spaarke-tenant tokens: `McpToolAuthorization.A10DenyReason` refuses any other `tid`, any issuer other than the exact
+  v2 issuer, and the home-directory (A9) and CIAM schemes. If the host ever accepts another tenant's tokens, runs must
+  be keyed on tenant plus object id (ADR-028 A9).
+
+**Not permitted under this exception:**
+- MSAL's long-running OBO sessions. They hold a refresh token that stays valid for up to 90 days, a larger exposure
+  than an access token that expires within the run's cap.
+- Any detached run started by a timer, a webhook or the system. Those stay app-only, or use §6 impersonation.
+
+**Enforced by:** ArchTests added with task 030, each with must-fire and must-not-fire controls:
+- In production code, a detached `HttpContext` may be built only in the shared helper and the baseline files above.
+- The caller's `Authorization` header may be read only in the token-acquisition (OBO) files and the shared helper. The
+  existing readers are a ratchet baseline.
+- At most **3 detached runs in progress per user** (`PlaybookRunLimits.MaxConcurrentRunsPerCaller`, per BFF instance; starts still being accepted count towards it). Enforced in the helper and tested there.
+
+---
+
 ## 🟡 AMENDMENT 2026-09-28 — no shared Model 1 compute (§6 Tenancy, §6 Identity, §7)
 
 > **Path**: CLAUDE.md §6.5 **path B**. **Source**: owner decision D-12 §1/§3/§3a
@@ -138,7 +218,7 @@ recorded in the Placement Justification (`.claude/constraints/bff-extensions.md`
 
 | # | Signal | Why |
 |---|---|---|
-| B1 | Needs the calling user's identity — OBO tokens, files the user wrote to SharePoint Embedded | Must run inside the user's request (`bff-extensions.md` Pattern 4) |
+| B1 | Needs the calling user's identity — OBO tokens, files the user wrote to SharePoint Embedded | Must run inside the user's request (`bff-extensions.md` Pattern 4). The one exception is a user-started JPS playbook run, which may finish in the same BFF process under the 2026-11-26 amendment's conditions |
 | B2 | Uses a large share of BFF domain code | A Function cannot reference `Sprk.Bff.Api`; the code must first move to shared libraries |
 | B3 | Low volume, with the BFF's scale signal, identity and release cadence | Colocation is cheaper; Microsoft's partitioning guidance allows it |
 | B4 | Tied to a live request — streaming, chat, sub-500 ms responses | Latency coupling |
@@ -189,7 +269,9 @@ A workload moves out of the BFF when at least one F-signal is material **and** o
   that user outside the request is permitted only as §6's conditional impersonation (ADR-028 A5), which uses the
   host's own app-only identity and never the user's token. (Until 2026-09-15 this line read "run work that needs the
   calling user's identity outside the BFF request" — which, taken literally, forbade even a BFF job handler from
-  impersonating the user who started the work.)
+  impersonating the user who started the work.) **Exception (2026-11-26 amendment):** a JPS playbook run that the
+  user started may carry that user's token, in the same process and through the shared detached-run helper only,
+  under all seven of the amendment's conditions.
 - **MUST NOT** add new Azure WebJobs.
 - **MUST NOT** add a new hand-rolled timer `BackgroundService` (§1).
 
@@ -294,7 +376,7 @@ does not go stale as the inventory changes.
 
 **Review checklist**
 - [ ] Host chosen with §3 signals and §4 costs recorded; tie-breaker applied where close
-- [ ] The caller's token never leaves the BFF request; any impersonation meets §6's conditions (BFF-initiated work, BFF-written requester field, shared helper)
+- [ ] The caller's token never leaves the BFF request, except a user-started JPS playbook run through the shared detached-run helper under the 2026-11-26 amendment (same process, memory only, 50-minute cap); any impersonation meets §6's conditions (BFF-initiated work, BFF-written requester field, shared helper)
 - [ ] Scheduled work that must not run concurrently gets one dispatch per schedule (timer trigger or lease)
 - [ ] Handlers idempotent with an atomic per-unit claim; dead-letter queue monitored
 - [ ] For a Function: §6 guardrails met (Flex, tenancy row, managed identity app-only, impersonation only per §6's conditions, no secrets, sender validation, Bicep, Key Vault, telemetry, shared code only) and §10 approval obtained where required

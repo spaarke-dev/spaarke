@@ -39,6 +39,9 @@ public class WriterOnlyTablesDeleteGuardTests
     {
         (typeof(Sprk.Bff.Api.Api.Ai.AnalysisEndpoints), "CompensatePromoteAnalysisDeleteAsync",
             "Compensates a promote: removes the sprk_analysis row it just created (AnalysisEntityLogicalName)."),
+        (typeof(Sprk.Bff.Api.Services.Ai.PlaybookRuns.DetachedPlaybookRunner), "DeleteEmptyAnalysisAsync",
+            "Removes the sprk_analysis row (PlaybookRunResultsReader.AnalysisEntitySet) THIS playbook start just created, as the caller (the caller's OBO client, never app-only), "
+            + "when the start did not end Started and nothing will ever fill it (spaarkeai-mcp-bff-api-r2 task 037d, D-037-cleanup)."),
         (typeof(Sprk.Bff.Api.Api.Reporting.ReportingEndpoints), "CreateReport",
             "Rolls back the sprk_report row this create just wrote; a fixed table."),
         (typeof(Sprk.Bff.Api.Api.Reporting.ReportingEndpoints), "DeleteReport",

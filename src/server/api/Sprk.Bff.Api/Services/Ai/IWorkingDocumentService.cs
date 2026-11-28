@@ -21,6 +21,21 @@ public interface IWorkingDocumentService
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// spaarkeai-mcp-bff-api-r2 task 037 review F-A: the same <c>sprk_workingdocument</c> write as
+    /// <see cref="UpdateWorkingDocumentAsync"/>, but it REPORTS a failure instead of only logging it, so the final save of a run can skip
+    /// the finalize when its content was not written. <see cref="UpdateWorkingDocumentAsync"/> keeps its swallow-and-log behaviour for its
+    /// streaming callers.
+    /// </summary>
+    /// <param name="analysisId">The analysis record ID.</param>
+    /// <param name="content">The working document content (the caller keeps it within the column's limit).</param>
+    /// <param name="cancellationToken">Cancellation token; a cancelled write throws.</param>
+    /// <returns><c>true</c> when the content was written; <c>false</c> when the write failed (logged with the exception type only).</returns>
+    Task<bool> TryUpdateWorkingDocumentAsync(
+        Guid analysisId,
+        string content,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Mark analysis as completed and copy working document to final output.
     /// Updates status, timestamps, and token usage.
     /// </summary>

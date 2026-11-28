@@ -395,7 +395,6 @@ Facade registrations live in `Infrastructure/DI/AnalysisServicesModule.cs`; ever
 | `Api/Ai/ChatEndpoints.cs` | Chat API surface (raw AI exposure to clients) |
 | `Api/Ai/PlaybookEndpoints.cs` | Playbook CRUD API — 10 handlers that wrap `IPlaybookService` 1:1; facade-wrapping would duplicate the surface |
 | `Api/Ai/AiPlaybookBuilderEndpoints.cs` | AI-internal builder for constructing playbooks |
-| `Api/Agent/AgentEndpoints.cs` | M365 Copilot agent gateway (playbook-discovery pattern) |
 | `Api/Filters/PlaybookAuthorizationFilter.cs` | ADR-008 authorization filter using `IPlaybookService.GetPlaybookAsync(Guid)` for ownership checks |
 
 ### AI-Coupled Handler Relocation (FR-E3)

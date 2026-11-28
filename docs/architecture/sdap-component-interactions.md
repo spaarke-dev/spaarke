@@ -271,24 +271,7 @@ Sequence: PCF (DocumentRelationshipViewer) → BFF (VisualizationEndpoints) → 
 
 ## Data Flow: M365 Copilot Agent
 
-Sequence: Teams/M365 Copilot → AgentEndpoints → SpaarkeAgentHandler → PlaybookInvocationService → AnalysisOrchestrationService → Azure OpenAI → AdaptiveCardFormatterService → response.
-
-**Components involved:**
-
-| Component | Path | Role |
-|-----------|------|------|
-| Agent endpoints | `src/server/api/Sprk.Bff.Api/Api/Agent/AgentEndpoints.cs` | Gateway for M365 Copilot |
-| Agent handler | `src/server/api/Sprk.Bff.Api/Api/Agent/SpaarkeAgentHandler.cs` | Conversation orchestration |
-| Playbook invocation | `src/server/api/Sprk.Bff.Api/Api/Agent/PlaybookInvocationService.cs` | Bridge to AI analysis |
-| Adaptive cards | `src/server/api/Sprk.Bff.Api/Api/Agent/AdaptiveCardFormatterService.cs` | Format AI output for Teams |
-
-**Change impact:**
-
-| Change | Impact |
-|--------|--------|
-| Modify playbook invocation interface | Update AgentHandler AND ChatEndpoints (both consumers) |
-| Change adaptive card schema | Update AdaptiveCardFormatterService, test in Teams |
-| Modify agent auth | Update AgentTokenService and AgentAuthorizationFilter |
+> Retired 2026-11-25 (spaarkeai-mcp-bff-api-r2); Copilot reaches Spaarke through the Spaarke MCP connector (see [SPAARKE-MCP-SERVER-ARCHITECTURE.md](SPAARKE-MCP-SERVER-ARCHITECTURE.md)). The `Api/Agent/` gateway and its Teams adaptive-card path were removed.
 
 ---
 

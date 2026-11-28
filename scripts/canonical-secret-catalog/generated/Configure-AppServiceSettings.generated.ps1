@@ -120,8 +120,6 @@ function Format-KvRef {
 }
 
 $settings = @(
-    "AgentToken__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
-    "AgentToken__TenantId=$(Format-KvRef 'TenantId')",
     "AiSafety__ContentSafety__Endpoint=$ContentSafetyEndpoint",
     "AiSafety__ContentSafety__ManagedIdentity__Enabled=true",
     "AiSearch__Endpoint=$(Format-KvRef 'AiSearch-Endpoint')",

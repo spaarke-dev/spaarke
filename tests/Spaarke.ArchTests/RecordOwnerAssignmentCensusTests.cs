@@ -184,9 +184,9 @@ public class RecordOwnerAssignmentCensusTests
 
         // ── Routed: the file resolves the owner and writes it ───────────────────────────────────────────────────
         new CensusEntry("DataverseWebApiService.cs", "sprk_eventlog", 1, Disposition.Routed,
-            "CreateEventLogAsync takes the owner positionally; EventEndpoints resolves it as content of the event "
+            "CreateEventLogAsync takes the owner positionally; EventsCapability resolves it as content of the event "
             + "(RecordOwnershipContext.ContentOf) for every log row it writes.",
-            OwnerFile: "EventEndpoints.cs"),
+            OwnerFile: "EventsCapability.cs"),
         new CensusEntry("ObservationMirrorMapper.cs", "sprk_analysis", 1, Disposition.Routed,
             "The mapper builds the mirrored analysis row; DataverseObservationMirror resolves its owner from the row's "
             + "parent lookups (ForChild) and skips the mirror on a refusal.",
@@ -400,9 +400,9 @@ public class RecordOwnerAssignmentCensusTests
             "A service request is a root with no parent, so the owner is the default team of the business unit that owns the "
             + "requester's contact (target = the contact; owner decision 2026-10-11, I-6), resolved before the create; "
             + "unresolved refuses with 500 EXT_INTAKE_OWNER_UNRESOLVED and ExternalDataService refuses an empty team."),
-        new UnscannedWriter("EventEndpoints.cs", "seam caller (CreateEventLogAsync)",
+        new UnscannedWriter("EventsCapability.cs", "seam caller (CreateEventLogAsync)",
             "The event row is created by RecordCreationService (field-mapping task 031), which decides its owner; the audit row takes the "
-            + "owner the service wrote. The re-file route (PUT /{id}) was deleted by task 159 (owner round 10 item 1)."),
+            + "owner the service wrote. The re-file route (PUT /{id}) was deleted by task 159 (owner round 10 item 1). spaarkeai-mcp-bff-api-r2 task 006 moved the create and complete bodies out of EventEndpoints.cs into this file."),
         new UnscannedWriter("AnalysisEndpoints.cs", "seam caller (CreateAnalysisAsync)",
             "Promote resolves the owner from the document and regarding record; create goes through RecordCreationService (field-mapping "
             + "task 031). A refusal is a 409 (the fork route was deleted by task 162)."),
@@ -3100,8 +3100,8 @@ public class RecordOwnerAssignmentCensusTests
         // RecordCreationService (the row above: DecideOwnerAsync names the caller via WhoAmI), so EventEndpoints.OwnershipContextFor,
         // EventEndpoints.CreateEventInDataverseAsync and AnalysisEndpoints.CreateAnalysis no longer create or decide an owner and
         // left this list. The event's creation LOG row (below, and here) still names the person whose create it records.
-        new PersonBearingWriter("EventEndpoints.cs", "WriteCreatedAuditLogAsync", "the caller whose create the event's creation log row records"),
-        new PersonBearingWriter("EventEndpoints.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),
+        new PersonBearingWriter("EventsCapability.cs", "WriteCreatedAuditLogAsync", "the caller whose create the event's creation log row records"),
+        new PersonBearingWriter("EventsCapability.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),
         // (ForkAnalysis left with POST /api/ai/analysis/fork, deleted by task 162 under owner round 10 item 1.)
         new PersonBearingWriter("AnalysisEndpoints.cs", "PromoteSession", "promote caller"),
         new PersonBearingWriter("AnalysisResultPersistence.cs", "StoreDocumentProfileOutputsAsync", "the user who ran the profile"),

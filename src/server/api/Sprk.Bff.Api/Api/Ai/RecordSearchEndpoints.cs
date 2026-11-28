@@ -1,13 +1,10 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Core.Auth;
-using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
-using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Models.Ai.RecordSearch;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -82,6 +79,36 @@ public static class RecordSearchEndpoints
             });
         }
 
+        // Validate: bounds. The [StringLength]/[Range] attributes on the DTOs are metadata only (no
+        // validation filter runs on this route), so enforce them here, from the same constants the
+        // attributes use. Without this, limit:0 / offset:-1 reached Azure AI Search and came back 500.
+        if (request.Query.Length > RecordSearchRequest.MaxQueryLength)
+        {
+            return BadRequest(
+                "Query Too Long",
+                $"query must not exceed {RecordSearchRequest.MaxQueryLength} characters.",
+                SearchErrorCodes.QueryTooLong);
+        }
+
+        if (request.Options is { } options)
+        {
+            if (options.Limit is < RecordSearchOptions.MinLimit or > RecordSearchOptions.MaxLimit)
+            {
+                return BadRequest(
+                    "Invalid Limit",
+                    $"options.limit must be between {RecordSearchOptions.MinLimit} and {RecordSearchOptions.MaxLimit}.",
+                    SearchErrorCodes.InvalidLimit);
+            }
+
+            if (options.Offset is < RecordSearchOptions.MinOffset or > RecordSearchOptions.MaxOffset)
+            {
+                return BadRequest(
+                    "Invalid Offset",
+                    $"options.offset must be between {RecordSearchOptions.MinOffset} and {RecordSearchOptions.MaxOffset}.",
+                    SearchErrorCodes.InvalidOffset);
+            }
+        }
+
         // Validate: RecordTypes not empty
         if (request.RecordTypes == null || request.RecordTypes.Count == 0)
         {
@@ -138,28 +165,6 @@ public static class RecordSearchEndpoints
                 detail: "Authorization context not available.");
         }
 
-        // Was `FindFirst("oid") ?? FindFirst(ClaimTypes.NameIdentifier)` until 2026-08-27. Inbound claim
-        // mapping (ON) renames `oid` to the .../objectidentifier schema URI, so the first term was always
-        // null and this resolved `sub` — pairwise per user+app, matching no Dataverse systemuser. It
-        // reaches the per-row authorization check at :280, so this was not a logging concern. Must stay
-        // identical to the filter's resolution; CallerResolution is what keeps the two halves in step.
-        var callerObjectId = CallerResolution.ResolveObjectId(httpContext.User);
-        var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
-
-        if (string.IsNullOrEmpty(callerObjectId) || string.IsNullOrEmpty(callerToken))
-        {
-            // The filter proved both present before permitting the request; if either is missing now,
-            // the pipeline changed underneath us.
-            logger.LogError(
-                "Record search reached the handler without a caller identity or bearer token, which the "
-                + "authorization filter guarantees. Refusing.");
-
-            return Results.Problem(
-                statusCode: 500,
-                title: "Internal Server Error",
-                detail: "Caller context not available.");
-        }
-
         try
         {
             logger.LogDebug(
@@ -167,10 +172,21 @@ public static class RecordSearchEndpoints
                 string.Join(", ", request.RecordTypes),
                 request.Options?.HybridMode ?? "rrf");
 
-            var response = await recordSearchService.SearchAsync(request, cancellationToken);
+            // The per-row record authorization the filter's decision obliges has ONE owner, shared with the MCP record
+            // search tool (spaarkeai-mcp-bff-api-r2 task 027): it reads the caller's identity and token before the search
+            // runs, then checks every row as the caller. This handler binds and maps.
+            var access = await RecordSearchAuthorizationFilter.SearchAndAuthorizeRowsAsync(
+                httpContext, request, recordSearchService.SearchAsync, authorizationService, logger, cancellationToken);
 
-            response = await AuthorizeRowsAsync(
-                response, callerObjectId, callerToken, authorizationService, logger, cancellationToken);
+            if (access is not { Outcome: RecordSearchAccessOutcome.Allowed, Response: { } response })
+            {
+                // CallerContextUnavailable: no caller identity or bearer token after the filter had seen both. The
+                // search did not run.
+                return Results.Problem(
+                    statusCode: 500,
+                    title: "Internal Server Error",
+                    detail: "Caller context not available.");
+            }
 
             logger.LogInformation(
                 "Record search completed: {ReturnedResults}/{TotalCount} results in {SearchTime}ms",
@@ -192,10 +208,11 @@ public static class RecordSearchEndpoints
             logger.LogError(ex, "Record search failed for recordTypes=[{RecordTypes}]",
                 string.Join(", ", request.RecordTypes));
 
-            // A fixed message: the exception's own text (an index or Dataverse error) is logged above, never returned.
             return Results.Problem(
                 title: "Record Search Failed",
-                detail: "Record search could not be completed.",
+                // Fixed text, never ex.Message: exception text can carry endpoints, index names and
+                // query fragments. The exception is logged above.
+                detail: "The record search could not be completed. Try again, and contact support if it persists.",
                 statusCode: 500,
                 extensions: new Dictionary<string, object?>
                 {
@@ -204,126 +221,12 @@ public static class RecordSearchEndpoints
         }
     }
 
-    /// <summary>
-    /// Upper bound on record-access checks spent assembling one page.
-    /// </summary>
-    /// <remarks>
-    /// Set to the maximum page size the request DTO permits (<c>RecordSearchOptions.Limit</c> is
-    /// <c>[Range(1, 50)]</c>), deliberately, so a full page is always fully evaluated. Document search
-    /// can afford a budget below its page size because twenty documents often share one parent — one
-    /// check covers many rows. Here the row IS the record, so there is no sharing to exploit and a
-    /// budget under 50 would silently truncate a legitimate full page. Repeats across requests are
-    /// absorbed by <c>CachedAccessDataSource</c>'s entity-set-qualified 60 s key.
-    /// </remarks>
-    private const int MaxRecordAuthorizationChecks = 50;
-
-    /// <summary>
-    /// Authorizes every returned row against its own record and drops what the caller cannot read.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>The row is the subject.</b> Document search authorizes a document's PARENT (access flows from
-    /// the parent per the build plan's invariant 2). A record search result IS a matter/project/invoice,
-    /// so the check is directly against that record — no parent hop, and no grouping win either: N rows
-    /// cost up to N checks, deduplicated by (type, id).
-    /// </para>
-    /// <para>
-    /// <b>Fail closed per row (ADR-003).</b> A row is dropped unless its <c>RecordType</c> resolves
-    /// through the single shared allow-list AND its <c>RecordId</c> parses as a non-empty GUID AND
-    /// Dataverse says the caller holds Read. The filter already refused unauthorizable types for the
-    /// whole request, so an unresolvable type here means the SERVICE returned a row of a type the caller
-    /// never asked for — which is a reason to drop it, not to trust it.
-    /// </para>
-    /// <para>
-    /// <b>Sequential</b>, for the reason documented on the document-search equivalent. The original reason —
-    /// <c>DataverseAccessDataSource</c> assigning the shared <c>_httpClient.DefaultRequestHeaders.Authorization</c>
-    /// before each request — is gone since issue #1576 (every read carries its own token); it stays sequential
-    /// because nothing above the data source has been reviewed for concurrent use within one request scope.
-    /// </para>
-    /// <para>
-    /// <b>Known limitation (task 077 follow-up F-4).</b> Rows are authorized after the index ranks them,
-    /// so a caller entitled to few records can have their matches ranked below the fetched page and
-    /// receive a short page that is indistinguishable from "nothing matched". Document search announces
-    /// that with a <c>PARTIAL_RESULTS</c> warning; <see cref="RecordSearchMetadata"/> has no warnings
-    /// channel, and adding one is a response-contract change that does not belong inside a security fix.
-    /// Recorded rather than silently accepted.
-    /// </para>
-    /// </remarks>
-    private static async Task<RecordSearchResponse> AuthorizeRowsAsync(
-        RecordSearchResponse response,
-        string callerObjectId,
-        string callerToken,
-        AuthorizationService authorizationService,
-        ILogger logger,
-        CancellationToken cancellationToken)
-    {
-        if (response.Results is not { Count: > 0 })
+    private static IResult BadRequest(string title, string detail, string code) =>
+        Results.Problem(new ProblemDetails
         {
-            return response;
-        }
-
-        var permitted = new List<RecordSearchResult>(response.Results.Count);
-        var decisions = new Dictionary<(string EntitySet, Guid RecordId), bool>();
-
-        var checksSpent = 0;
-        var unresolvable = 0;
-        var budgetExhausted = false;
-
-        foreach (var row in response.Results)
-        {
-            if (!SemanticSearchAuthorizationFilter.TryResolveAuthorizableEntitySet(
-                    row.RecordType, out var entitySetName)
-                || !Guid.TryParse(row.RecordId, out var recordId)
-                || recordId == Guid.Empty)
-            {
-                unresolvable++;
-                continue;
-            }
-
-            var key = (entitySetName, recordId);
-            if (!decisions.TryGetValue(key, out var readable))
-            {
-                if (checksSpent >= MaxRecordAuthorizationChecks)
-                {
-                    budgetExhausted = true;
-                    break;
-                }
-
-                checksSpent++;
-
-                var snapshot = await authorizationService.GetCallerRecordAccessAsync(
-                    callerObjectId, entitySetName, recordId, callerToken, cancellationToken);
-
-                readable = snapshot.AccessRights.HasFlag(AccessRights.Read);
-                decisions[key] = readable;
-            }
-
-            if (readable)
-            {
-                permitted.Add(row);
-            }
-        }
-
-        var dropped = response.Results.Count - permitted.Count;
-        if (dropped > 0)
-        {
-            logger.LogInformation(
-                "Record search authorization dropped {Dropped} of {Total} rows the caller cannot read "
-                + "({Checks} record checks, {Unresolvable} unresolvable rows, budgetExhausted={Budget})",
-                dropped, response.Results.Count, checksSpent, unresolvable, budgetExhausted);
-        }
-
-        return response with
-        {
-            Results = permitted,
-            Metadata = response.Metadata with
-            {
-                // The count of rows in THIS response. Leaving the pre-filter total would report how many
-                // records exist beyond what was returned — a smaller leak than the records themselves,
-                // but the same kind, and on this route the count alone reveals how many matters match a
-                // counterparty's name.
-                TotalCount = permitted.Count
-            }
-        };
-    }
+            Title = title,
+            Detail = detail,
+            Status = 400,
+            Extensions = { ["code"] = code }
+        });
 }

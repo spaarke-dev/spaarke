@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Deploy Phase 1 to dev; routing-eval run A</title>
+    <phase>1 Read tools</phase>
+    <gate>BLOCKED until the owner gives a go for the exact SHA in uac-r2's session</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task with live verification</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment through the existing bff-deploy skill plus a scripted probe; judgment points are escalation triggers</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live deployment to the shared dev BFF; runs alone</parallel-reason>
+    <deps>019, 020, 021, 022, 023, 024, 025, 026</deps>
+    <tags>deploy, azure, app-service, bff-api</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the merged Phase 1 BFF (read tools 022–026 plus the plumbing) to dev through uac-r2's session after the owner's go for the exact SHA, verify tools/list and one call per new tool as the test user, confirm the Decisions widget still works on the shared transport, and prepare routing-eval run A (≈9 tools) for the owner.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Azure App Service deployment of the Spaarke BFF and MCP probing.</role>
+  <goal>The approved SHA runs on dev; tools/list shows r1's tools plus the eight Phase 1 tools for the test user; each new tool returns a non-error result; Decisions still renders; notes/routing-eval-A.md holds the prompt set ready for the owner.</goal>
+
+  <context>
+    <background>Spec FR-17 (eval at 10, 15 and all tools; planning approximates these as run A ≈9 model-visible tools after 029, run B ≈18 after 039, run C all after 049: notes/decisions.md), NFR-08. r1 method and prompt-table shape: projects/spaarkeai-mcp-bff-api-r1/notes/routing-eval.md. Phase 1 adds no widget resource except the moved Decisions transport (021), which is client-side and ships with the widget build.</background>
+    <relevant-files>
+      <file role="output">projects/spaarkeai-mcp-bff-api-r2/notes/deploy-dev-029.md</file>
+      <file role="output">projects/spaarkeai-mcp-bff-api-r2/notes/routing-eval-A.md (prompt table per tool + controls, owner fills)</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/notes/routing-eval.md</file>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r2/tasks/019-deploy-phase0-dev.poml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="pending">Phase 0 on dev</dependency>
+      <dependency task="026" status="pending">Last Phase 1 tool merged</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy only after the owner's explicit go for the exact SHA, in uac-r2's session, with the bff-deploy skill (scripts/Deploy-BffApi.ps1); never raw az webapp deploy --clean; dev only; no App Service setting change.</constraint>
+    <constraint source="ADR-029">Record the published size (at or under 60 MB; 55 MB or more triggers an architecture review) in the deploy note.</constraint>
+    <constraint source="project">Probes run as the test user through the connector or an MCP client with the user's token; never log or store the token (NFR-05). Do not call any write tool.</constraint>
+    <constraint source="project">The routing eval is run by the owner in Copilot Chat (new chat per prompt, no skill); this task only prepares the table: ≥ 8 positive prompts per model-visible tool (half naming Spaarke, half not) plus ≥ 8 unrelated controls.</constraint>
+    <constraint source="project">Run context-handoff after the deploy (root CLAUDE.md §5).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/routing-eval.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Record the owner's go for SHA {sha} in notes/deploy-dev-029.md; if missing, stop. Run /conflict-check.</step>
+    <step order="2">Deploy with the bff-deploy skill in uac-r2's session; record the rollback SHA and publish size.</step>
+    <step order="3">Verify: /healthz 200; tools/list for the test user; one read call per Phase 1 tool returns isError false; Decisions widget renders in Copilot Chat.</step>
+    <step order="4">Write notes/routing-eval-A.md from r1's table shape; hand it to the owner.</step>
+    <step order="5">Run context-handoff.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner has not given a go for this exact SHA, STOP.</trigger>
+    <trigger>If /healthz, any Phase 1 tool or the Decisions widget fails after deploy, roll back to the recorded SHA and escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">scripts/Deploy-BffApi.ps1 via the bff-deploy skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">dev BFF at the approved SHA</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/deploy-dev-029.md</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/routing-eval-A.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/deploy-dev-029.md records the owner's go with the exact SHA, the deployed and rollback SHAs and the publish size (at or under 60 MB).</criterion>
+    <criterion testable="true">Negative: without the recorded go, no deploy happened.</criterion>
+    <criterion testable="true">tools/list for the test user includes spaarke_search_documents, spaarke_find_records, spaarke_list_documents, spaarke_get_document, spaarke_list_playbooks, spaarke_list_tasks, spaarke_get_task, spaarke_get_portfolio and r1's tools; one call each returns isError false.</criterion>
+    <criterion testable="true">The Decisions widget renders in Copilot Chat as before.</criterion>
+    <criterion testable="true">notes/routing-eval-A.md has ≥ 8 positive prompts per model-visible tool and ≥ 8 controls.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-17, NFR-08. Plan risk R1.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
