@@ -106,6 +106,7 @@ public partial class FieldMappingPushAuthorizationContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, text);
         host.Writes.Should().HaveCount(2).And.OnlyContain(w => (string?)w.Payload["sprk_clientreference"] == "REF-SECURED");
+        text.Should().NotContain("REF-SECURED", "task 067 fix round (F1): the response returns no value the caller's own read did not");
         JsonNode.Parse(text)!["warnings"]!.AsArray().Should().BeEmpty();
         host.Logs.Should().Contain(l => l.Level == Microsoft.Extensions.Logging.LogLevel.Information
                                         && l.Message.Contains("push: rule")
@@ -177,6 +178,33 @@ public partial class FieldMappingPushAuthorizationContractTests
         text.Should().NotContain("not-to-be-copied");
         JsonNode.Parse(text)!["warnings"]!.AsArray().Select(w => w!.GetValue<string>())
             .Should().Contain(AccessModelSourceColumns.ReadAsTheCallerWarning("sprk_description"));
+    }
+
+    /// <summary>
+    /// Task 067 C3, must not fire: a column the access-column registry lists for another table (<c>name</c>, listed for team and
+    /// business unit) is an ordinary column of the matter. On a Filing edge it is read app-only and copied, with no warning.
+    /// MUTATION: matching registry names on every table keeps it at the caller's (empty) value and names it in a warning.
+    /// </summary>
+    [Fact]
+    public async Task Push_OnAFilingEdge_ARegistryNameOfAnotherTable_IsCopiedFromTheFilingParent()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ExtraSourceAttributes.Add("name");
+        host.ArrangeHappyPathData(
+            lookupsToSource: [FilingLookup],
+            rules: [PushHost.Rule("name", 0, "sprk_description", 0)],
+            extraSourceColumns: new() { ["name"] = System.Text.Json.JsonSerializer.SerializeToElement((string?)null) });
+        host.AppOnly.ExtraColumns["name"] = System.Text.Json.JsonSerializer.SerializeToElement("MATTER-NAME");
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+        var text = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, text);
+        host.AppOnly.Reads.Should().ContainSingle().Which.Query.Should().Contain("name");
+        host.Writes.Should().HaveCount(2).And.OnlyContain(w => (string?)w.Payload["sprk_description"] == "MATTER-NAME");
+        text.Should().NotContain("MATTER-NAME");
+        JsonNode.Parse(text)!["warnings"]!.AsArray().Should().BeEmpty();
     }
 
     [Fact]

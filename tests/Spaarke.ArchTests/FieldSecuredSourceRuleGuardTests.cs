@@ -40,9 +40,9 @@ public class FieldSecuredSourceRuleGuardTests
         ["Api/FieldMappings/FieldMappingPushLookups.cs"] = ["FieldSecuredSourceRule.CountsAsSecured("],
         ["Services/Dataverse/FieldMapping/SendTimeFieldMapping.cs"] =
             [".ApplyOrLiftForFilingParentAsync(sourceIsFilingParent,", "AccessModelSourceColumns.TargetsOfRulesReadingOne("],
-        ["Services/Dataverse/FieldMapping/MappingSourceCallerMask.cs"] = ["mappedColumns.Where(AccessModelSourceColumns.Contains)"],
+        ["Services/Dataverse/FieldMapping/MappingSourceCallerMask.cs"] = ["mappedColumns.Where(c => AccessModelSourceColumns.Contains(sourceEntityLogicalName, c))"],
         ["Services/RecordCreation/RecordCreationService.Repair.cs"] =
-            ["answer.Secured.Where(AccessModelSourceColumns.Contains)", "AccessModelSourceColumns.NotCopiedByRepairWarning("],
+            ["answer.Secured.Where(c => AccessModelSourceColumns.Contains(sourceTable, c))", "AccessModelSourceColumns.NotCopiedByRepairWarning("],
     };
 
     /// <summary>Task 067 (C3): the access-model list's own definition; no other field-mapping source spells one of its columns.</summary>
@@ -109,9 +109,11 @@ public class FieldSecuredSourceRuleGuardTests
 
     /// <summary>The names that are field-mapping-only access-model columns. <c>sprk_issecure</c> and
     /// <c>sprk_accessinheritance</c> are also the secure-root and copy-invariant columns other rules name in these folders, so
-    /// they are not counted as a second list.</summary>
+    /// they are not counted as a second list; nor are a document's file-binding columns (<c>sprk_graphitemid</c>,
+    /// <c>sprk_graphitemidbound</c>), which the create's copy-invariant list names.</summary>
     private static bool IsOnlyAnAccessModelName(string column) =>
-        column is not ("sprk_issecure" or "sprk_accessinheritance" or "sprk_accesspermissiongrant" or "sprk_standinggrant");
+        column is not ("sprk_issecure" or "sprk_accessinheritance" or "sprk_accesspermissiongrant" or "sprk_standinggrant"
+            or "sprk_graphitemid" or "sprk_graphitemidbound");
 
     [Fact(DisplayName = "Task 067 (C3) control: a second access-model list fires; the definition's own consumers do not")]
     public void TheAccessModelDetector_FiresOnASecondList_AndStaysQuietOnTheSharedCall()

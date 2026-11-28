@@ -249,7 +249,7 @@ internal static partial class MappingSourceCallerMask
                 .ConfigureAwait(false);
         }
 
-        var accessModel = mappedColumns.Where(AccessModelSourceColumns.Contains).ToArray();
+        var accessModel = mappedColumns.Where(c => AccessModelSourceColumns.Contains(sourceEntityLogicalName, c)).ToArray();
         Entity? accessModelView = null;
         if (accessModel.Length > 0)
         {
@@ -262,7 +262,7 @@ internal static partial class MappingSourceCallerMask
         var lifted = new Entity(appRead.LogicalName, appRead.Id);
         foreach (var attribute in appRead.Attributes)
         {
-            if (!mapped.Contains(attribute.Key) || attribute.Value is null || AccessModelSourceColumns.Contains(attribute.Key)
+            if (!mapped.Contains(attribute.Key) || attribute.Value is null || AccessModelSourceColumns.Contains(sourceEntityLogicalName, attribute.Key)
                 || WebApiPropertyFor(attribute.Key, attribute.Value, primaryKey) is null)
             {
                 continue; // not mapped, empty, access-model (judged above), or a kind the mask never copies
@@ -296,7 +296,7 @@ internal static partial class MappingSourceCallerMask
                 continue;
 
             var lifted = CreateTimeFieldMapping.CollectSourceColumns([rule])
-                .Where(c => !AccessModelSourceColumns.Contains(c))
+                .Where(c => !AccessModelSourceColumns.Contains(sourceTable, c))
                 .ToArray();
             if (lifted.Length == 0)
                 continue;
