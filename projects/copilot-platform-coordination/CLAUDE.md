@@ -26,6 +26,7 @@ Coordination project for every Spaarke artifact in Microsoft 365 Copilot tenants
   - It does run Office.js that a skill supplies. The code runner wraps it as `async function main(context) { ... }`, with no `Word.run`.
   - The runner does not pass the return value back.
   - It refuses `toString` and a top-level `await`.
+  - Word has two code runners (WP-6, 2026-11-27). The Office.js runner works through a sub-agent and returns nothing. The HTML-document runner returns values and errors, but Copilot wrapped our code in a stand-in API there. A Copilot-filled edit list applied through fixed Office.js was hash-exact, carrying 17 KB of code.
   - Detail: accelerator PR #3266.
 - **The admin center refuses a plugin whose app id was already used by a Cowork › Customize › Plugins upload, even after that upload is removed.** The message is only "We couldn't validate this manifest file".
   - Proof (2026-11-27, accelerator P1/P1b): the same no-script zip was refused on the Word Probe's Cowork-used app id and accepted on a fresh id.
