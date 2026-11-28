@@ -107,6 +107,7 @@ export {
 export {
   launchCreateMatterWizard,
   launchCreateEventWizard,
+  launchCreateInvoiceWizard,
   launchCreateProjectWizard,
   launchSummarizeFilesWizard,
   launchFindSimilarWizard,
