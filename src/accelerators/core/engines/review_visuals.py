@@ -103,6 +103,7 @@ def edit_kind(e):
 def cross_check(review, plan):
     probs = []
     by_topic = {t.get("topic"): t for t in review.get("topics", []) if isinstance(t, dict)}
+    posture = (plan.get("review_basis") or {}).get("posture")
     planned = {}
     for i, e in enumerate(plan.get("edits", [])):
         tid = e.get("topic")
@@ -114,6 +115,12 @@ def cross_check(review, plan):
             probs.append(f"plan edit {i}: topic {tid} is not in the review")
         elif by_topic[tid].get("action", "none") == "none":
             probs.append(f"plan edit {i}: topic {tid} has edits but the review says action 'none'")
+        elif (by_topic[tid].get("status") == "fallback" and edit_kind(e) != "comment only"
+              and posture != "aggressive"):
+            # The playbook accepts its fallback as an end state: only an aggressive posture pushes past it.
+            probs.append(f"plan edit {i}: topic {tid} is at the playbook's acceptable fallback, so with posture "
+                         f"'{posture}' it gets no change; drop the edit (a comment-only entry is fine) and list it "
+                         f"in open_questions, or use posture 'aggressive' if the user asked for preferred positions")
     for tid, t in by_topic.items():
         if t.get("action") == "edit" and tid not in planned:
             probs.append(f"review topic {tid}: action 'edit' but the plan has no edit for it")
