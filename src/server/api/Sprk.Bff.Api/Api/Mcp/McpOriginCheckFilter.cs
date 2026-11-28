@@ -112,6 +112,41 @@ public sealed class McpOriginCheckFilter(IConfiguration configuration, ILogger<M
     }
 
     /// <summary>
+    /// Startup check of <c>Mcp:OriginCheck</c>, called once from <c>MapMcpEndpoints</c> when the MCP server is on (<paramref name="enabled"/>).
+    /// Logs one Warning for each setting that would make the check weaker than it looks, and nothing for a valid configuration:
+    /// <list type="bullet">
+    /// <item>a <c>Mode</c> that is neither LogOnly nor Enforce (it is treated as Enforce, so a typo fails closed, but the operator should know);</item>
+    /// <item>Enforce (or an unrecognised Mode) with no allowed host resolved from <c>Mcp:OriginCheck:AllowedHosts</c>, <c>AllowedHosts</c> or
+    /// <c>Insights:CitationHref:BffBaseUrl</c>: only <c>Origin</c> is checked and any <c>Host</c> passes.</item>
+    /// </list>
+    /// Configuration is read per request, but an App Service setting change restarts the app, so this runs for every configuration that serves.
+    /// </summary>
+    internal static void WarnIfMisconfigured(ILogger logger, IConfiguration configuration, bool enabled)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(configuration);
+        if (!enabled)
+        {
+            return;
+        }
+
+        var mode = ParseMode(configuration.GetSection(SectionName)["Mode"], out var unrecognised);
+        if (unrecognised is not null)
+        {
+            logger.LogWarning(
+                "[MCP-ORIGIN] Mcp:OriginCheck:Mode '{ModeValue}' is not LogOnly or Enforce; it is treated as Enforce.",
+                Truncate(unrecognised));
+        }
+
+        if (mode == McpOriginCheckMode.Enforce && ResolveAllowedHosts(configuration).Count == 0)
+        {
+            logger.LogWarning(
+                "[MCP-ORIGIN] Mcp:OriginCheck is in Enforce but no allowed host is configured (Mcp:OriginCheck:AllowedHosts, AllowedHosts, "
+                + "Insights:CitationHref:BffBaseUrl), so the Host header is not checked; only Origin is. Set Mcp:OriginCheck:AllowedHosts.");
+        }
+    }
+
+    /// <summary>
     /// <see cref="McpOriginCheckMode.LogOnly"/> when unset (the default); otherwise the named mode, case-insensitive. A value that names neither is
     /// <see cref="McpOriginCheckMode.Enforce"/> and is returned in <paramref name="unrecognised"/> so the caller can warn.
     /// </summary>
@@ -136,7 +171,8 @@ public sealed class McpOriginCheckFilter(IConfiguration configuration, ILogger<M
     internal static string? Evaluate(
         bool originPresent, StringValues origin, HostString host, string[]? allowedOrigins, IReadOnlyList<string> allowedHosts)
     {
-        if (originPresent && !origin.All(o => OriginAllowed(o, allowedOrigins)))
+        // Every value must be allowed; a header that is present with no value at all fails closed.
+        if (originPresent && (origin.Count == 0 || !origin.All(o => OriginAllowed(o, allowedOrigins))))
         {
             return OriginRefusedErrorCode;
         }

@@ -55,6 +55,12 @@ public static class McpEndpoints
             app.Services.GetRequiredService<IOptions<McpOptions>>().Value.Enabled,
             DecisionsWidgetResource.IsEmbedded);
 
+        // One startup warning per Mcp:OriginCheck setting that weakens the Host/Origin check (ISS-007: unknown Mode; Enforce with no allowed host).
+        McpOriginCheckFilter.WarnIfMisconfigured(
+            app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(McpEndpoints).FullName!),
+            app.Configuration,
+            app.Services.GetRequiredService<IOptions<McpOptions>>().Value.Enabled);
+
         // The policy name is a literal on purpose: the health-probe policy guard (RouteAuthorizationGuardTests) reads only string literals.
         // Keep it equal to RateLimitingModule.McpPolicyName.
         app.MapMcp(LegalOperationsRoute)
