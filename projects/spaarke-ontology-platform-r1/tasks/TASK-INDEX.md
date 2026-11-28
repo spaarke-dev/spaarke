@@ -316,6 +316,8 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | ✅ 235 | [Signal-less billing, Record Procedure and assign-firm Decision Records appear on the Decision Records tab under their core record, without Open (#3283, DI-180)](235-dr-tab-signal-less-records.poml) | FULL | opus/high | none | group-d-2026-11-27 | Owner 2026-11-27 D-234. PR to master |
 | ✅ 236 | [One-off: recalculate the stored finance roll-up of each matter or project with a finance Threshold Signal open from before task 232 (D-235, #1767)](236-recalculate-open-finance-threshold-rollups.poml) | STANDARD | opus/high | 232 | group-d-2026-11-27 | Owner 2026-11-27 D-235 "you can run it automatically". Main session, dev data |
 | ✅ 237 | [ClosesTodo recognises statecode/statuscode sent as a string or a non-integer JSON number, so the open-inquiry guard cannot be skipped (uac-r2 note on #3293)](237-closestodo-lenient-state-values.poml) | FULL | sonnet/high | 234 | group-d-2026-11-27 | uac-r2 access-gate note 2026-11-27 (fix found defects). PR to master |
+| 🔲 238 | [Task 185 leftovers (client): Smart To Do "New To Do" label, composer warns on an unresolvable recipient pick, focus returns to To in the DRV iframe composer](238-185-leftovers-todo-label-recipient-notice-iframe-focus.poml) | FULL | sonnet/high | 185 | 185-leftovers-2026-11-28 | Owner 2026-11-28: fix every open 185 item. PR to master |
+| 🔲 239 | [Task 185 leftover: Create Project Description gets "Generate with AI" by extending the matter summary endpoint (UAT round 4 A1)](239-create-project-generate-description-with-ai.poml) | FULL | sonnet/high | 185 | 185-leftovers-2026-11-28 | Owner 2026-11-28. BFF change: dev deploy via uac-r2. PR to master |
 
 ### Phase 5 — The worklist surface
 

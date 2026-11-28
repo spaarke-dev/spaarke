@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="238" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Task 185 leftovers (client): Smart To Do "New To Do" label, the composer tells the user when a picked recipient cannot be resolved, focus returns to To after a side-pane pick in the Document Relationship Viewer's composer</title>
+    <phase>12 Create-wizard lookups and composer (UAT round 4) follow-up</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared .ts/.tsx in @spaarke/ui-components and a SmartTodo shared package.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Three scoped client changes with file:line maps; reference implementations named.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-leftovers-2026-11-28</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Client-only; does not touch the files of task 239 (CreateProjectStep, BFF workspace endpoints).</parallel-reason>
+    <deps>185</deps>
+    <tags>frontend, react, fluent-ui, email, a11y</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-28: open items on task 185 must be fixed, not kept open. Dev checks 2026-11-28 (notes/task-185-notes.md, last section) left three client items in this project's scope.</prompt>
+  <role>Implementer agent, worktree off origin/master, PR to master.</role>
+  <goal>(a) Smart To Do's primary button reads "New To Do". (b) When a side-pane recipient pick cannot be turned into an email address (record not found, no access, no email on the record), the composer shows a warning naming the pick and why, instead of dropping it silently; picks that resolve are still added. (c) After a side-pane recipient pick or cancel in the composer hosted by the Document Relationship Viewer (an iframe inside the SemanticSearchControl Find Similar dialog), keyboard focus lands on the field's lookup button inside the iframe, not on the iframe body.</goal>
+  <context><background>
+(a) The only rendered string is src/client/shared/Spaarke.SmartTodo.Components/src/components/Header/Header.tsx:276. Update comments that quote the label; internal names (handleNewTask, newTaskLauncher) may stay.
+(b) Drop site: src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createXrmEmailComposeHandlers.ts:221-240 (the catch logs console.warn; a record with no email is skipped silently). The composer already renders a warning MessageBar (EmailComposer.tsx ~1729, aiError) and a validation MessageBar (~1465). Callers of onLookupRecipients: EmailComposer.tsx ~1557/1570/1584 (to/cc/bcc, wrapped in withLookupFocusReturn), DocumentEmailWizard.tsx:545, SendEmailDialog.tsx:354, DecisionWizard/steps/EmailMessageFields.tsx:133; CommunicationActionsApp.tsx:495 has its own copy of the same silent catch. Prefer the smallest contract change: an optional notice channel (for example a handlers option onNotice, or an optional skipped list on the result) that keeps existing hosts compiling unchanged; fix the CommunicationActions copy the same way.
+Live evidence: a Recent-records entry pointing at a deleted systemuser made retrieveRecord fail with "The requested record was not found"; To stayed empty with no message.
+(c) Focus return: EmailComposer.tsx:697-711 withLookupFocusReturn; utils/focusReturn.ts useFocusReturn/scheduleFocusReturn (tasks 199/200: 1f9e2eedd4, 973d72b67e, 1e6ee676d7). DRV wiring: src/client/code-pages/DocumentRelationshipViewer/src/App.tsx:434 and :824-835; parent: SemanticSearchControl FindSimilarViewerDialog.tsx:209-217 (postMessage), SemanticSearchControl.tsx:1894 yieldToSidePane. Observed on dev 2026-11-28: after Add, the DRV document's activeElement is BODY and the top document's activeElement is an IFRAME. Hypothesis (unverified): focusing an element inside an iframe does not move top-level focus unless the iframe window is focused first, and/or the parent dialog's un-yield runs after the retry window. Model the cross-frame case in a jsdom test, then fix in focusReturn.ts (for example focus the frame's window before the element when doc.defaultView !== top) and/or have the parent re-trigger after un-yield.
+  </background></context>
+  <constraints>
+    <constraint source="owner 2026-11-12">Reuse the existing composer, DataverseLookupField and focusReturn helpers; no second rendering of any of them.</constraint>
+    <constraint source="CLAUDE.md gotcha 2026-11-12">Run node scripts/quality/client-lint/client-lint.mjs check before pushing.</constraint>
+    <constraint source="public repo">No environment ids, user names or mailbox addresses in code, tests, commits or PR.</constraint>
+    <constraint source="process">Do not edit current-task.md, TASK-INDEX.md, POMLs or defer-issues.md. No git stash. No sub-agents.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step order="1">(a) Change the label; update comments; check the Header and SmartTodoApp tests for a name assertion and update it.</step>
+    <step order="2">(b) Add the notice channel; show the existing warning MessageBar with "Could not add {name}: {reason}" (one line per skipped pick); clear it on the next successful pick or edit. Same for the CommunicationActionsApp copy.</step>
+    <step order="3">(c) Write a failing test for the iframe case, then fix focusReturn.</step>
+    <step order="4">No deploy: the main session deploys (the Console auto-deploys; SmartTodo, the DRV code page and the PCFs that bundle the shared lib need owner-approved deploys).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Jest: new tests for (b) (must-fire: a not-found pick and a no-email pick produce the warning and add nothing for them; must-not-fire: a resolvable pick adds a chip and shows no warning; a mixed multi-select adds the good ones and warns for the bad) and (c) (focus ends on the lookup button in an iframe-hosted composer) fail before and pass after.</criterion>
+    <criterion testable="true">Existing EmailComposer, DocumentEmailWizard, SendEmailDialog, DecisionWizard and SmartTodo Header tests pass; tsc and client-lint pass for the touched packages.</criterion>
+    <criterion testable="true">Negative: no new composer, lookup or focus helper component; existing hosts compile without changes beyond the opt-in.</criterion>
+  </acceptance-criteria>
+  <outputs><output type="code">PR to master</output></outputs>
+</task>
