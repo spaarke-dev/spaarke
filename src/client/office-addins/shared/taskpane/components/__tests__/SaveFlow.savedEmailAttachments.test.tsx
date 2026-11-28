@@ -264,8 +264,15 @@ describe('SaveFlow — a saved email with unsaved attachments (task 141)', () =>
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
   });
 
-  it('negative: not filed to a record → attachments listed, none can be added', () => {
-    render(<OutlookPane initial={savedEmail(['Exhibit A.pdf'], null)} />);
+  // Task 143: an email filed to NO record now takes an add (SaveFlow.unfiledEmailAdd.test.tsx); one whose filing is not known still does not.
+  it('negative: filing record not known → attachments listed, none can be added', () => {
+    render(
+      <OutlookPane
+        initial={
+          { ...(savedEmail(['Exhibit A.pdf'], null) as object), relatedRecordKnown: false } as DocumentIdentityState
+        }
+      />
+    );
 
     expect(savedMarks()).toHaveLength(1);
     expect(screen.queryByRole('checkbox')).toBeNull();

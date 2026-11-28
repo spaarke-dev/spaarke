@@ -311,8 +311,11 @@ public class DocumentEmailIdentityContractTests
         AssertIsTheNotSavedShape(answer);
         answer.Body.Should().NotContain("Discovery schedule").And.NotContain("MAT-000042")
             .And.NotContain(documentId.ToString("D")).And.NotContain("sdap.access");
+        // Task 143: the archive lookup alone (its sprk_isemailarchive condition); the standalone-attachments lookup is another query.
         entityService.Verify(
-            e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Once,
+            e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_isemailarchive")),
+                It.IsAny<CancellationToken>()), Times.Once,
             "one candidate, one authorization — an older copy is never searched");
     }
 

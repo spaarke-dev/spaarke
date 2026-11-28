@@ -77,10 +77,11 @@ public partial class RouteAuthorizationGuardTests
             + "AddDocumentAuthorizationFilter (share-link, gated by task 072, was RETIRED 2026-10-16, #1350; resolve-identity pairs DocumentUrlIdentityFilter "
             + "with it; GET /{documentId}/identity since word-add-in task 112; resolve-email-identity pairs "
             + "DocumentEmailIdentityFilter with it since word-add-in task 120). ADR-008 Amendment A1 (word-add-in task 141): "
-            + "resolve-email-identity's savedAttachmentNames lists the saved .eml's children, which only the handler's own "
-            + "lookup finds; ReadSavedAttachmentNamesAsync checks Read on each child through "
-            + "InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync before naming it (refused = left out; a fault omits the "
-            + "field)."),
+            + "resolve-email-identity's savedAttachmentNames lists the saved .eml's children and (task 143) the email's "
+            + "standalone attachment documents, which only the route's own lookups find; "
+            + "DocumentEmailIdentityFilter.ReadSavedAttachmentNamesAsync (shared by the handler and the not_saved answer) checks "
+            + "Read on each through InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync before naming it (refused = left out; "
+            + "a fault omits the field)."),
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
             "/api/v1/documents/* — document rows, a byte download, the pointer attach (POST /{id}/file, task 166 f1) and the "
             + "two container-keyed listings (gated by task 078; GET /api/v1/documents?containerId= since task 166 carries "

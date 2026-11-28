@@ -1135,7 +1135,9 @@ public class ExternalDocumentNarrowingGuardTests
         // using a shape.
         foreach (var site in new[]
                  {
-                     "Sprk.Bff.Api.Api.Office.OfficeEndpoints::WithholdCollisionIdentityIfUnauthorizedAsync",
+                     // Task 143 (word-add-in-r1): the collision refusal's gate moved into the helper it now shares with
+                     // the content-duplicate answer.
+                     "Sprk.Bff.Api.Api.Office.OfficeEndpoints::CallerMaySeeDocumentAsync",
                      "Sprk.Bff.Api.Api.PermissionsEndpoints::GetDocumentPermissionsAsync",
                      "Sprk.Bff.Api.Api.PermissionsEndpoints::GetBatchPermissionsAsync",
                      // Round 4d (#2199, #2200): still a snapshot / a Record-path check on sprk_documents, now narrowed.

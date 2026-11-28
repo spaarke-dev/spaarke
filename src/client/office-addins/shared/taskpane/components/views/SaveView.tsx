@@ -90,6 +90,11 @@ export interface SaveViewProps {
    * not apply (Outlook) → a plain create save, as before.
    */
   documentIdentity?: DocumentIdentityState;
+  /**
+   * Task 143: for an email not saved as an `.eml`, the names of its attachments saved on their own (App's email lookup).
+   * Undefined = nothing can be said (no marks).
+   */
+  standaloneSavedAttachmentNames?: string[];
   /** Re-runs identity resolution for the "Check again" / "Try again" actions. */
   onRetryDocumentIdentity?: () => void;
   /** Task 111: the pane filed the open document to a record — `App` puts it into the identity state. */
@@ -143,6 +148,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
   allowedEntityTypes,
   resolvedDocumentId,
   documentIdentity,
+  standaloneSavedAttachmentNames,
   onRetryDocumentIdentity,
   onDocumentFiled,
   savedState,
@@ -453,6 +459,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
       {...(allowedEntityTypes !== undefined ? { allowedEntityTypes } : {})}
       {...(resolvedDocumentId !== undefined ? { resolvedDocumentId } : {})}
       {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+      {...(standaloneSavedAttachmentNames !== undefined ? { standaloneSavedAttachmentNames } : {})}
       {...(onRetryDocumentIdentity ? { onRetryDocumentIdentity } : {})}
       {...(onDocumentFiled ? { onDocumentFiled } : {})}
       {...(onSearchContacts ? { onSearchContacts } : {})}

@@ -244,9 +244,16 @@ public interface IOfficeService
     /// - job-failed: Job encountered an error
     /// - error: Terminal error (per ADR-019)
     /// </para>
+    /// <para>
+    /// Task 143 (owner A1): <paramref name="statusForCaller"/> is applied to every job status the stream reads before it
+    /// forms an event from it, so the stream says no more about the job than the status read would to this caller (a
+    /// content-duplicate job's existing document is named only to a caller who may see it). Required, so no caller can
+    /// stream without stating it.
+    /// </para>
     /// </remarks>
     IAsyncEnumerable<byte[]> StreamJobStatusAsync(
         Guid jobId,
         string? lastEventId,
+        Func<JobStatusResponse, CancellationToken, Task<JobStatusResponse>> statusForCaller,
         CancellationToken cancellationToken = default);
 }

@@ -15,8 +15,12 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave;
 /// <para><b>The failure mode.</b> Immutable content runs content-dedup in SUPPRESS mode: on a byte-identical hit the
 /// save creates no row and deletes "the transient blob it just uploaded". The upload is PATH-keyed and states
 /// <c>Replace</c>, so an upload whose name already exists in the container lands ON THAT EXISTING ITEM — and the
-/// "transient blob" is then another document's own file. Deterministic for a direct Attachment save to a
-/// different record under the canonical's name; the save reported success.</para>
+/// "transient blob" is then another document's own file. Deterministic for a direct save to a different record
+/// under the canonical's name; the save reported success.</para>
+/// <para><b>Which save can land there.</b> Until task 143's review this was a direct Attachment save. An attachment's
+/// name is system-derived and is now stored with task 046 (b)'s unique suffix, so it never asks for another document's
+/// name; the immutable save that still can is an email whose name the user typed (stored unchanged), so the
+/// name-landing scenarios below are typed-name emails.</para>
 /// <para><b>What "file intact" means here.</b> The item still exists in the world's drive and its current bytes are
 /// the canonical's bytes. The Replace itself still adds an identical SPE version: that is the create path's
 /// collision policy (task 025's <c>Fail</c> + <c>OFFICE_020</c>), not this task's.</para>
@@ -28,6 +32,9 @@ public class OfficeImmutableSaveFileSafetyTests
 {
     /// <summary>Where a matter-targeted save lands in this fixture (<c>EmailProcessing:DefaultContainerId</c>).</summary>
     private const string SaveContainer = "b!test-office-save-drive";
+
+    /// <summary>The readable name for subject "Re: Exhibit" sent 2026-09-14 (':' is stripped by the sanitizer).</summary>
+    private const string TypedName = "2026-09-14_Re Exhibit.eml";
 
     private static readonly byte[] ExhibitBytes = { 0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37 };
 
@@ -44,6 +51,35 @@ public class OfficeImmutableSaveFileSafetyTests
         },
     };
 
+    /// <summary>
+    /// An email save to a FRESH record whose Document Name the user typed (<c>isNameSystemDerived: false</c>), so it is
+    /// stored under <see cref="TypedName"/> exactly.
+    /// </summary>
+    private static SaveRequest TypedNameEmailSave() => new()
+    {
+        ContentType = SaveContentType.Email,
+        TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
+        Email = new EmailMetadata
+        {
+            Subject = "Re: Exhibit",
+            SenderEmail = "counsel@test.com",
+            SentDate = new DateTimeOffset(2026, 9, 14, 9, 30, 0, TimeSpan.Zero),
+            InternetMessageId = "<exhibit-046@test.com>",
+            Body = "Exhibit A attached.",
+            IsNameSystemDerived = false,
+        },
+    };
+
+    /// <summary>The <c>.eml</c> bytes the server builds for <paramref name="request"/> (the same builder, so a seeded file can hold
+    /// exactly what the save uploads).</summary>
+    private static byte[] EmlBytesOf(SaveRequest request)
+    {
+        using var eml = Sprk.Bff.Api.Services.Office.OfficeEmailEnricher.BuildEmlFromMetadata(request.Email!);
+        using var copy = new MemoryStream();
+        eml.CopyTo(copy);
+        return copy.ToArray();
+    }
+
     private static async Task<JobStatusResponse> JobOf(HttpClient client, SaveResponse saved)
     {
         var response = await client.GetAsync($"/api/office/jobs/{saved.JobId}");
@@ -52,35 +88,38 @@ public class OfficeImmutableSaveFileSafetyTests
     }
 
     [Fact]
-    public async Task ByteIdenticalAttachmentSave_UnderTheCanonicalsNameInItsContainer_LeavesTheCanonicalsFileIntact()
+    public async Task ByteIdenticalTypedNameEmailSave_UnderTheCanonicalsNameInItsContainer_LeavesTheCanonicalsFileIntact()
     {
         var world = new OfficeVersionSaveWorld();
-        var (canonicalId, canonicalItemId) = world.SeedDocument(SaveContainer, "Exhibit A.pdf", ExhibitBytes);
+        var request = TypedNameEmailSave();
+        var emlBytes = EmlBytesOf(request);
+        var (canonicalId, canonicalItemId) = world.SeedDocument(SaveContainer, TypedName, emlBytes);
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
 
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            "/api/office/save", AttachmentSave("Exhibit A.pdf", ExhibitBytes));
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         world.UploadSmallCalls.Should().Be(1, "precondition: the save reached SPE");
+        world.CollisionRefusals.Should().Be(1, "precondition: the save asked for the canonical's own name");
         world.DeletedItemIds.Should().NotContain(canonicalItemId,
             "the upload landed on the canonical's own item, so that item is the canonical's file, not a transient blob");
         world.SpeItems.Should().ContainKey(canonicalItemId, "the canonical document's file still exists");
-        world.SpeItems[canonicalItemId].Versions[^1].Should().Equal(ExhibitBytes, "its bytes are unchanged");
+        world.SpeItems[canonicalItemId].Versions[^1].Should().Equal(emlBytes, "its bytes are unchanged");
         world.Documents[canonicalId].ItemId.Should().Be(canonicalItemId, "the canonical row still points at that file");
     }
 
     [Fact]
-    public async Task ByteIdenticalAttachmentSave_UnderTheCanonicalsNameInItsContainer_IsStillSuppressedAsADuplicate()
+    public async Task ByteIdenticalTypedNameEmailSave_UnderTheCanonicalsNameInItsContainer_IsStillSuppressedAsADuplicate()
     {
         // AC2: the guard changes only the cleanup. The save is still a content duplicate of the canonical: no second
         // document, no finalization, and the completed job names the canonical so the pane opens it.
         var world = new OfficeVersionSaveWorld();
-        var (canonicalId, _) = world.SeedDocument(SaveContainer, "Exhibit A.pdf", ExhibitBytes);
+        var request = TypedNameEmailSave();
+        var (canonicalId, _) = world.SeedDocument(SaveContainer, TypedName, EmlBytesOf(request));
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
         var client = factory.CreateClient();
 
-        var response = await client.PostAsJsonAsync("/api/office/save", AttachmentSave("Exhibit A.pdf", ExhibitBytes));
+        var response = await client.PostAsJsonAsync("/api/office/save", request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         var saved = (await response.Content.ReadFromJsonAsync<SaveResponse>())!;
@@ -96,26 +135,27 @@ public class OfficeImmutableSaveFileSafetyTests
     }
 
     [Fact]
-    public async Task ByteIdenticalAttachmentSave_UnderAHashLinkedCopysName_LeavesThatCopysFileIntact()
+    public async Task ByteIdenticalTypedNameEmailSave_UnderAHashLinkedCopysName_LeavesThatCopysFileIntact()
     {
         // The same defect, one row removed: the item the upload lands on belongs to a hash-linked COPY. The detector
         // (which excludes copies) resolves the TRUE canonical elsewhere, so comparing against the canonical's item
         // alone would still have deleted the copy's file.
         var world = new OfficeVersionSaveWorld();
-        var (canonicalId, canonicalItemId) = world.SeedDocument("b!doc-drive", "Original.pdf", ExhibitBytes);
+        var request = TypedNameEmailSave();
+        var emlBytes = EmlBytesOf(request);
+        var (canonicalId, canonicalItemId) = world.SeedDocument("b!doc-drive", "Original.eml", emlBytes);
         var (copyId, copyItemId) = world.SeedDocument(
-            SaveContainer, "Exhibit A.pdf", ExhibitBytes,
-            linkedToCanonical: canonicalId, linkedHash: OfficeVersionSaveWorld.Hash(ExhibitBytes));
+            SaveContainer, TypedName, emlBytes,
+            linkedToCanonical: canonicalId, linkedHash: OfficeVersionSaveWorld.Hash(emlBytes));
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
 
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            "/api/office/save", AttachmentSave("Exhibit A.pdf", ExhibitBytes));
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         world.DocumentCreates.Should().Be(0, "precondition: the immutable duplicate branch ran");
         world.DeletedItemIds.Should().BeEmpty("the upload landed on the linked copy's own item");
         world.SpeItems.Should().ContainKey(copyItemId, "the linked copy's file still exists");
-        world.SpeItems[copyItemId].Versions[^1].Should().Equal(ExhibitBytes);
+        world.SpeItems[copyItemId].Versions[^1].Should().Equal(emlBytes);
         world.Documents[copyId].ItemId.Should().Be(copyItemId);
         world.SpeItems.Should().ContainKey(canonicalItemId);
     }

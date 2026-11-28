@@ -189,7 +189,7 @@ public class OfficeEmailAttachmentsAddByDocumentTests
     }
 
     [Fact]
-    public async Task Add_WithoutARecordOrWithoutNames_Is400_AndWritesNothing()
+    public async Task Add_WithoutNames_Is400_AndWithoutARecordUnderAFiledEml_IsRefused_AndWritesNothing()
     {
         var world = new OfficeVersionSaveWorld();
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
@@ -200,7 +200,9 @@ public class OfficeEmailAttachmentsAddByDocumentTests
         var noRecord = await client.SendAsync(Add(emlId, new[] { B }, "add-no-record", target: null, omitTarget: true));
         var noNames = await client.SendAsync(Add(emlId, Array.Empty<string>(), "add-no-names"));
 
-        noRecord.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        // Task 143: the record is optional; with none the add is allowed only under an .eml filed to no record, and this one is
+        // filed to the matter (OFFICE_009).
+        noRecord.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         noNames.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         world.FinalizationPayloads.Should().ContainSingle();
         world.Jobs.Should().HaveCount(jobsBefore);

@@ -336,6 +336,11 @@ public static class OfficeEndpoints
                     response.JobId,
                     request.ContentType);
 
+                // Task 143 (owner A1): a content-duplicate Attachment save names the existing document only when the caller
+                // may see it — decided here, as the collision refusal's identity is (ADR-008).
+                response = await WithholdContentDuplicateIdentityIfUnauthorizedAsync(
+                    response, userId, context, authorizationService, logger, cancellationToken);
+
                 // Return 202 Accepted for new saves
                 return TypedResults.Accepted(response.StatusUrl, response);
             }
@@ -526,20 +531,20 @@ public static class OfficeEndpoints
                         correlationId);
                 }
 
-                // Task 141: an attachments add names the saved email, the record it is filed to and at least one attachment.
-                // Without a record or a name there is nothing it could add, and it never falls back to an email save.
+                // Task 141: an attachments add names the saved email and at least one attachment. Without a name there is
+                // nothing it could add, and it never falls back to an email save. Task 143: the record is optional — with
+                // none, the service adds only under a saved email filed to no record (EmailAttachmentAddPlanner.IsFiledToNoRecord).
                 if (OfficeService.SavedEmailAttachmentAddDocumentId(request) is not null
-                    && (request.TargetEntity is null
-                        || request.Email.SelectedAttachmentFileNames is not { Count: > 0 } names
+                    && (request.Email.SelectedAttachmentFileNames is not { Count: > 0 } names
                         || names.Any(string.IsNullOrWhiteSpace)))
                 {
                     logger.LogWarning(
-                        "Attachments add without a record or attachment names, correlation {CorrelationId}",
+                        "Attachments add without attachment names, correlation {CorrelationId}",
                         correlationId);
                     return ProblemDetailsHelper.OfficeValidationError(
                         "OFFICE_VALIDATION",
                         "Validation Error",
-                        "Adding attachments to a saved email needs the record it is filed to and the names of the attachments.",
+                        "Adding attachments to a saved email needs the names of the attachments.",
                         correlationId);
                 }
                 break;
@@ -619,35 +624,15 @@ public static class OfficeEndpoints
             return error;
         }
 
-        AccessRights rights;
-        try
-        {
-            var snapshot = await authorizationService.GetCallerAccessAsync(
-                userId,
-                collidingDocumentId.ToString("D"),
-                TokenHelper.ExtractBearerTokenOrNull(context),
-                cancellationToken);
-            rights = snapshot.AccessRights;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex,
-                "Could not evaluate the caller's access to collision target {DocumentId}; withholding its "
-                + "identity from the refusal (fail closed).",
-                collidingDocumentId);
-            rights = AccessRights.None;
-        }
-
         // Task 188 round 4c (F1): Read is the root grant only. THE external document narrowing decides next, so a
         // document it hides from a caller who is not an internal systemuser (own or ancestor Restricted, an internal-only
         // communication's file, a narrowing or caller-lookup fault) is withheld exactly like an unreadable one: the
         // refusal stays a refusal (nothing was written, nothing is overwritten), its identity and the version retry go.
         // The retry itself is refused anyway: OfficeVersionSaveAuthorizationFilter is DocumentAuthorizationFilter, which
         // narrows. Internal systemusers: no narrowing call, no app-only read.
-        if (rights.HasFlag(AccessRights.Read)
-            && (await InternalPlaneDocumentNarrowing.ForCallerAsync(
-                    context, new[] { (string?)collidingDocumentId.ToString("D") }, CollisionNarrowingSurface, logger))
-                .IsShown(collidingDocumentId.ToString("D")))
+        if (await CallerMaySeeDocumentAsync(
+                collidingDocumentId, userId, context, authorizationService, CollisionNarrowingSurface, logger,
+                cancellationToken))
         {
             return error;
         }
@@ -659,6 +644,133 @@ public static class OfficeEndpoints
             error.FileName);
 
         return error with { ExistingDocumentId = null, ExistingDocumentName = null, CanSaveAsVersion = false };
+    }
+
+    /// <summary>The narrowing's log label for an Attachment save that is a content duplicate of an existing document (no ids).</summary>
+    private const string ContentDuplicateNarrowingSurface = "office-save-content-duplicate";
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 143 (owner A1): strips a content-duplicate Attachment save's
+    /// <see cref="SaveResponse.ExistingDocument"/> (the existing document's id and name) unless the caller may see that
+    /// document — the same decision as the name-collision refusal's identity (<see cref="CallerMaySeeDocumentAsync"/>: Read,
+    /// then THE external document narrowing; a fault withholds). <see cref="SaveResponse.ContentDuplicate"/> is kept, so the
+    /// pane still says "Already in Spaarke". Every other response passes through untouched.
+    /// </summary>
+    /// <remarks>
+    /// The content de-dup finds the existing document app-only by hash (<c>ContentDedupDetector</c>), so it may be one the
+    /// caller cannot read or that is hidden from them. This is the only code that puts its identity on the wire, so the
+    /// decision is here (ADR-008), not in <c>OfficeService</c>.
+    /// </remarks>
+    internal static async Task<SaveResponse> WithholdContentDuplicateIdentityIfUnauthorizedAsync(
+        SaveResponse response,
+        string userId,
+        HttpContext context,
+        AuthorizationService authorizationService,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (response.ExistingDocument is not { } existing)
+        {
+            return response;
+        }
+
+        if (await CallerMaySeeDocumentAsync(
+                existing.Id, userId, context, authorizationService, ContentDuplicateNarrowingSurface, logger,
+                cancellationToken))
+        {
+            return response;
+        }
+
+        logger.LogInformation(
+            "Content-duplicate save: the caller holds no Read on the existing document (or the external document narrowing "
+            + "hides it), so its name and id are withheld. The pane says \"Already in Spaarke\" only.");
+
+        return response with { ExistingDocument = null };
+    }
+
+    /// <summary>The narrowing's log label for the status of a save's job that resolved to an existing document (no ids).</summary>
+    private const string ContentDuplicateJobNarrowingSurface = "office-job-content-duplicate";
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 143 (owner A1): the job-status read and stream obey the rule the save's answer obeys. A
+    /// job whose content resolved to an existing document through content de-dup (<see cref="OfficeService.ContentDuplicatePhase"/>)
+    /// names that document in <c>result.artifact</c> (id, file id, container, URL); it is kept only when the caller reading
+    /// the status may see the document (<see cref="CallerMaySeeDocumentAsync"/>: Read, then THE external document narrowing; a
+    /// fault, or no caller identity, withholds). Withheld, the artifact goes and the job's own status, phase and outcome stay,
+    /// so the pane still says the item is already in Spaarke. Every other job passes through untouched, with no access check.
+    /// </summary>
+    /// <remarks>
+    /// The existing document was found app-only by hash (<c>ContentDedupDetector</c>), so it may be one the caller cannot
+    /// read. These two job routes are the only code that put a job's artifact on the wire, so the decision is here (ADR-008).
+    /// </remarks>
+    internal static async Task<JobStatusResponse> WithholdContentDuplicateJobIdentityIfUnauthorizedAsync(
+        JobStatusResponse job,
+        string? userId,
+        HttpContext context,
+        AuthorizationService authorizationService,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(job.CurrentPhase, OfficeService.ContentDuplicatePhase, StringComparison.Ordinal)
+            || job.Result?.Artifact is not { } existing)
+        {
+            return job;
+        }
+
+        if (!string.IsNullOrEmpty(userId)
+            && await CallerMaySeeDocumentAsync(
+                existing.Id, userId, context, authorizationService, ContentDuplicateJobNarrowingSurface, logger,
+                cancellationToken))
+        {
+            return job;
+        }
+
+        logger.LogInformation(
+            "Status of content-duplicate job {JobId}: the caller holds no Read on the existing document (or the external "
+            + "document narrowing hides it), so the job's artifact is withheld.",
+            job.JobId);
+
+        return job with { Result = job.Result with { Artifact = null } };
+    }
+
+    /// <summary>
+    /// Whether the caller may be told which document <paramref name="documentId"/> is: they hold <see cref="AccessRights.Read"/>
+    /// on it AND THE external document narrowing shows it to them (task 188 round 4c, F1). Fail closed: an access check that
+    /// throws answers <c>false</c> (<c>AuthorizationService</c> itself denies when the bearer token is absent), and a
+    /// narrowing fault hides the document. Shared by the name-collision refusal and the content-duplicate answer.
+    /// </summary>
+    private static async Task<bool> CallerMaySeeDocumentAsync(
+        Guid documentId,
+        string userId,
+        HttpContext context,
+        AuthorizationService authorizationService,
+        string narrowingSurface,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        AccessRights rights;
+        try
+        {
+            var snapshot = await authorizationService.GetCallerAccessAsync(
+                userId,
+                documentId.ToString("D"),
+                TokenHelper.ExtractBearerTokenOrNull(context),
+                cancellationToken);
+            rights = snapshot.AccessRights;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "Could not evaluate the caller's access to document {DocumentId} ({Surface}); withholding its "
+                + "identity (fail closed).",
+                documentId, narrowingSurface);
+            rights = AccessRights.None;
+        }
+
+        return rights.HasFlag(AccessRights.Read)
+            && (await InternalPlaneDocumentNarrowing.ForCallerAsync(
+                    context, new[] { (string?)documentId.ToString("D") }, narrowingSurface, logger))
+                .IsShown(documentId.ToString("D"));
     }
 
     /// <summary>
@@ -842,6 +954,7 @@ public static class OfficeEndpoints
     private static async Task<IResult> GetJobStatusAsync(
         Guid jobId,
         IOfficeService officeService,
+        AuthorizationService authorizationService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -875,6 +988,10 @@ public static class OfficeEndpoints
                     ["jobId"] = jobId
                 });
         }
+
+        // Task 143 (owner A1): a content-duplicate job names the existing document only to a caller who may see it.
+        jobStatus = await WithholdContentDuplicateJobIdentityIfUnauthorizedAsync(
+            jobStatus, userId, context, authorizationService, logger, cancellationToken);
 
         return TypedResults.Ok(jobStatus);
     }
@@ -922,6 +1039,7 @@ public static class OfficeEndpoints
     private static async Task GetJobStatusStreamAsync(
         Guid jobId,
         IOfficeService officeService,
+        AuthorizationService authorizationService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -1029,7 +1147,13 @@ public static class OfficeEndpoints
         try
         {
             // Stream job status updates as SSE events
-            await foreach (var eventData in officeService.StreamJobStatusAsync(jobId, lastEventId, cancellationToken))
+            // Task 143 (owner A1): every status the stream reads is the one the status read would give this caller.
+            await foreach (var eventData in officeService.StreamJobStatusAsync(
+                               jobId,
+                               lastEventId,
+                               (status, ct) => WithholdContentDuplicateJobIdentityIfUnauthorizedAsync(
+                                   status, userId, context, authorizationService, logger, ct),
+                               cancellationToken))
             {
                 // Check if client is still connected before writing
                 if (cancellationToken.IsCancellationRequested)

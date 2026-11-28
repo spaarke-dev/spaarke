@@ -476,6 +476,10 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
         {
             (request, attachmentParentEmail) =
                 await _emailEnricher.EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
+
+            // Task 143: Graph could not read the parent (its id is an RFC Message-ID, or the mailbox is not the caller's own —
+            // a guest's), so the parent is the email the request itself describes, when that email IS the parent.
+            attachmentParentEmail ??= ParentEmailOfTheRequest(request);
         }
 
         // Declared outside the try (task 039, finding 2) so the outer catch can mark THIS save's ProcessingJob
@@ -622,10 +626,19 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     "Duplicate save detected, returning existing job {JobId}",
                     existingJob.JobId);
 
+                // Task 143 (owner A1): an earlier save of these bytes that resolved to an EXISTING document through content
+                // de-dup (its job's phase says so) is still a content duplicate on a re-save, so the answer says so
+                // (`ContentDuplicate`) and the pane reports "Already in Spaarke" rather than counting it saved. This path never
+                // names the existing document (`ExistingDocument` stays unset): that identity is read only through the
+                // job-status gate, and nothing here reads or returns it.
+                var isContentDuplicateJob = request.ContentType == SaveContentType.Attachment
+                    && string.Equals(existingJob.CurrentPhase, ContentDuplicatePhase, StringComparison.Ordinal);
+
                 return new SaveResponse
                 {
                     Success = true,
                     Duplicate = true,
+                    ContentDuplicate = isContentDuplicateJob,
                     JobId = existingJob.JobId,
                     StatusUrl = $"/api/office/jobs/{existingJob.JobId}",
                     StreamUrl = $"/api/office/jobs/{existingJob.JobId}/stream",
@@ -983,8 +996,8 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             Stream? contentStream = null;
             string fileName;
             // Task 046 (b) / 020: the name the document is SHOWN under (sprk_documentname). Null means "the
-            // stored file name", which is the case only for Attachment — Email (task 046 (b)) and Document
-            // (task 020, FR-06) both set it explicitly below.
+            // stored file name"; Email (task 046 (b)), Document (task 020, FR-06) and, since task 143's review,
+            // Attachment all set it explicitly below.
             string? documentName = null;
             long fileSize = 0;
             // FR-02 (task 014): on a Document CREATE the sprk_document id must be known BEFORE the bytes are
@@ -1129,7 +1142,22 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         // SANITIZED — see the note on the Document branch below. The client-supplied
                         // attachment name becomes the SPE upload path verbatim, and any '/' in it makes
                         // Graph create a folder.
-                        fileName = SpeUploadPath.SanitizeFileName(request.Attachment.FileName);
+                        //
+                        // Task 143 review (F1): an attachment's name comes from the email, never typed in the pane, so it is
+                        // SYSTEM-DERIVED (owner decision B2, 2026-09-14/15) and is STORED with task 046 (b)'s short unique
+                        // suffix, as the .eml's is. Containers are business-unit scoped and flat, so a common name ("Exhibit
+                        // A.pdf", "image001.png") was otherwise refused 409 OFFICE_020 for a different attachment saved before.
+                        // A byte-identical save is still answered by the content dedup after the upload, as a system-named
+                        // .eml's is.
+                        fileName = OfficeEmailEnricher.WithUniqueSuffix(SpeUploadPath.SanitizeFileName(request.Attachment.FileName));
+
+                        // The name the document is SHOWN under (sprk_documentname) is the attachment's own file name,
+                        // unsanitized and unsuffixed, as the worker names an .eml's attachment children (CreateDocumentRequest.Name
+                        // = attachment.FileName). Task 141's name rule (EmailAttachmentAddPlanner.SavedNamesOf: documentname or
+                        // filename, case-insensitive) therefore still finds it by that name, also when the sanitizer changed it.
+                        documentName = string.IsNullOrWhiteSpace(request.Attachment.FileName)
+                            ? fileName
+                            : request.Attachment.FileName;
                         break;
 
                     case SaveContentType.Document when request.Document != null:
@@ -1467,7 +1495,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 // nothing new to finalize: the canonical already carries its Email/Attachment artifacts + AI, so
                 // re-running finalization would only duplicate them and re-spend AI on identical bytes. Skip the
                 // whole downstream pipeline, clean up the upload (gate-after-write), and complete the job. The
-                // detector already NOTIFIED the user of the canonical. Cleanup is best-effort (never fails the save).
+                // detector already notified the user (the notification names no other document). Cleanup is best-effort (never fails the save).
                 // The `finally` below still disposes the content stream.
                 //
                 // Task 046: the upload is deleted ONLY when no sprk_document points at it. The create upload above is
@@ -1490,7 +1518,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     {
                         Status = JobStatus.Completed,
                         Progress = 100,
-                        CurrentPhase = "DeduplicatedToExisting",
+                        CurrentPhase = ContentDuplicatePhase,
                         CompletedAt = DateTimeOffset.UtcNow,
                         // Task 039 (finding 3): names the canonical this save resolved to. No file id: the upload was
                         // either deleted or is some document's own file, and the canonical's file is not re-read here.
@@ -1502,14 +1530,26 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         "ProcessingJob {JobId} completed: content duplicate of canonical document {DocumentId}; finalization skipped, upload cleanup attempted: {CleanupAttempted}.",
                         jobId, documentId, uploadIsTransient);
 
+                    // Task 143 (owner A1): an Attachment save says it is already in Spaarke, and names the existing document.
+                    // The name is read app-only here; the ENDPOINT withholds it and the id unless the caller holds Read on
+                    // that document and the external narrowing shows it (ADR-008), as the collision refusal's identity is.
+                    var isAttachmentDuplicate = request.ContentType == SaveContentType.Attachment;
+                    var existingName = isAttachmentDuplicate
+                        ? await _documentPersistence.FindDocumentNameAsync(documentId, cancellationToken)
+                        : null;
+
                     return new SaveResponse
                     {
                         Success = true,
-                        Duplicate = false, // NOT an idempotent job replay — this is a content dedup (user notified via the canonical notification)
+                        Duplicate = false, // NOT an idempotent job replay — this is a content dedup (the detector notified the user; it names no other document)
                         JobId = jobId,
                         StatusUrl = $"/api/office/jobs/{jobId}",
                         StreamUrl = $"/api/office/jobs/{jobId}/stream",
-                        EmailFiling = emailFiling
+                        EmailFiling = emailFiling,
+                        ContentDuplicate = isAttachmentDuplicate,
+                        ExistingDocument = existingName is null
+                            ? null
+                            : new ExistingDocumentReference { Id = documentId, Name = existingName }
                     };
                 }
 
@@ -1767,6 +1807,14 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// the immutable duplicate path. The task pane completes on <c>result.artifact.id</c>; without it the job
     /// reported Completed with nothing to open and the pane stalled on its job card.
     /// </summary>
+    /// <summary>
+    /// The phase of a save's job whose content resolved to an EXISTING document through content de-dup (FR-C3): no document was
+    /// created, and <c>result.artifact</c> names that existing document. Task 143 (owner A1): the job-status read and stream name
+    /// it only to a caller who may see it (<c>OfficeEndpoints.WithholdContentDuplicateJobIdentityIfUnauthorizedAsync</c>). The
+    /// value is unchanged since FR-C3, so jobs recorded before the gate are gated too.
+    /// </summary>
+    public const string ContentDuplicatePhase = "DeduplicatedToExisting";
+
     private static JobResult DocumentResult(Guid documentId, string? speFileId, string? driveId, string? webUrl) => new()
     {
         Artifact = new CreatedArtifact
@@ -1948,9 +1996,13 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     "This saved email is not the email being saved, so its attachments can't be added. Nothing was saved.",
                     retryable: false), null);
             case EmailAttachmentAddPlanner.SavedEmailOutcome.NotFiledToTheRecord:
+                // Task 143: an add that names no record is refused when the saved email is filed to one.
                 return (SavedEmailRefusal(
                     OfficeErrorCodes.AccessDenied,
-                    "This saved email is not filed to that record, so its attachments can't be added there. Nothing was saved.",
+                    request.TargetEntity is null
+                        ? "This saved email is filed to a record, so its attachments can only be added to that record. "
+                          + "Nothing was saved."
+                        : "This saved email is not filed to that record, so its attachments can't be added there. Nothing was saved.",
                     retryable: false), null);
             case EmailAttachmentAddPlanner.SavedEmailOutcome.Unreadable:
                 return (SavedEmailRefusal(
@@ -1969,15 +2021,47 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 _logger.LogWarning(
                     "Email attachments add: the record's documents are no longer kept where .eml document {DocumentId} is; refusing",
                     plan.EmlDocumentId);
+                // Task 143 review (F5): an add that names no record goes where the CALLER's documents are kept, so its refusal
+                // does not speak of a record.
                 return (SavedEmailRefusal(
                     OfficeErrorCodes.AccessDenied,
-                    "This record's documents are now kept somewhere else, so attachments can't be added to this saved email. "
-                    + "Nothing was saved.",
+                    request.TargetEntity is null
+                        ? "This saved email's documents are kept in a different place than yours, so attachments can't be added to it. "
+                          + "Nothing was saved."
+                        : "This record's documents are now kept somewhere else, so attachments can't be added to this saved email. "
+                          + "Nothing was saved.",
                     retryable: false), null);
             }
         }
 
         return (null, plan);
+    }
+
+    /// <summary>
+    /// Task 143: the parent of a single-attachment save, taken from the request's own <see cref="SaveRequest.Email"/>, for when
+    /// Graph could not read it (the pane saves an attachment without its email, including from a mailbox the caller's token
+    /// cannot read). Only when that email IS the parent: its RFC Message-ID or its Exchange item id equals
+    /// <see cref="AttachmentMetadata.ParentEmailId"/> (case-insensitive, as the planner compares message keys). Any other email
+    /// — none, or one that names another message — is never captured or filed for this attachment: <see langword="null"/>.
+    /// The capture and the filing then trust it exactly as an email save trusts its own <c>email</c> metadata.
+    /// </summary>
+    internal static EmailMetadata? ParentEmailOfTheRequest(SaveRequest request)
+    {
+        if (request.ContentType != SaveContentType.Attachment
+            || request.Email is not { } email
+            || string.IsNullOrWhiteSpace(request.Attachment?.ParentEmailId))
+        {
+            return null;
+        }
+
+        var parentId = request.Attachment.ParentEmailId;
+        return IsSameKey(OfficeEmailEnricher.ResolveRfcMessageId(email), parentId)
+            || IsSameKey(OfficeEmailEnricher.ResolveExchangeItemId(email), parentId)
+                ? email
+                : null;
+
+        static bool IsSameKey(string? key, string parentId) =>
+            !string.IsNullOrWhiteSpace(key) && string.Equals(key, parentId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static SaveResponse SavedEmailRefusal(string code, string message, bool retryable) => new()
@@ -3498,6 +3582,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     public IAsyncEnumerable<byte[]> StreamJobStatusAsync(
         Guid jobId,
         string? lastEventId,
+        Func<JobStatusResponse, CancellationToken, Task<JobStatusResponse>> statusForCaller,
         CancellationToken cancellationToken = default)
-        => _jobs.StreamAsync(jobId, lastEventId, cancellationToken);
+        => _jobs.StreamAsync(jobId, lastEventId, statusForCaller, cancellationToken);
 }
