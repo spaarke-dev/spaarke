@@ -455,3 +455,8 @@ shared/taskpane/hooks/__tests__/useSaveFlow.attachmentsAddWatch.test.ts
 shared/taskpane/services/__tests__/savedEmailAttachments.adding.test.ts
 shared/taskpane/components/__tests__/SaveFlow.attachmentsAddResume.test.tsx
 shared/taskpane/hooks/__tests__/useSaveFlow.attachmentsAddGiveUp.test.ts
+# task 143 (attachments without the email or a record; duplicate attachments reported, identity gated)
+shared/taskpane/components/__tests__/SaveFlow.attachmentsAlreadyInSpaarke.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.attachmentsOnly.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.unfiledEmailAdd.test.tsx
+shared/taskpane/services/__tests__/documentIdentityService.standaloneAttachments.test.ts

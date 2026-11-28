@@ -1495,7 +1495,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 // nothing new to finalize: the canonical already carries its Email/Attachment artifacts + AI, so
                 // re-running finalization would only duplicate them and re-spend AI on identical bytes. Skip the
                 // whole downstream pipeline, clean up the upload (gate-after-write), and complete the job. The
-                // detector already NOTIFIED the user of the canonical. Cleanup is best-effort (never fails the save).
+                // detector already notified the user (the notification names no other document). Cleanup is best-effort (never fails the save).
                 // The `finally` below still disposes the content stream.
                 //
                 // Task 046: the upload is deleted ONLY when no sprk_document points at it. The create upload above is
@@ -1541,7 +1541,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     return new SaveResponse
                     {
                         Success = true,
-                        Duplicate = false, // NOT an idempotent job replay — this is a content dedup (user notified via the canonical notification)
+                        Duplicate = false, // NOT an idempotent job replay — this is a content dedup (the detector notified the user; it names no other document)
                         JobId = jobId,
                         StatusUrl = $"/api/office/jobs/{jobId}",
                         StreamUrl = $"/api/office/jobs/{jobId}/stream",
