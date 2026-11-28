@@ -14,22 +14,12 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Primitives;
 using Sprk.Bff.Api.Api.Mcp;
-using Sprk.Bff.Api.Infrastructure.DI;
-using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Mcp;
@@ -184,6 +174,54 @@ public sealed class McpOriginCheckTests
     }
 
     [Fact]
+    public async Task Enforce_RefusedTokenWithABadOrigin_Is401_NotChangedByTheCheck()
+    {
+        await using var host = await OriginHost.StartAsync(Config("Enforce"));
+        // The JwtBearer scheme accepts this token; the MCP plane refuses it (no user_impersonation scope) before the origin check runs.
+        var refused = McpTestHost.MintToken(Caller, claims => claims["scp"] = "Files.Read");
+
+        using var response = await host.CallAsync(origin: Evil, token: refused);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the connector-token refusal runs first; a bad Origin never turns it into 403");
+        host.Logs.ForCategory(typeof(McpOriginCheckFilter).FullName!).Should().BeEmpty("the origin check never ran");
+    }
+
+    [Fact]
+    public async Task Enforce_EmptyOrigin_IsPresentAndRejected()
+    {
+        await using var host = await OriginHost.StartAsync(Config("Enforce"));
+
+        using var response = await host.CallAsync(origin: string.Empty);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "an Origin header with no value is present and matches no allowed origin");
+        (await ErrorCodeAsync(response)).Should().Be(McpOriginCheckFilter.OriginRefusedErrorCode);
+    }
+
+    [Fact]
+    public async Task Enforce_CommaJoinedOrigin_IsRejected()
+    {
+        await using var host = await OriginHost.StartAsync(Config("Enforce"));
+
+        // HttpClient sends the two values as ONE header line, which Kestrel keeps as one value. That an allowed value cannot carry a
+        // bad one when they arrive as separate values is pinned by Evaluate_SeveralOriginValues_PassOnlyWhenEveryValueIsAllowed.
+        using var response = await host.CallAsync(origin: null, extraHeaders: new() { ["Origin"] = Allowed + ", " + Evil });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "a comma-joined Origin matches no allowed origin");
+    }
+
+    [Fact]
+    public void Evaluate_SeveralOriginValues_PassOnlyWhenEveryValueIsAllowed()
+    {
+        string[] origins = [Allowed, "https://second.example.com"];
+        string[] none = [];
+
+        McpOriginCheckFilter.Evaluate(true, new StringValues([Allowed, "https://second.example.com"]), default, origins, none).Should().BeNull();
+        McpOriginCheckFilter.Evaluate(true, new StringValues([Allowed, Evil]), default, origins, none).Should().Be(McpOriginCheckFilter.OriginRefusedErrorCode);
+        McpOriginCheckFilter.Evaluate(true, new StringValues(string.Empty), default, origins, none).Should().Be(McpOriginCheckFilter.OriginRefusedErrorCode);
+        McpOriginCheckFilter.Evaluate(true, StringValues.Empty, default, origins, none)
+            .Should().Be(McpOriginCheckFilter.OriginRefusedErrorCode, "a header that is present with no value at all fails closed");
+    }
+    [Fact]
     public async Task UnrecognisedMode_FailsClosed_AsEnforce()
     {
         await using var host = await OriginHost.StartAsync(Config("Enforced")); // a typo of "Enforce"
@@ -264,10 +302,84 @@ public sealed class McpOriginCheckTests
         using var passed = await host.CallAsync(origin: Allowed);
         using var refused = await host.CallAsync(origin: Evil);
 
+        passed.StatusCode.Should().Be(HttpStatusCode.OK);
+        refused.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         var lines = host.Logs.ForCategory(typeof(McpOriginCheckFilter).FullName!);
         lines.Should().ContainSingle().Which.Level.Should().Be(LogLevel.Warning);
     }
 
+    // ---- startup warnings (K1, K7) ------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("Enforced")] // unrecognised Mode and no allowed host: both warnings
+    [InlineData("Enforce")]  // Enforce and no allowed host
+    public async Task Startup_WarnsOnce_ForEachSettingThatWeakensTheCheck(string mode)
+    {
+        await using var host = await OriginHost.StartAsync(Config(mode));
+
+        var warnings = StartupWarnings(host);
+
+        warnings.Should().Contain(w => w.Contains("no allowed host is configured"));
+        if (mode == "Enforced")
+        {
+            warnings.Should().Contain(w => w.Contains("'Enforced' is not LogOnly or Enforce"));
+            warnings.Should().HaveCount(2);
+        }
+        else
+        {
+            warnings.Should().ContainSingle();
+        }
+    }
+
+    [Theory]
+    [InlineData(null, false)]       // the default LogOnly
+    [InlineData("LogOnly", false)]
+    [InlineData("Enforce", true)]   // Enforce with an allowed host
+    public async Task Startup_ValidConfiguration_LogsNoWarning(string? mode, bool withHosts)
+    {
+        await using var host = await OriginHost.StartAsync(Config(mode, withHosts));
+
+        StartupWarnings(host).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Startup_McpOff_LogsNoOriginWarning_EvenWhenMisconfigured()
+    {
+        await using var host = await OriginHost.StartAsync(Config("Enforced"), mcpEnabled: false);
+
+        StartupWarnings(host).Should().BeEmpty("with the server off nothing is served, so there is nothing to warn about");
+    }
+
+    [Fact]
+    public void ResolveAllowedHosts_ScalarSettingWithoutAnIndex_IsNotAList()
+    {
+        // K4: an App Service setting "Mcp__OriginCheck__AllowedHosts" (no __0) arrives as a scalar value, not an array entry.
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Mcp:OriginCheck:AllowedHosts"] = OwnHost })
+            .Build();
+
+        McpOriginCheckFilter.ResolveAllowedHosts(configuration).Should().BeEmpty("only indexed entries (AllowedHosts:0, :1, ...) bind to the list");
+    }
+
+    [Theory]
+    [InlineData("AllowedHosts")]
+    [InlineData("AllowedOrigins")]
+    public async Task Startup_WarnsWhenAListIsSetWithoutAnIndex_WithoutLoggingItsValue(string list)
+    {
+        var config = Config("LogOnly", withHosts: true);
+        config.Remove("Mcp:OriginCheck:" + list + ":0");
+        config["Mcp:OriginCheck:" + list] = "unindexed.example.test";
+        await using var host = await OriginHost.StartAsync(config);
+
+        var warning = StartupWarnings(host).Should().ContainSingle().Which;
+        warning.Should().Contain("Mcp:OriginCheck:" + list + " is set as a single value").And.NotContain("unindexed.example.test");
+    }
+
+    private static List<string> StartupWarnings(OriginHost host) =>
+        host.Logs.ForCategory(typeof(McpEndpoints).FullName!)
+            .Where(e => e.Level == LogLevel.Warning && e.Message.StartsWith("[MCP-ORIGIN]", StringComparison.Ordinal))
+            .Select(e => e.Message)
+            .ToList();
     // ---- other routes -------------------------------------------------------------------------------------------------
 
     [Theory]
@@ -329,74 +441,33 @@ public sealed class McpOriginCheckTests
 
     // ---- the host -----------------------------------------------------------------------------------------------------
 
-    /// <summary>The setup of <see cref="McpTestHost"/> (production MCP module and routes, real JwtBearer) with the configuration and the log sink under test control.</summary>
+    /// <summary><see cref="McpTestHost"/> (production MCP module and routes, real JwtBearer) with the configuration and the log sink under test control, plus one non-MCP route.</summary>
     private sealed class OriginHost : IAsyncDisposable
     {
-        private readonly WebApplication _app;
+        private readonly McpTestHost _host;
 
-        private OriginHost(WebApplication app, HttpClient client, McpProbeState probe, CapturingLoggerProvider logs)
+        private OriginHost(McpTestHost host, CapturingLoggerProvider logs)
         {
-            _app = app;
-            Client = client;
-            Probe = probe;
+            _host = host;
             Logs = logs;
         }
 
-        public HttpClient Client { get; }
+        public HttpClient Client => _host.Client;
 
-        public McpProbeState Probe { get; }
+        public McpProbeState Probe => _host.Probe;
 
         public CapturingLoggerProvider Logs { get; }
 
-        public static async Task<OriginHost> StartAsync(Dictionary<string, string?> extraConfig)
+        public static async Task<OriginHost> StartAsync(Dictionary<string, string?> extraConfig, bool mcpEnabled = true)
         {
-            var builder = WebApplication.CreateBuilder();
-            builder.WebHost.UseKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0));
             var logs = new CapturingLoggerProvider();
-            builder.Logging.ClearProviders();
-            builder.Logging.AddProvider(logs);
-            builder.Logging.SetMinimumLevel(LogLevel.Information);
-            var config = new Dictionary<string, string?>
-            {
-                ["Mcp:Enabled"] = "true",
-                ["AzureAd:TenantId"] = McpTestHost.TenantId,
-                ["AzureAd:ClientId"] = McpTestHost.BffClientId,
-            };
-            foreach (var (key, value) in extraConfig)
-            {
-                config[key] = value;
-            }
-
-            builder.Configuration.AddInMemoryCollection(config);
-
-            var probe = new McpProbeState();
-            builder.Services.AddHttpContextAccessor();
-            builder.Services.AddSingleton(probe);
-            builder.Services.AddSingleton<IDecisionCapability>(new McpProbeCapability());
-            builder.Services
-                .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-                .AddJwtBearer(options => options.TokenValidationParameters = new TokenValidationParameters
-                {
-                    ValidIssuer = "https://login.microsoftonline.com/" + McpTestHost.TenantId + "/v2.0",
-                    ValidAudience = McpTestHost.BffClientId,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("mcp-contract-test-signing-key-0123456789-0123456789")),
-                });
-            builder.Services.AddAuthorization(o => o.AddPolicy("SystemAdmin", p => p.RequireAssertion(_ => false)));
-            builder.Services.AddRateLimitingModule();
-            builder.Services.AddMcpModule(builder.Configuration, McpProbeTools.Served);
-
-            var app = builder.Build();
-            app.UseAuthentication();
-            app.UseAuthorization();
-            app.UseRateLimiter();
-            app.MapMcpEndpoints();
-            app.MapPost("/probe/other", () => Results.Ok("other")).RequireAuthorization();
-            await app.StartAsync();
-
-            var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-            return new OriginHost(app, new HttpClient { BaseAddress = new Uri(address) }, probe, logs);
+            var host = await McpTestHost.StartAsync(
+                mcpEnabled,
+                extraConfig,
+                logs,
+                app => app.MapPost("/probe/other", () => Results.Ok("other")).RequireAuthorization());
+            return new OriginHost(host, logs);
         }
-
         /// <summary>One JSON-RPC call to the MCP route. <paramref name="origin"/> null sends no <c>Origin</c>; <paramref name="hostHeader"/> null keeps the real host.</summary>
         public Task<HttpResponseMessage> CallAsync(
             string? origin,
@@ -449,12 +520,7 @@ public sealed class McpOriginCheckTests
             return Client.SendAsync(request);
         }
 
-        public async ValueTask DisposeAsync()
-        {
-            Client.Dispose();
-            await _app.StopAsync();
-            await _app.DisposeAsync();
-        }
+        public ValueTask DisposeAsync() => _host.DisposeAsync();
     }
 
     /// <summary>Keeps every log entry (category, level, rendered message, structured state) so a test can read what the filter logged.</summary>

@@ -62,17 +62,37 @@ internal sealed class McpTestHost : IAsyncDisposable
 
     public BufferingRecorder.State Buffering { get; }
 
-    public static async Task<McpTestHost> StartAsync(bool mcpEnabled)
+    /// <summary>
+    /// Starts the host. <paramref name="extraConfig"/> is layered over the base configuration; <paramref name="logs"/>, when given, receives
+    /// every log entry at Information and above (no provider otherwise); <paramref name="mapExtra"/> maps further routes after the MCP routes.
+    /// </summary>
+    public static async Task<McpTestHost> StartAsync(
+        bool mcpEnabled,
+        IReadOnlyDictionary<string, string?>? extraConfig = null,
+        ILoggerProvider? logs = null,
+        Action<WebApplication>? mapExtra = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0));
         builder.Logging.ClearProviders();
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        if (logs is not null)
+        {
+            builder.Logging.AddProvider(logs);
+            builder.Logging.SetMinimumLevel(LogLevel.Information);
+        }
+
+        var config = new Dictionary<string, string?>
         {
             ["Mcp:Enabled"] = mcpEnabled ? "true" : "false",
             ["AzureAd:TenantId"] = TenantId,
             ["AzureAd:ClientId"] = BffClientId,
-        });
+        };
+        foreach (var (key, value) in extraConfig ?? new Dictionary<string, string?>())
+        {
+            config[key] = value;
+        }
+
+        builder.Configuration.AddInMemoryCollection(config);
 
         var probe = new McpProbeState();
         var capability = new McpProbeCapability();
@@ -106,6 +126,7 @@ internal sealed class McpTestHost : IAsyncDisposable
         app.UseAuthorization();
         app.UseRateLimiter();
         app.MapMcpEndpoints();
+        mapExtra?.Invoke(app);
         await app.StartAsync();
 
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
@@ -120,19 +141,27 @@ internal sealed class McpTestHost : IAsyncDisposable
         await _app.DisposeAsync();
     }
 
-    /// <summary>A valid workforce-style test token for the caller whose <c>oid</c> is <paramref name="oid"/>.</summary>
-    public static string MintToken(Guid oid) => new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+    /// <summary>
+    /// A valid workforce-style test token for the caller whose <c>oid</c> is <paramref name="oid"/>. <paramref name="edit"/> changes the claims
+    /// before signing (for a token the scheme accepts but the MCP plane refuses, e.g. <c>scp</c> without <c>user_impersonation</c>).
+    /// </summary>
+    public static string MintToken(Guid oid, Action<Dictionary<string, object>>? edit = null)
     {
-        Issuer = Issuer,
-        Audience = Audience,
-        SigningCredentials = new SigningCredentials(SigningKey, SecurityAlgorithms.HmacSha256),
-        Claims = new Dictionary<string, object>
+        var claims = new Dictionary<string, object>
         {
             ["scp"] = "user_impersonation",
             ["oid"] = oid.ToString(),
             ["tid"] = TenantId,
-        },
-    });
+        };
+        edit?.Invoke(claims);
+        return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+        {
+            Issuer = Issuer,
+            Audience = Audience,
+            SigningCredentials = new SigningCredentials(SigningKey, SecurityAlgorithms.HmacSha256),
+            Claims = claims,
+        });
+    }
 
     /// <summary>One JSON-RPC call. <paramref name="token"/> null sends no Authorization header; <paramref name="accept"/> false omits <c>Accept</c>.</summary>
     public Task<HttpResponseMessage> PostRpcAsync(string route, string method, object parameters, string? token, bool accept = true)
