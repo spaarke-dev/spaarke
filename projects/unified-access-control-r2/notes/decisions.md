@@ -332,3 +332,12 @@ The owner accepted (in this session) that the external work-assignments module m
 - the notification-feed DTO property set is unchanged.
 
 There is no live change. The work goes into the next dev BFF candidate, on the owner's exact-SHA go.
+
+## 2026-11-27: Creating a task from a communication needs Read as well as AppendTo on the record (#3317, D-3181 extended)
+**Rule (D-3181, the owner's):** when a create copies a referenced record's name onto the new row app-only, the caller must hold Read **and** AppendTo on that record (all-of), checked as the caller. AppendTo alone does not let a caller learn a record's name.
+
+**Owner, 2026-11-27 ("Yes"):** the rule also covers the communication create-task routes (#3317): the ad-hoc task route and the proposal create-task apply, which copy the regarding record's name into `sprk_regardingrecordname` through TaskActionCore. A caller with AppendTo and no Read gets the same 403 as for a record that does not exist, and nothing is created.
+
+Shipped in PR #3324 (squash `bc22f35481`): `CommunicationRecordAuthorizationFilter.AuthorizeTaskCreateAsync`, contract tests (must-fire "no Read" cases, byte-identical 403), and feature-role guard rows (Core: Read and AppendTo at Deep on the 12 regarding tables). Not yet on dev; it goes in the next dev BFF candidate.
+
+Not covered, owner ruling open (#3323): the other AppendTo-only name copies (thread re-file, the send's ancestor stamp, platform lookup display names, the playbook CreateTask node).
