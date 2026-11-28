@@ -43,7 +43,7 @@ What makes it more than a pane fix: two data-loss defects (D1, D2), one in anoth
 
 - Open PRs touching these files: only PR #3330 (task 143). 145 starts after it merges.
 - Local worktrees with unpushed work on these files: see §6 (scan result).
-- Coordination before starting: field-mapping-r1 (worker, W3); the communications owner or the project owner for D2 in `IncomingCommunicationProcessor`; ebilling-r1 informed (additive fields only); task 144 waits on 145 (its "skip a name already saved" rule is replaced by §3).
+- Coordination before starting: field-mapping-r1 (worker, W3); D2 in `IncomingCommunicationProcessor`: **owner go 2026-11-28, "Yes include fix here"**; ebilling-r1 informed (additive fields only); task 144 waits on 145 (its "skip a name already saved" rule is replaced by §3).
 
 ## 6. Worktree scan
 
