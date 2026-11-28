@@ -93,6 +93,46 @@ public record SaveResponse
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? AttachmentsNotSaveable { get; init; }
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 143 (owner A1): an Attachment save whose bytes are identical to an existing Spaarke
+    /// document (content de-dup, FR-C3). <c>true</c> on that success answer only: nothing was created, nothing was written to
+    /// the existing document, and nothing was re-filed. Omitted (<c>false</c>) on every other answer. Additive: clients that
+    /// do not know the field ignore it.
+    /// </summary>
+    /// <remarks>
+    /// Stays <c>true</c> when <see cref="ExistingDocument"/> is withheld, so the pane can still say "Already in Spaarke".
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ContentDuplicate { get; init; }
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 143 (owner A1): the existing document a <see cref="ContentDuplicate"/> Attachment save
+    /// matched, so the pane can say "Already in Spaarke as {name}" and open it. Omitted (<c>null</c>) on every other answer.
+    /// Additive.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Withheld unless the caller may see that document</b> — decided at the ENDPOINT (ADR-008), as the
+    /// name-collision refusal's identity is (<see cref="SaveError.ExistingDocumentName"/>): the content de-dup finds it
+    /// app-only by hash, so the caller may not be allowed to see it. The caller must hold <c>Read</c> on it AND the external
+    /// document narrowing must show it; without Read, a hidden document, or a check that faults, the field is omitted (fail
+    /// closed) and <see cref="ContentDuplicate"/> alone remains.</para>
+    /// <para>Also omitted when the document's name could not be read: the pane then says "Already in Spaarke".</para>
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ExistingDocumentReference? ExistingDocument { get; init; }
+}
+
+/// <summary>
+/// spaarkeai-word-add-in-r1 task 143: an existing <c>sprk_document</c> a save answer names (<see cref="SaveResponse.ExistingDocument"/>).
+/// </summary>
+public record ExistingDocumentReference
+{
+    /// <summary>The existing <c>sprk_document</c> id. The pane opens it through <c>GET /api/documents/{id}/open-links</c>, which re-checks Read.</summary>
+    public required Guid Id { get; init; }
+
+    /// <summary>Its display name (<c>sprk_documentname</c>).</summary>
+    public required string Name { get; init; }
 }
 
 /// <summary>

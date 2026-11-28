@@ -527,6 +527,39 @@ public class OfficeDocumentPersistence
     }
 
     /// <summary>
+    /// spaarkeai-word-add-in-r1 task 143 (owner A1): the display name (<c>sprk_documentname</c>) of the existing document an
+    /// immutable save's content de-dup resolved to, so the save's answer can say "Already in Spaarke as {name}". Read-only,
+    /// app-only, best-effort: <c>null</c> when the name is unset, the read fails, or no generic seam is available.
+    /// </summary>
+    /// <remarks>
+    /// Authorization is NOT decided here: the endpoint withholds the name and id unless the caller may see the document
+    /// (<c>OfficeEndpoints.WithholdContentDuplicateIdentityIfUnauthorizedAsync</c>, ADR-008), exactly as the name-collision
+    /// refusal's name (<see cref="FindCollisionTargetByLocationAsync"/>) is read here and gated there.
+    /// </remarks>
+    public async Task<string?> FindDocumentNameAsync(Guid documentId, CancellationToken cancellationToken)
+    {
+        if (_genericEntityService is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var row = await _genericEntityService.RetrieveAsync(
+                DocumentLogicalName, documentId, new[] { DocumentNameAttribute }, cancellationToken);
+            var name = row?.Attributes.TryGetValue(DocumentNameAttribute, out var value) == true ? value as string : null;
+            return string.IsNullOrWhiteSpace(name) ? null : name;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Content-duplicate name read failed (non-fatal) for sprk_document {DocumentId}; the save's answer will not name it.",
+                documentId);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Task 025 (spaarkeai-word-add-in-r1): does an <c>sprk_document</c> already hold <paramref name="fileName"/>
     /// in <paramref name="driveId"/>? Called ONLY after a name-collision refusal (<c>OfficeStorageUploader</c>'s
     /// <c>ConflictBehavior.Fail</c> 409) to resolve WHICH existing row the collision belongs to, so the pane can

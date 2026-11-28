@@ -1521,6 +1521,14 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         "ProcessingJob {JobId} completed: content duplicate of canonical document {DocumentId}; finalization skipped, upload cleanup attempted: {CleanupAttempted}.",
                         jobId, documentId, uploadIsTransient);
 
+                    // Task 143 (owner A1): an Attachment save says it is already in Spaarke, and names the existing document.
+                    // The name is read app-only here; the ENDPOINT withholds it and the id unless the caller holds Read on
+                    // that document and the external narrowing shows it (ADR-008), as the collision refusal's identity is.
+                    var isAttachmentDuplicate = request.ContentType == SaveContentType.Attachment;
+                    var existingName = isAttachmentDuplicate
+                        ? await _documentPersistence.FindDocumentNameAsync(documentId, cancellationToken)
+                        : null;
+
                     return new SaveResponse
                     {
                         Success = true,
@@ -1528,7 +1536,11 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         JobId = jobId,
                         StatusUrl = $"/api/office/jobs/{jobId}",
                         StreamUrl = $"/api/office/jobs/{jobId}/stream",
-                        EmailFiling = emailFiling
+                        EmailFiling = emailFiling,
+                        ContentDuplicate = isAttachmentDuplicate,
+                        ExistingDocument = existingName is null
+                            ? null
+                            : new ExistingDocumentReference { Id = documentId, Name = existingName }
                     };
                 }
 

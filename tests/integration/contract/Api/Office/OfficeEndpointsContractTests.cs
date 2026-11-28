@@ -1228,6 +1228,9 @@ public sealed class OfficeVersionSaveWorld
     public Dictionary<string, SpeItem> SpeItems { get; } = new(StringComparer.Ordinal);
     public Dictionary<Guid, AccessRights> AccessByDocumentId { get; } = new();
     public HashSet<string> LockedItemIds { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Task 143 (owner A1): documents whose caller access check THROWS (the access data source faults).</summary>
+    public HashSet<Guid> FaultingAccessChecks { get; } = new();
     public List<string> AccessChecks { get; } = new();
     public List<string> DocumentReads { get; } = new();
     public List<(string DocumentId, UpdateDocumentRequest Update)> DocumentUpdates { get; } = new();
@@ -1458,6 +1461,9 @@ public sealed class OfficeVersionSaveWorld
                         document["sprk_emailconversationindex"] = conversationIndex;
                     if (row.RestrictedBySubmission)
                         document["sprk_restrictedbysubmission"] = true;
+                    // Task 143 (owner A1): the name a content-duplicate save's answer reports. Unset rows omit it, as Dataverse does.
+                    if (row.DocumentName is { } documentName)
+                        document["sprk_documentname"] = documentName;
                     return document;
                 }
             }
@@ -2155,6 +2161,8 @@ public sealed class OfficeVersionSaveWorld
         lock (_gate)
         {
             AccessChecks.Add(resourceId);
+            if (Guid.TryParse(resourceId, out var faulting) && FaultingAccessChecks.Contains(faulting))
+                throw new InvalidOperationException("The access data source failed (test fault).");
             var rights = Guid.TryParse(resourceId, out var id) && AccessByDocumentId.TryGetValue(id, out var granted)
                 ? granted
                 : AccessRights.None;
