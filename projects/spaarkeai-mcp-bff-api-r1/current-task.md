@@ -1,6 +1,6 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-27 ~21:00Z (mcp-r1: Part C merged + live on dev, check passed 15.4 s; #3242 merged 7f48825d90; D1 merged 8b38e97667; mcp-r2 reported an ADR-010 ceiling breach on master (173) that does not reproduce on 60933c82be — asked for the run; worktree C:\wtadr kept for a fix if needed)
+> **Last Updated**: 2026-11-27 ~21:00Z (mcp-r1: Part C merged + live on dev, check passed 15.4 s; #3242 merged 7f48825d90; D1 merged 8b38e97667; ADR-010 alarm was r2-branch only; master 171/172. TODO in the next ISS-010 PR: add an ADR010_DITests.cs ceiling entry (no ceiling change) for ICallerClientView -> DecisionAccessWindowCallerClient — it entered within headroom undocumented)
 > **Recovery**: Read "Quick Recovery" first. History: commit messages and `notes/wave{6,7,8}-review.md`, `notes/merge-review-2026-11-15.md`.
 
 ---
