@@ -146,7 +146,12 @@
     <criterion testable="true">SpaarkeAi builds and its tests pass. Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Unconfirmed at authoring time: which Console surface lists Work Items (the Worklist lives in `@spaarke/ui-components` and is registered by `src/solutions/LegalWorkspace/src/sections/worklist.registration.ts`). Step 1 settles it; the escalation trigger bounds the change. Deploy is in task 029 (code-page-deploy / `scripts/Deploy-SpaarkeAi.ps1`). Synthetic NDAs only for any demo data (NFR-10).</notes>
+  <notes>Unconfirmed at authoring time: which Console surface lists Work Items (the Worklist lives in `@spaarke/ui-components` and is registered by `src/solutions/LegalWorkspace/src/sections/worklist.registration.ts`). Step 1 settles it; the escalation trigger bounds the change. Deploy is in task 029 (code-page-deploy / `scripts/Deploy-SpaarkeAi.ps1`). Synthetic NDAs only for any demo data (NFR-10).
+
+REVISE FOR THE DECIDE LANE before running. Since task 017, approval is a Decide-lane Work Item: a plan with `approve-intake` / `reject-intake` committed through the decision commit route, plus the claim route. It is not a `task` plus an endpoint; see `notes/017-approval.md` and `notes/decisions.md` 2026-11-28. Carried in from 017 (ontology-r1, 2026-11-28):
+(1) MUST land before the intake approval policy is enabled. The shared DecisionWizard does not treat an empty `plan.dismissalReasons` as "no dismissal". With no action picked, the panel goes into dismissal mode with an empty "Reason for dismissing" dropdown (ConfirmStep.tsx ~327-345), and `decisionDraft.ts` dismissalValid never passes, so the user is stuck. Fix: an empty list means no dismissal path; the panel says to choose one of the item's actions to continue, and hides the dismissal box. Jest tests: must-fire for an intake-shaped plan; must-not-fire for an ordinary Decide plan, whose dismissal still works. Run client-lint before push. ontology-r1 reviews it (their component).
+(2) The work type. Today the item shows under "Other". Add the new `sprk_policy.sprk_worktype` option: an ontology-table schema change, owner approval, in the solution source where sprk_policy lives, the next free local value. Add the Console labels (`DecideLaneCategories.cs`, `laneCountFilters.ts`) and the parity corpus. ontology-r1 reviews.
+(3) Approve needs a prior claim, so the card offers Claim first.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
