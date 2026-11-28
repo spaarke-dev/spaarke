@@ -106,6 +106,12 @@ content model"), so the rating rules can't drift between editions. The applier i
   even after removal. Today `build_accelerator.py` gives each package one fixed id. Proposal: keep that id for
   Cowork test uploads, and derive a second id for admin deployment (`uuid5(".../<pkg>/admin")`), chosen by a build
   flag. Small change, to master by its own PR.
+- **Cross-project check (specialist-legal-agents-r1, 2026-11-28):** no overlap today. Its Phase 0 builds no Word
+  redline, and its NDA agents only review and recommend. Its program design is Microsoft-first for contract markup
+  (Spaarke supplies positions, Microsoft's edit-contract/legal plugin does tracked changes), except NDA in Cowork →
+  our `nda-review`. Its **D-A13 (Microsoft-first) is still an open owner decision.** If its Phase 1 needs redlines,
+  it would use this skill rather than build a second, and flag it first. So adopting this proposal and D-A13 should
+  be decided together: the two projects currently assume the same Microsoft-first rule (our rule 4.2).
 - Risks carried over from the synthesis §4: Word may tighten or drop skill-supplied Office.js (undocumented), so the
   fallback in 4.2 is required; EU tenants run GPT, so the skill must be tested on GPT; Information Barriers tenants
   can't use skills at all.
