@@ -59,14 +59,13 @@ public class WorkloadPlacementGuardTests
     //   shared library the BFF registers, is not inventoried — none exists today (task-102 code review). Review
     //   catches those; widen the scan if one appears.
     // =============================================================================================
-    private const int TimerServiceBaseline = 10; // 14 → 13: TodoGenerationService (UAC-r2 task 152); 13 → 12: SpeDashboardSyncService (UAC-r2 task 165); 12 → 11: DemoExpirationService → DemoExpirationJob (#1363); 11 → 10: InboundPollingBackupService (#2749) — all migrated to IScheduledJob
+    private const int TimerServiceBaseline = 9; // 14 → 13: TodoGenerationService (UAC-r2 task 152); 13 → 12: SpeDashboardSyncService (UAC-r2 task 165); 12 → 11: DemoExpirationService → DemoExpirationJob (#1363); 11 → 10: InboundPollingBackupService (#2749); 10 → 9: RecordSyncJob (#3321) — all migrated to IScheduledJob
 
     private const int OtherServiceBaseline = 9;
 
     private static readonly IReadOnlyDictionary<string, string> ExistingTimerServices = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["ScheduledRagIndexingService"] = "PeriodicTimer RAG re-index loop. Migrates to IScheduledJob when next touched (ADR-052 §1, ADR-036).",
-        ["RecordSyncJob"] = "PeriodicTimer record-sync loop. Migrates to IScheduledJob when next touched (ADR-052 §1, ADR-036).",
         ["SessionFileRetentionJob"] = "PeriodicTimer (TimeProvider) session-file retention loop. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["SessionFilesCleanupJob"] = "PeriodicTimer session-files cleanup loop. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["MembershipReconcileSweepService"] = "Task.Delay sweep loop for communication membership. Migrates when next touched (ADR-052 §1, ADR-036).",
