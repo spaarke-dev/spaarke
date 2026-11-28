@@ -17,6 +17,10 @@ jest.mock('../../../utils/xrmContext', () => ({
 const GOOD = 'aaaaaaaa-1111-2222-3333-444444444444';
 const GONE = 'bbbbbbbb-1111-2222-3333-444444444444';
 const NO_EMAIL = 'cccccccc-1111-2222-3333-444444444444';
+const DENIED = 'dddddddd-1111-2222-3333-444444444444';
+const HTTP_404 = 'eeeeeeee-1111-2222-3333-444444444444';
+const TRANSIENT = 'ffffffff-1111-2222-3333-444444444444';
+const UNKNOWN = '99999999-1111-2222-3333-444444444444';
 
 function xrmWith(picks: Array<{ id: string; name: string; entityType: string }>, retrieveRecord: jest.Mock) {
   return {
@@ -25,11 +29,15 @@ function xrmWith(picks: Array<{ id: string; name: string; entityType: string }>,
   };
 }
 
-/** retrieveRecord stand-in: GOOD has an address, GONE is not found (as Dataverse reports a deleted user), NO_EMAIL has none. */
+/** retrieveRecord stand-in: GOOD has an address, GONE/DENIED/HTTP_404 are not found / access denied (as Dataverse reports them), TRANSIENT and UNKNOWN are other failures, NO_EMAIL has none. */
 const retrieve = jest.fn(async (_entityType: string, id: string) => {
   if (id === GOOD) return { emailaddress1: 'pat@example.com' };
   if (id === NO_EMAIL) return { emailaddress1: null };
-  throw new Error('The requested record was not found');
+  if (id === GONE) throw { errorCode: 0x80040217, message: 'Contact With Id = x Does Not Exist' };
+  if (id === DENIED) throw { errorCode: 0x80040220, message: 'SecLib::AccessCheckEx failed' };
+  if (id === HTTP_404) throw { status: 404, message: 'Not Found' };
+  if (id === TRANSIENT) throw { errorCode: 0x80072321, message: 'Too many requests. secret-internal-detail' };
+  throw new Error('network down: secret-internal-detail');
 });
 
 describe('onLookupRecipients - unresolvable picks are reported (task 238 b)', () => {
@@ -88,6 +96,32 @@ describe('onLookupRecipients - unresolvable picks are reported (task 238 b)', ()
 
     expect(result.map(r => r.email)).toEqual(['pat@example.com']);
     expect(result.skipped?.map(s => s.name)).toEqual(['Jane Smith', 'Sam Nomail']);
+  });
+
+  it('must fire: access denied and an HTTP 404 get the not-found / no-access wording', async () => {
+    const result = (await lookup([
+      { id: DENIED, name: 'Dee Nied', entityType: 'contact' },
+      { id: HTTP_404, name: 'Hal Four', entityType: 'contact' },
+    ])) as IRecipientLookupResult;
+
+    expect(result.skipped?.map(s => s.reason)).toEqual([
+      expect.stringMatching(/deleted.*access/i),
+      expect.stringMatching(/deleted.*access/i),
+    ]);
+  });
+
+  it('must not fire: a transient or unknown failure is not reported as deleted / no access, and shows no raw text', async () => {
+    const result = (await lookup([
+      { id: TRANSIENT, name: 'Tess Throttle', entityType: 'contact' },
+      { id: UNKNOWN, name: 'Una Known', entityType: 'systemuser' },
+    ])) as IRecipientLookupResult;
+
+    expect(result.skipped).toHaveLength(2);
+    for (const s of result.skipped!) {
+      expect(s.reason).toMatch(/right now.*try again/i);
+      expect(s.reason).not.toMatch(/deleted|access/i);
+      expect(s.reason).not.toMatch(/secret-internal-detail/);
+    }
   });
 
   it('a cancelled picker is still null', async () => {

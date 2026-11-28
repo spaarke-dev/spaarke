@@ -82,11 +82,41 @@ export type RetrieveRecipientRecord = (
   options: string
 ) => Promise<Record<string, unknown> | undefined>;
 
+// Dataverse error codes (and HTTP statuses) that mean "the record is not there / you may not read it".
+const DV_OBJECT_DOES_NOT_EXIST = 0x80040217;
+const DV_ACCESS_DENIED = 0x80040220;
+
+/** Reads a numeric Dataverse error code or HTTP status off an Xrm / PCF WebApi error, in either of its shapes. */
+function numericField(err: unknown, key: string): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const v = (err as Record<string, unknown>)[key];
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string' && /^(0x[0-9a-f]+|-?\d+)$/i.test(v.trim())) return Number(v.trim());
+  return undefined;
+}
+
+/**
+ * True when a failed `retrieveRecord` means the record is gone or not readable by this user (error code
+ * "does not exist" / "access denied", or HTTP 401/403/404); anything else (network, throttling, 5xx, unknown) is
+ * treated as possibly transient. The error's own text is never shown to the user.
+ */
+export function isRecordNotFoundOrDenied(err: unknown): boolean {
+  for (const key of ['errorCode', 'code']) {
+    const n = numericField(err, key);
+    if (n !== undefined && (n >>> 0 === DV_OBJECT_DOES_NOT_EXIST || n >>> 0 === DV_ACCESS_DENIED)) return true;
+  }
+  for (const key of ['status', 'statusCode', 'httpStatus']) {
+    const n = numericField(err, key);
+    if (n === 401 || n === 403 || n === 404) return true;
+  }
+  return false;
+}
+
 /**
  * Turn people-picker picks into recipient chips, and say WHY any pick could not become one (the composer shows
  * "Could not add {name}: {reason}" instead of dropping it silently). A pick is skipped when it is not a contact or a
- * user, when its record cannot be read (deleted, or no access - the Recent list can hold either), or when the record
- * has no email address. Picks that resolve are always returned. Shared by `createXrmEmailComposeHandlers` and the
+ * user, when its record cannot be read (deleted or no access - the Recent list can hold either - or a transient
+ * read failure, each with its own wording), or when the record has no email address. Picks that resolve are always returned. Shared by `createXrmEmailComposeHandlers` and the
  * CommunicationActions PCF, which used to carry its own copy of this loop.
  *
  * Returns `null` when there is nothing to report (no picks, or none resolved and none skipped); otherwise the
@@ -126,7 +156,9 @@ export async function resolveRecipientPicks(
       console.warn(`${logPrefix} recipient email resolve failed:`, err);
       skipped.push({
         name,
-        reason: 'the record could not be read. It may have been deleted, or you may not have access to it.',
+        reason: isRecordNotFoundOrDenied(err)
+          ? 'the record could not be read. It may have been deleted, or you may not have access to it.'
+          : 'the record could not be read right now. Try again.',
       });
     }
   }
