@@ -119,6 +119,22 @@ public sealed class IntakeEngineCompletionJobHandler : IJobHandler
                 return Done();
             }
 
+            // An earlier delivery of THIS failing completion wrote the fence (the run is held with its code for this dispatch) and then
+            // faulted before the request moved to Needs triage and the run was failed: finish it, or the run stays held for ever.
+            var pending = Decide(completion);
+            if (!recordedHere && pending.Disposition == Disposition.Fail && run.State.Awaiting is null
+                && run.State.Held?.Code == pending.Code && run.EngineExecutionId == key)
+            {
+                var fail = new IntakeExternalStop(IntakeExternalStopKind.Fail, IntakeEngineOperations.StageOf(dispatch.Operation), pending.Code!, pending.Message!);
+                if (await _store.FinishFencedFailAsync(dispatch.RunId, key, fail, ct).ConfigureAwait(false) == IntakeExternalWriteResult.Written)
+                {
+                    _logger.LogWarning(
+                        "Intake run {RunId}: {Operation} attempt {DispatchAttempt} failed ({Code}); an earlier delivery's fail was finished",
+                        dispatch.RunId, dispatch.Operation, dispatch.DispatchAttempt, pending.Code);
+                    return Done();
+                }
+            }
+
             return NoChange(recordedHere ? "already handled" : "the run is not awaiting this dispatch");
         }
 

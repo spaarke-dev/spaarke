@@ -515,6 +515,32 @@ public class IntakeRunStore
     }
 
     /// <summary>
+    /// Finishes a <see cref="IntakeExternalStopKind.Fail"/> whose fence was written but whose second half did not complete (a fault or
+    /// crash after the fence): the run is held with <paramref name="stop"/>'s code for the dispatch <paramref name="executionId"/>,
+    /// awaits nothing and is not claimed. The request moves to Needs triage (idempotent) and the terminal status is written last.
+    /// Anything else (a re-drive claimed it, another hold, another dispatch) is <see cref="IntakeExternalWriteResult.NotApplicable"/>.
+    /// </summary>
+    public virtual async Task<IntakeExternalWriteResult> FinishFencedFailAsync(Guid runId, string executionId, IntakeExternalStop stop, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executionId);
+        ArgumentNullException.ThrowIfNull(stop);
+        if (stop.Kind != IntakeExternalStopKind.Fail)
+        {
+            throw new ArgumentException("Only a fail is finished after its fence.", nameof(stop));
+        }
+
+        var run = await ReadRunAsync(runId, ct).ConfigureAwait(false);
+        if (run is null || run.RowVersion is null || IsTerminalStatus(run.Status) || run.State.Awaiting is not null || run.State.Claim is not null
+            || run.State.Held?.Code != stop.Code || run.EngineExecutionId != executionId)
+        {
+            return IntakeExternalWriteResult.NotApplicable;
+        }
+
+        await FailHeldRunAsync(run, stop, ct).ConfigureAwait(false);
+        return IntakeExternalWriteResult.Written;
+    }
+
+    /// <summary>
     /// The second half of a <see cref="IntakeExternalStopKind.Fail"/>, after the fence write held the run: the request moves to Needs
     /// triage, then the run's terminal status is written last. Skipped (the hold stands) when the held run was touched since.
     /// </summary>

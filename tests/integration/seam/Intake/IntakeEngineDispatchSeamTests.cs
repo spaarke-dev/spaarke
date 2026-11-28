@@ -651,6 +651,60 @@ public sealed class IntakeEngineDispatchSeamTests
     }
 
     [Fact]
+    public async Task Stop_AFailThatFaultedAfterItsFence_IsFinishedByTheRedelivery()
+    {
+        var bed = new EngineBed();
+        var runId = await bed.StartAsync();
+        var faulted = false;
+        bed.Run.Dataverse.RunWriteHook = (_, fields) =>
+        {
+            // The terminal write of the first delivery faults (a transient Dataverse error), after the fence held the run.
+            if (!faulted && fields.ContainsKey(IntakeRunStore.RunStatus))
+            {
+                faulted = true;
+                return new InvalidOperationException("dataverse is unavailable");
+            }
+
+            return null;
+        };
+
+        var first = () => bed.Completion.ProcessAsync(bed.CompletionJob(runId, Segment, 1, outcome: "input_invalid"), CancellationToken.None);
+        await first.Should().ThrowAsync<InvalidOperationException>();
+        bed.Run.Run(runId).State.Held!.Code.Should().Be(IntakeEngineCodes.InputInvalid, "the fence was written");
+
+        var redelivered = await bed.Completion.ProcessAsync(bed.CompletionJob(runId, Segment, 1, outcome: "input_invalid"), CancellationToken.None);
+
+        redelivered.Status.Should().Be(JobStatus.Completed);
+        bed.Run.RunStatus(runId).Should().Be((int)ProcessingJobStatus.Failed, "the redelivery finishes the fail instead of leaving the run held");
+        bed.Run.RequestStage().Should().Be(IntakeRequestStages.NeedsTriage);
+        bed.Run.Run(runId).State.Held.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Stop_AHeldRunWithTheSameCodeAfterAReDriveClaimedIt_IsNotFailedByALateDuplicate()
+    {
+        var bed = new EngineBed();
+        var runId = await bed.StartAsync();
+        bed.Run.Dataverse.RunWriteHook = (_, fields) =>
+            fields.ContainsKey(IntakeRunStore.RunStatus) ? new InvalidOperationException("dataverse is unavailable") : null;
+        var first = () => bed.Completion.ProcessAsync(bed.CompletionJob(runId, Segment, 1, outcome: "input_invalid"), CancellationToken.None);
+        await first.Should().ThrowAsync<InvalidOperationException>();
+        bed.Run.Dataverse.RunWriteHook = null;
+
+        // A re-drive claims the held run before the duplicate arrives.
+        var row = bed.Run.Dataverse.Get(IntakeRunStore.RunEntity, runId);
+        var state = IntakeRunState.Parse(row.GetAttributeValue<string>(IntakeRunStore.RunState));
+        state.Claim = new IntakeRunClaim("redrive", new DateTimeOffset(2026, 11, 28, 0, 0, 0, TimeSpan.Zero));
+        row[IntakeRunStore.RunState] = state.Serialize();
+        bed.Run.Dataverse.Seed(row);
+
+        var duplicate = await bed.Completion.ProcessAsync(bed.CompletionJob(runId, Segment, 1, outcome: "input_invalid"), CancellationToken.None);
+
+        duplicate.Status.Should().Be(JobStatus.Completed);
+        bed.Run.RunStatus(runId).Should().Be((int)ProcessingJobStatus.InProgress, "a claimed (re-driven) run is not failed by a late duplicate");
+    }
+
+    [Fact]
     public async Task Stop_ACompletionRecordedBetweenTheReadAndTheWrite_LeavesTheRequestStageUnchanged()
     {
         var bed = new EngineBed();
