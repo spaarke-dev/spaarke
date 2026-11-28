@@ -155,6 +155,17 @@ public static class DecisionActionCatalog
     /// <summary>The <see cref="DecisionActionDefinition.Composer"/> value for the shared EmailComposer (task 160, D-179).</summary>
     public const string EmailComposer = "email";
 
+    /// <summary>spaarke-intake-pipeline-r1 task 017: the intake approval actions. A plan that offers either is an intake approval plan
+    /// (<see cref="IsIntakeApprovalPlan"/>), which the commit route never lets be dismissed or resolved alongside other items.</summary>
+    public const string ApproveIntakeCode = "approve-intake";
+
+    /// <inheritdoc cref="ApproveIntakeCode"/>
+    public const string RejectIntakeCode = "reject-intake";
+
+    /// <summary>True when <paramref name="actionCodes"/> names an intake approval action (task 017).</summary>
+    public static bool IsIntakeApprovalPlan(IEnumerable<string> actionCodes) =>
+        actionCodes.Any(code => code is ApproveIntakeCode or RejectIntakeCode);
+
     private const string ApproveVarianceEffect = "The Decision Record is the approval; nothing else is written";
 
     private static readonly DecisionActionParameter[] MessageParameters =
@@ -249,6 +260,31 @@ public static class DecisionActionCatalog
             Excludes: ["revise-budget"],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        // spaarke-intake-pipeline-r1 task 017 (owner decision 2026-11-28, ontology-r1 condition (a)4): the intake approval Work Item's two
+        // actions, about the request (sprk_servicerequest). Exactly one is taken (mutual Excludes). Approve releases the AI output to the
+        // requester through the door's return, which cannot be called back (Tier4, external). WorkType is null on purpose: the Console's
+        // Decide lane has no card for an approval yet (task 019 adds the work type, its labels and the parity corpus); until then the
+        // item shows under "Other".
+        new(ApproveIntakeCode, "Approve", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [new("note", "Approval note", DecisionParameterKind.TextArea, Required: false)],
+            [
+                "Records the approved version of each output document",
+                "Continues the request: the output is returned to the requester",
+            ],
+            Excludes: [RejectIntakeCode],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
+
+        new(RejectIntakeCode, "Reject", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [new("reason", "Reason for rejecting", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            [
+                "Ends this run without returning its output",
+                "Moves the request back to In review",
+            ],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, RecordOfTruthImpact: true) },
 
         // D-178 (task 159): the no-budget decision creates a Task (a sprk_event of type Task), not a Work Assignment. A Decide-lane plan
         // action only: Add To Do and Assign Work are what the plan offers as its Next steps.

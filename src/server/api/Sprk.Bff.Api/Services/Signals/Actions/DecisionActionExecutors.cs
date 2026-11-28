@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Intake;
 
 namespace Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -143,6 +144,10 @@ public static class DecisionActionReasons
 
     /// <summary>The revision was written by the writer but the signed-in user could not write the budget amount (D-55).</summary>
     public const string BudgetAmountNotWritten = "decision.action.budget_amount_not_written";
+
+    /// <summary>spaarke-intake-pipeline-r1 task 017 (ADR-032): the action's kill switch is off (the intake run's harness switch). The commit
+    /// route answers 503 and writes nothing.</summary>
+    public const string Disabled = "decision.action.disabled";
 }
 
 /// <summary>One decision action's executor. Its <see cref="Code"/> is a catalog code.</summary>
@@ -760,6 +765,80 @@ public sealed class ApproveVarianceExecutor : IDecisionActionExecutor
 
     public Task<DecisionActionOutcome> ExecuteAsync(DecisionActionRequest request, CancellationToken ct) =>
         Task.FromResult(DecisionActionOutcome.Done(Code));
+}
+
+/// <summary>
+/// spaarke-intake-pipeline-r1 task 017: <c>approve-intake</c> and <c>reject-intake</c>, thin adapters over
+/// <see cref="IntakeApprovalService"/> (which owns the checks and the transitions). The preflight runs the service's whole chain
+/// (record, team, the caller's own contact and claim, the harness switch, the state) and writes nothing; the execute runs it again
+/// (a claim or a membership can change in between) and then transitions. The subject must be the intake request
+/// (<c>sprk_servicerequest</c>).
+/// </summary>
+/// <remarks>Mapping: a failed record check or team, contact or claim check is <see cref="DecisionActionReasons.NotAuthorized"/>
+/// (the commit route has already proven the caller reads the Signal and its core); the switch off is
+/// <see cref="DecisionActionReasons.Disabled"/>; any state refusal (not waiting, decided the other way, not claimed, a race) is
+/// <see cref="DecisionActionReasons.InvalidState"/>.</remarks>
+public abstract class IntakeApprovalExecutorBase : DecisionExecutorBase
+{
+    private readonly IntakeApprovalService _approvals;
+
+    protected IntakeApprovalExecutorBase(IntakeApprovalService approvals) =>
+        _approvals = approvals ?? throw new ArgumentNullException(nameof(approvals));
+
+    protected abstract IntakeApprovalAction Action { get; }
+
+    protected abstract Task<IntakeApprovalResult> TransitionAsync(IntakeApprovalService approvals, HttpContext http, Guid requestId, CancellationToken ct);
+
+    public override async Task<DecisionActionOutcome?> PreflightAsync(DecisionActionRequest request, CancellationToken ct)
+    {
+        if (request.Subject is not { Entity: IntakeRunStore.RequestEntity } subject || subject.Id == Guid.Empty)
+        {
+            return Refuse(DecisionActionReasons.SubjectUnsupported, "This action applies to an intake request only.");
+        }
+
+        var check = await _approvals.CheckAsync(request.Http, subject.Id, Action, ct).ConfigureAwait(false);
+        return check.IsDone ? null : Map(check);
+    }
+
+    protected override async Task<DecisionActionOutcome> WriteAsync(DecisionActionRequest request, CancellationToken ct)
+    {
+        var subject = request.Subject!;
+        var result = await TransitionAsync(_approvals, request.Http, subject.Id, ct).ConfigureAwait(false);
+        return result.IsDone ? DecisionActionOutcome.Done(Code, subject) : Map(result);
+    }
+
+    private DecisionActionOutcome Map(IntakeApprovalResult result) => result.Outcome switch
+    {
+        IntakeApprovalOutcome.NotFound or IntakeApprovalOutcome.Forbidden =>
+            Refuse(DecisionActionReasons.NotAuthorized, "You cannot decide this request."),
+        IntakeApprovalOutcome.Disabled => Refuse(DecisionActionReasons.Disabled, result.Detail ?? "Approval is switched off right now."),
+        IntakeApprovalOutcome.Unavailable =>
+            DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed, result.Detail ?? "The decision could not be recorded; nothing was changed."),
+        _ => Refuse(DecisionActionReasons.InvalidState, result.Detail ?? "The request is not waiting for approval."),
+    };
+}
+
+/// <summary><c>approve-intake</c>: records the output versions, moves the run to Approved and continues it (the door's Return).</summary>
+public sealed class ApproveIntakeExecutor(IntakeApprovalService approvals) : IntakeApprovalExecutorBase(approvals)
+{
+    public override string Code => DecisionActionCatalog.ApproveIntakeCode;
+
+    protected override IntakeApprovalAction Action => IntakeApprovalAction.Approve;
+
+    protected override Task<IntakeApprovalResult> TransitionAsync(IntakeApprovalService approvals, HttpContext http, Guid requestId, CancellationToken ct) =>
+        approvals.ApproveAsync(http, requestId, ct);
+}
+
+/// <summary><c>reject-intake</c>: ends the run (Cancelled, never Failed) and moves the request back to In review. The reason is the
+/// Decision Record's; this executor never reads or logs it.</summary>
+public sealed class RejectIntakeExecutor(IntakeApprovalService approvals) : IntakeApprovalExecutorBase(approvals)
+{
+    public override string Code => DecisionActionCatalog.RejectIntakeCode;
+
+    protected override IntakeApprovalAction Action => IntakeApprovalAction.Reject;
+
+    protected override Task<IntakeApprovalResult> TransitionAsync(IntakeApprovalService approvals, HttpContext http, Guid requestId, CancellationToken ct) =>
+        approvals.RejectAsync(http, requestId, ct);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

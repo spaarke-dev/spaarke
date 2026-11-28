@@ -260,7 +260,7 @@ public class DecisionActionCatalogTests
     public void CatalogCodesAreUnique_AndExactlyTheStatedSet()
     {
         DecisionActionCatalog.All.Select(a => a.Code).Should().BeEquivalentTo(
-            "send-budget-inquiry", "revise-budget", "create-budget", "approve-variance", "assign-task",
+            "send-budget-inquiry", "revise-budget", "create-budget", "approve-variance", "approve-intake", "reject-intake", "assign-task",
             "mark-complete", "reschedule", "reassign", "send-reminder", "extend-response-date", "record-the-response",
             "add-todo", "create-event", "send-email", "assign-work");
     }

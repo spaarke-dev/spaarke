@@ -952,8 +952,16 @@ public class DecisionActionExecutorsTests
             new AssignWorkExecutor(probe, cores, entities),
             new AssignTaskExecutor(probe, cores, entities),
             new BudgetInquiryActionExecutor(Inquiry()),
+            // spaarke-intake-pipeline-r1 task 017: the two intake approval actions. Their service is never run here (registry
+            // tests only); their behaviour is pinned in tests/integration/data-mutation/Intake and tests/integration/auth/Intake.
+            new ApproveIntakeExecutor(UnrunIntakeApprovals()),
+            new RejectIntakeExecutor(UnrunIntakeApprovals()),
         ];
     }
+
+    private static Sprk.Bff.Api.Services.Intake.IntakeApprovalService UnrunIntakeApprovals() =>
+        (Sprk.Bff.Api.Services.Intake.IntakeApprovalService)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(
+            typeof(Sprk.Bff.Api.Services.Intake.IntakeApprovalService));
 
     /// <summary>070's executor, built only so the adapter can be constructed; these tests never run it.</summary>
     private static BudgetInquiryExecutor Inquiry() =>

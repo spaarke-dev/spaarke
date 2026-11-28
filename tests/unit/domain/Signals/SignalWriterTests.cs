@@ -340,12 +340,30 @@ public partial class SignalWriterTests
         var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
         var writerOrg = new FakeOrganizationService();
         var writer = Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun));
-        var request = MatterSubjectRequest() with { SubjectEntityLogicalName = "sprk_servicerequest", SubjectId = Guid.NewGuid() };
+        // Task 017 made sprk_servicerequest a verified subject; a document subject is still unverified.
+        var request = MatterSubjectRequest() with { SubjectEntityLogicalName = "sprk_document", SubjectId = Guid.NewGuid() };
 
         var act = async () => await writer.WriteAsync(request);
 
-        (await act.Should().ThrowAsync<SignalWriterEscalationException>()).WithMessage("*sprk_servicerequest*");
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>()).WithMessage("*sprk_document*");
         writerOrg.Rows.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WriteAsync_ServiceRequestSubject_IsItsOwnCoreRecord_Task017()
+    {
+        // spaarke-intake-pipeline-r1 task 017: the intake approval Signal is about the service request, which is its own core record.
+        var sysadmin = new FakeSysadminClient().WithBusinessUnit("sprk_servicerequest", ServiceRequestId, ServiceRequestBusinessUnitId);
+        var writerOrg = new FakeOrganizationService();
+        var request = MatterSubjectRequest() with { SubjectEntityLogicalName = "sprk_servicerequest", SubjectId = ServiceRequestId };
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(request);
+        var row = writerOrg.Rows[result.SignalId];
+
+        row.GetAttributeValue<EntityReference>("sprk_regardingservicerequest").Id.Should().Be(ServiceRequestId);
+        row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(sysadmin.CatalogId("sprk_servicerequest"));
+        row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(ServiceRequestId));
+        row.Attributes.Keys.Should().NotContain("sprk_matter");
     }
 
     [Fact]
@@ -1865,12 +1883,13 @@ public partial class SignalWriterTests
     }
 
     [Fact]
-    public async Task WriteAsync_ServiceRequestSubject_IsStillRefused()
+    public async Task WriteAsync_DocumentSubject_IsStillRefused()
     {
+        // Task 017 verified sprk_servicerequest (WriteAsync_ServiceRequestSubject_IsItsOwnCoreRecord_Task017); a document is not.
         var writerOrg = new FakeOrganizationService();
 
         var act = async () => await Build(writerOrg, new FakeSysadminClient(), new FakeTimeProvider(FirstRun))
-            .WriteAsync(DoRequest("sprk_servicerequest", ServiceRequestId));
+            .WriteAsync(DoRequest("sprk_document", Guid.NewGuid()));
 
         (await act.Should().ThrowAsync<SignalWriterEscalationException>()).Which.Reason
             .Should().Be(OntologyWriterFailureReason.MatterDerivationUnverified);

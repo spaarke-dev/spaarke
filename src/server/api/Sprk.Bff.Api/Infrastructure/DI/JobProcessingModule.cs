@@ -67,6 +67,9 @@ public static class JobProcessingModule
         services.AddScoped<Sprk.Bff.Api.Services.Intake.IntakeRunStore>();
         services.AddScoped<Sprk.Bff.Api.Services.Intake.IntakeContentTextReader>();
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Intake.IntakeRunJobHandler>();
+        // Task 017: the approval's claim / approve / reject transitions and their one authorization chain (the claim route and the
+        // approve-intake / reject-intake executors). Scoped: it uses the caller's request and the scoped ContactUserRepresentation.
+        services.AddScoped<Sprk.Bff.Api.Services.Intake.IntakeApprovalService>();
 
         // Intake engine plumbing (task 014, FR-07/FR-09; ADR-004 A2 claim check, ADR-052 placement: queue → ADR-004 consumer,
         // schedule → a scheduled message handled by an IJobHandler). All unconditional and inert without an engine: the staging

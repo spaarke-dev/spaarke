@@ -44,7 +44,7 @@ public partial class SignalWriterTests
         ["rendered sentence 2001 chars"] = new(
             r => r with { MessageTemplate = "{{longFact}}", FactValues = new Dictionary<string, object?> { ["longFact"] = new string('x', 2001) } },
             SignalWriteRefusal.SentenceTooLong, typeof(ArgumentException)),
-        ["subject table not verified"] = new(r => r with { SubjectEntityLogicalName = "sprk_servicerequest" }, SignalWriteRefusal.SubjectNotVerified, typeof(SignalWriterEscalationException)),
+        ["subject table not verified"] = new(r => r with { SubjectEntityLogicalName = "sprk_document" }, SignalWriteRefusal.SubjectNotVerified, typeof(SignalWriterEscalationException)),
     };
 
     public static TheoryData<string> PreflightCaseNames() => new(PreflightCases.Keys);

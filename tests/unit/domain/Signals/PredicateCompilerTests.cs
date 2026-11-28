@@ -733,11 +733,21 @@ public class PredicateCompilerTests
     }
 
     [Fact]
-    public void Compile_ServiceRequestSubject_IsStillRefused()
+    public void Compile_ServiceRequestSubject_IsAccepted_Task017()
     {
-        var act = () => Compiler().Compile(SubjectOnly("sprk_servicerequest", """{"statecode":0}"""));
+        // spaarke-intake-pipeline-r1 task 017: the intake approval rule's subject, added after the live read-depth check.
+        var compiled = Compiler().Compile(SubjectOnly("sprk_servicerequest", """{"sprk_intakestage":100000003}"""));
 
-        act.Should().Throw<PredicateCompilationException>().WithMessage("*'sprk_servicerequest' is not in the verified Global-read allow-list*");
+        compiled.SubjectEntity.Should().Be("sprk_servicerequest");
+        compiled.SubjectIdAttribute.Should().Be("sprk_servicerequestid");
+    }
+
+    [Fact]
+    public void Compile_ADocumentSubject_IsStillRefused()
+    {
+        var act = () => Compiler().Compile(SubjectOnly("sprk_document", """{"statecode":0}"""));
+
+        act.Should().Throw<PredicateCompilationException>().WithMessage("*'sprk_document' is not in the verified Global-read allow-list*");
     }
 
     [Fact]

@@ -87,6 +87,7 @@ public sealed class RuleBodyDescriber
         ["sprk_budget"] = "budget",
         ["sprk_invoice"] = "invoice",
         ["sprk_memo"] = "memo",
+        ["sprk_servicerequest"] = "service request",
     };
 
     /// <summary>
@@ -127,6 +128,8 @@ public sealed class RuleBodyDescriber
             [("sprk_workassignment", "statecode")] = "Status",
             [("sprk_workassignment", "sprk_responseduedate")] = "Response Due Date",
             [("sprk_workassignment", "sprk_respondedon")] = "Responded On",
+            // spaarke-intake-pipeline-r1 task 017: a service request's Date Only column, authorable once the table is a verified subject.
+            [("sprk_servicerequest", "sprk_responseduedate")] = "Response Due Date",
             [("sprk_matter", "createdon")] = "Created On",
             [("sprk_matter", "statecode")] = "Status",
             [("sprk_matter", "sprk_matterid")] = "Matter",

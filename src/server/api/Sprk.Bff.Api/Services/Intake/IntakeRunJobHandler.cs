@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Intake.Harnesses;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals;
 
 namespace Sprk.Bff.Api.Services.Intake;
 
@@ -70,6 +71,7 @@ public sealed class IntakeRunJobHandler : IJobHandler
     private readonly IntakeContentTextReader _text;
     private readonly IEnumerable<IIntakeDoorReturn> _doors;
     private readonly IOptionsMonitor<IntakePipelineOptions> _options;
+    private readonly SignalEvaluationTrigger _signals;
     private readonly TimeProvider _time;
     private readonly ILogger<IntakeRunJobHandler> _logger;
 
@@ -80,6 +82,7 @@ public sealed class IntakeRunJobHandler : IJobHandler
         IntakeContentTextReader text,
         IEnumerable<IIntakeDoorReturn> doors,
         IOptionsMonitor<IntakePipelineOptions> options,
+        SignalEvaluationTrigger signals,
         TimeProvider time,
         ILogger<IntakeRunJobHandler> logger)
     {
@@ -89,6 +92,7 @@ public sealed class IntakeRunJobHandler : IJobHandler
         _text = text ?? throw new ArgumentNullException(nameof(text));
         _doors = doors ?? throw new ArgumentNullException(nameof(doors));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _signals = signals ?? throw new ArgumentNullException(nameof(signals));
         _time = time ?? throw new ArgumentNullException(nameof(time));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -525,9 +529,12 @@ public sealed class IntakeRunJobHandler : IJobHandler
 
     /// <summary>
     /// The approval slot (stage 8): the request moves to Awaiting approval and the run waits (status In Progress, stage
-    /// Approve). [Task 017 slot: the team's approval Work Item under the <c>approve</c> marker key; the decision endpoint
-    /// sets <see cref="IntakeRunState.ApprovedOn"/> and enqueues <see cref="CreateJob"/>, which continues at Return.] A
-    /// redelivery while waiting changes nothing.
+    /// Approve). Task 017: the run then enqueues an <see cref="SignalTriggerKind.IntakeAwaitingApproval"/> Signal trigger about the
+    /// request, so the intake approval policy raises the team's ONE Decide-lane Signal through the ontology's evaluate-plan-write
+    /// (no Signal is written here). The decision (<c>approve-intake</c> / <c>reject-intake</c>, IntakeApprovalService) sets
+    /// <see cref="IntakeRunState.ApprovedOn"/> and enqueues <see cref="CreateJob"/>, which continues at Return, or ends the run.
+    /// A redelivery while waiting writes nothing new; its repeated trigger is harmless (the evaluation writes only what changed).
+    /// The trigger never throws: a failed enqueue is logged and the nightly pass raises the Signal within a day.
     /// </summary>
     private async Task<JobOutcome> AwaitApprovalAsync(Delivery d, IntakeRunState state, CancellationToken ct)
     {
@@ -537,6 +544,7 @@ public sealed class IntakeRunJobHandler : IJobHandler
         }
 
         await _store.WriteRequestStageAsync(d.RequestId, d.RunId, IntakeRequestStages.AwaitingApproval, makeCurrentRun: false, ct).ConfigureAwait(false);
+        await _signals.EnqueueAsync(SignalTriggerKind.IntakeAwaitingApproval, IntakeRunStore.RequestEntity, d.RequestId, d.RunId, d.Job.CorrelationId, ct).ConfigureAwait(false);
         await WriteAsync(d, IntakeRunStage.Approve, null, ct, release: true).ConfigureAwait(false);
         _logger.LogInformation("Intake run {RunId}: awaiting approval", d.RunId);
         return Done(d);

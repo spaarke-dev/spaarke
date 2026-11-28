@@ -235,6 +235,10 @@ public static class DecisionCommitReasons
     public const string DismissalReasonUnknown = "ontology.decision.dismissal_reason_unknown";
     public const string DismissalDetailRequired = "ontology.decision.dismissal_detail_required";
     public const string DismissalWithActions = "ontology.decision.dismissal_with_actions";
+
+    /// <summary>spaarke-intake-pipeline-r1 task 017 (ontology-r1 condition (c)): an intake approval item is approved or rejected, never
+    /// dismissed. Refused before any write, so it is never a dismissal and never counts toward suppression (D-11).</summary>
+    public const string DismissalNotAllowed = "ontology.decision.dismissal_not_allowed";
     public const string AlsoResolveNotAllowed = "ontology.decision.also_resolve_not_allowed";
 
     /// <summary>Task 142 fix round 2 (K3): the secure families of the review's items could not be read (a fault or a short answer).
@@ -1403,7 +1407,13 @@ public sealed class DecisionCommitService
             {
                 return new DecisionCommitResult
                 {
-                    Status = refused.ReasonCode == DecisionActionReasons.NotAuthorized ? DecisionCommitStatus.Forbidden : DecisionCommitStatus.Refused,
+                    // Task 017 (ADR-032): an action switched off by its kill switch is 503, nothing written; no existing action returns it.
+                    Status = refused.ReasonCode switch
+                    {
+                        DecisionActionReasons.NotAuthorized => DecisionCommitStatus.Forbidden,
+                        DecisionActionReasons.Disabled => DecisionCommitStatus.Unavailable,
+                        _ => DecisionCommitStatus.Refused,
+                    },
                     ReviewId = reviewId,
                     ActionCode = step.Def.Code,
                     ReasonCode = refused.ReasonCode,
@@ -1690,6 +1700,48 @@ public sealed class DecisionCommitService
         return null;
     }
 
+    /// <summary>
+    /// Task 017 (ontology-r1 condition (c)): the refusal when an Also resolve item is an intake approval, else null. Only an item about a
+    /// service request can be one (the intake approval policy's subject), so only those have their plan read: every other Also resolve item
+    /// is decided exactly as before, with no extra read. A plan that cannot be read or resolved is not taken to be "not intake" (fail closed).
+    /// </summary>
+    private async Task<DecisionCommitResult?> IntakeApprovalAmongAsync(IEnumerable<SignalRow> others, CancellationToken ct)
+    {
+        foreach (var other in others.Where(o => string.Equals(o.SubjectEntity, IntakeApprovalSubject, StringComparison.OrdinalIgnoreCase)))
+        {
+            DecisionPlanResolution otherPlan;
+            try
+            {
+                otherPlan = other.PolicyVersionId is { } otherVersion
+                    ? await _plans.GetAsync(otherVersion, DecisionLane.Decide, ct).ConfigureAwait(false)
+                    : new DecisionPlanResolution(null, DecisionCommitReasons.PlanRefused);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Decision commit: an Also resolve item's plan could not be read ({ExceptionType}); refusing.", ex.GetType().Name);
+                return new DecisionCommitResult
+                {
+                    Status = DecisionCommitStatus.Unavailable,
+                    ReasonCode = DecisionCommitReasons.SignalUnreadable,
+                    Detail = "An item in Also resolve could not be checked right now; nothing was done. Try again shortly.",
+                };
+            }
+
+            if (otherPlan.Plan is not { } p || DecisionActionCatalog.IsIntakeApprovalPlan(p.Actions.Select(a => a.Code)))
+                return new DecisionCommitResult
+                {
+                    Status = DecisionCommitStatus.Refused,
+                    ReasonCode = DecisionCommitReasons.AlsoResolveNotAllowed,
+                    Detail = "An intake approval is decided on its own; remove it from Also resolve.",
+                };
+        }
+
+        return null;
+    }
+
+    /// <summary>The intake approval policy's subject table (task 017).</summary>
+    private const string IntakeApprovalSubject = "sprk_servicerequest";
+
     private async Task<(DecisionCommitResult? Refusal, Prepared? Ready)> PrepareAsync(
         DecisionReview review, IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, SignalAccessDecision> access,
         DateTimeOffset reviewStart, DateTimeOffset? clearedSince, Guid? linkedRecord, bool createBudgetLanded, bool resumed, CancellationToken ct)
@@ -1729,6 +1781,14 @@ public sealed class DecisionCommitService
         var resolution = await _plans.GetAsync(versionId, lane, ct).ConfigureAwait(false);
         if (resolution.Plan is not { } plan)
             return No(DecisionCommitReasons.PlanRefused, "This item's decision plan does not resolve against the action catalog.");
+
+        // spaarke-intake-pipeline-r1 task 017 (ontology-r1 condition (c)): an intake approval item (its plan offers approve-intake or
+        // reject-intake) is decided on its own: it resolves no other item, and no other decision resolves it. Both before any write.
+        var intakeApproval = DecisionActionCatalog.IsIntakeApprovalPlan(plan.Actions.Select(a => a.Code));
+        if (rows.Count > 1 && intakeApproval)
+            return No(DecisionCommitReasons.AlsoResolveNotAllowed, "An intake approval is decided on its own; it cannot resolve other items.");
+        if (rows.Count > 1 && await IntakeApprovalAmongAsync(rows.Skip(1), ct).ConfigureAwait(false) is { } intakeRefusal)
+            return (intakeRefusal, null);
 
         var given = review.Actions ?? [];
 
@@ -1862,6 +1922,10 @@ public sealed class DecisionCommitService
         Resolution outcome;
         if (taken.Count == 0 && next.Count == 0)
         {
+            // Task 017 (ontology-r1 condition (c)): an intake approval is approved or rejected, never dismissed (and so never counted
+            // toward suppression, D-11).
+            if (intakeApproval)
+                return No(DecisionCommitReasons.DismissalNotAllowed, "An intake approval cannot be dismissed; approve or reject it.");
             if (review.Dismissal is not { Code: { Length: > 0 } code } dismissal)
                 return No(DecisionCommitReasons.DismissalReasonRequired, "Taking nothing is a dismissal, and a dismissal needs a reason.");
             var reason = DecisionActionCatalog.DismissalReasons(lane).FirstOrDefault(r => r.Code == code);

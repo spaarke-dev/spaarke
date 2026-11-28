@@ -343,6 +343,14 @@ public partial class RouteAuthorizationGuardTests
             + "caller and must be Incoming and filed against the inquiry named. GET /api/v1/inquiries/for-todo/{todoId} (task 154) "
             + "carries RecordRouteAccessAuthorizationFilter(\"read\", sprk_todos, todoId) and reads the To Do, the inquiry and its "
             + "replies AS THE CALLER: a refused read is the uniform 404, a fault 503."),
+        new GovernedFile("Api/Intake/IntakeApprovalEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/intake/requests/{requestId}/claim (spaarke-intake-pipeline-r1 task 017, FR-11) -- a member of the request's "
+            + "owning team claims an intake request waiting for approval. RequireAuthorization on the group, then "
+            + "IntakeApprovalAuthorizationFilter runs IntakeApprovalService.AuthorizeAsync AS THE CALLER before the handler: Read AND Write "
+            + "on the request through the probe's gate question (any failure, fault or unknown id: the uniform 404), then owning-team "
+            + "membership and the caller's own single linked contact (403). The handler runs the same chain again before its one write, "
+            + "which is conditional on the row version (never a create). Approve and reject are not here: they are decision plan actions "
+            + "on the commit route, whose executors run the same chain plus the claimer check."),
         new GovernedFile("Api/FieldMappings/FieldMappingEndpoints.cs", Scope.RouteLevelGate,
             "field-mapping configuration reads, type validation, and the push route: Read on the source as the caller, children "
             + "read and written impersonated (task 166; sweep S-67)."),
@@ -1302,7 +1310,9 @@ public partial class RouteAuthorizationGuardTests
     // (task 020, 2026-11-12, FR-01) -- POST /mcp/legal-operations, the stateless MCP endpoint, counted once the census vocabulary learned
     // MapMcp (the SDK's MCP registration form). Classified by GovernedFiles (RouteLevelGate). Task 021 (2026-11-12, ADR-028 A10) removed its
     // interim Pending waiver; the route is declared by the MCP credit (McpRoutes + McpTools, RouteAuthorizationGuardTests.Mcp.cs).
-    private const int ExpectedEndpointFileCount = 157;
+    // 157 -> 158 (2026-11-28, spaarke-intake-pipeline-r1 task 017, FR-11). Net +1: Api/Intake/IntakeApprovalEndpoints.cs ADDED --
+    // POST /api/v1/intake/requests/{requestId:guid}/claim. Classified by GovernedFiles (RouteLevelGate) and a HandlerDecision below.
+    private const int ExpectedEndpointFileCount = 158;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1392,6 +1402,12 @@ public partial class RouteAuthorizationGuardTests
         new CreditedForm("AddRecordRouteAccessAuthorizationFilter", "Api/Filters/RecordRouteAccessAuthorizationFilter.cs",
             "RetrievePrincipalAccess on the route record over OBO via CallerRecordAccessProbe "
             + "(RecordRouteAccessAuthorizationFilter.cs:110), 403 on deny (:155); the probe throwing is a denial (task 076)."),
+        new CreditedForm("AddEndpointFilter<IntakeApprovalAuthorizationFilter>", "Services/Intake/IntakeApprovalService.cs",
+            "spaarke-intake-pipeline-r1 task 017: the filter (IntakeApprovalEndpoints.cs:115) runs IntakeApprovalService.AuthorizeAsync, whose "
+            + "first I/O is RetrievePrincipalAccess on the route request over OBO via CallerRecordAccessProbe."
+            + "GetCallerRightsForAuthorizationGateAsync (IntakeApprovalService.cs:181), requiring Read AND Write (:182); no right, a fault, an "
+            + "unknown id or a row that is not an intake request is the uniform 404 (:184, :192, :198); then owning-team membership and the "
+            + "caller's own single linked contact, 403 otherwise (:212). The FilterFile is the service that decides; the filter is its adapter."),
         new CreditedForm("AddEntityAccessFilter", "Api/Filters/EntityAccessFilter.cs",
             "OBO RetrievePrincipalAccess (AppendTo) on SaveRequest.TargetEntity via CallerRecordAccessProbe.GetCallerRightsAsync "
             + "(EntityAccessFilter.cs:276), 403 on deny (:291). Its pass-through on a null target is in the task-167 note."),

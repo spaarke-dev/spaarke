@@ -1150,7 +1150,7 @@ internal sealed class EngineBed
         var registry = new IntakeHarnessRegistry([_harness], routing.Object, NullLogger<IntakeHarnessRegistry>.Instance);
 
         return new IntakeRunJobHandler(
-            Run.Store, registry, Run.AgreementAi.Object, Run.TextReader.Object, [Run.Door], Run.Options, Run.Time,
+            Run.Store, registry, Run.AgreementAi.Object, Run.TextReader.Object, [Run.Door], Run.Options, Run.Signals.Object, Run.Time,
             Run.Logs.CreateLogger<IntakeRunJobHandler>());
     }
 

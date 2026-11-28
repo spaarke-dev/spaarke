@@ -117,6 +117,9 @@ public static class SignalsModule
         // Task 159 (D-178): Assign Task, the no-budget decision's action (a sprk_event of type Task) through the same child-records create.
         services.AddScoped<IDecisionActionExecutor, AssignTaskExecutor>();
         services.AddScoped<IDecisionActionExecutor, BudgetInquiryActionExecutor>();
+        // spaarke-intake-pipeline-r1 task 017: the intake approval's two actions, adapters over IntakeApprovalService (JobProcessingModule).
+        services.AddScoped<IDecisionActionExecutor, ApproveIntakeExecutor>();
+        services.AddScoped<IDecisionActionExecutor, RejectIntakeExecutor>();
         services.AddScoped<DecisionActionExecutors>();
         // Task 043: the decision commit route's service and its after-record step (032 trigger, 034 suppression).
         services.AddScoped<DecisionCommitFollowUps>();

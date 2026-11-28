@@ -22,6 +22,11 @@ public enum SignalTriggerKind
     /// subject is that To Do; its open Do-lane Signal no longer holds. The one kind that evaluates the Do lane
     /// (<see cref="SignalEvaluationTrigger.IncludesDoLane"/>).</summary>
     InquiryDisposition,
+
+    /// <summary>spaarke-intake-pipeline-r1 task 017 (ontology-r1 condition (a)3): an intake run reached its Approve stage and moved its
+    /// request (<c>sprk_servicerequest</c>, the subject) to Awaiting approval. The intake approval policy may now hold; the source is the
+    /// run (<c>sprk_processingjob</c>). Decide lane only (<see cref="SignalEvaluationTrigger.IncludesDoLane"/> is false).</summary>
+    IntakeAwaitingApproval,
 }
 
 /// <summary>Stable <see cref="EventId"/>s for the event triggers (task 032). Kept beside the trigger, not in
@@ -143,6 +148,7 @@ public class SignalEvaluationTrigger
         SignalTriggerKind.BudgetRevision => "budget-revision",
         SignalTriggerKind.AssociationConfirmed => "association-confirmed",
         SignalTriggerKind.InquiryDisposition => "inquiry-disposition",
+        SignalTriggerKind.IntakeAwaitingApproval => "intake-awaiting-approval",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown trigger kind."),
     };
 

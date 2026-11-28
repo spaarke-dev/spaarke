@@ -466,6 +466,8 @@ public static partial class DecisionResultMapper
             "This dismissal reason needs a short explanation. Add the detail, then send again.",
         [DecisionCommitReasons.DismissalWithActions] =
             "A dismissal cannot be sent with taken actions or Next steps. Send either a dismissal or the actions.",
+        [DecisionCommitReasons.DismissalNotAllowed] =
+            "This item cannot be dismissed. Take one of the actions the item's decision plan offers.",
         [DecisionCommitReasons.AlsoResolveNotAllowed] =
             "An item in Also resolve cannot be decided together with this one. Remove it from Also resolve and decide it separately.",
         [DecisionCommitReasons.SecureFamilyUnavailable] =
@@ -531,6 +533,8 @@ public static partial class DecisionResultMapper
             "Your Spaarke user could not be identified for this action. Sign in again with your Spaarke work account, then retry.",
         [DecisionActionReasons.OwnerUnresolved] =
             "The person chosen for this action could not be resolved. Choose another person.",
+        [DecisionActionReasons.Disabled] =
+            "This action is switched off right now; nothing was done. Try again later.",
         [DecisionActionReasons.BudgetAmountNotWritten] =
             "The budget revision was written but its amount was not. Check the budget in Spaarke before trying again.",
     };

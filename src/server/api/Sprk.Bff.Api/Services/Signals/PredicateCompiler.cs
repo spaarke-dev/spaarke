@@ -191,8 +191,11 @@ public sealed partial class PredicateCompiler
     /// and the evaluator (task 030) is responsible for verifying the principal's live read depth at run time.
     /// <para><b><c>sprk_workassignment</c></b> was added by task 024 (D-16, a Do-lane subject) after the writer's read
     /// depth was confirmed live on 2026-10-07 with the §9.2 method: Global on the user side, rows identical as admin
-    /// and as the writer (<c>notes/024-progress.md</c>). <c>sprk_servicerequest</c> stays out (not a D-16 subject).
-    /// Being listed makes a table a valid SUBJECT; as a clause entity it still needs a <see cref="VerifiedJoins"/>
+    /// and as the writer (<c>notes/024-progress.md</c>). <b><c>sprk_servicerequest</c></b> was added by
+    /// spaarke-intake-pipeline-r1 task 017 (the intake approval rule's subject) after the same §9.2 check on 2026-11-28: Global
+    /// on the user side, and the writer's own access answered Read on every row the admin read
+    /// (<c>projects/spaarke-intake-pipeline-r1/notes/017-approval.md</c>). Outbound inquiries share the table, so a rule on it
+    /// must select intake rows explicitly (<c>sprk_intakestage</c>). Being listed makes a table a valid SUBJECT; as a clause entity it still needs a <see cref="VerifiedJoins"/>
     /// entry, and none exists for the three Do-lane tables.</para>
     /// </remarks>
     public static readonly FrozenSet<string> EvaluatorGlobalReadableEntities = new[]
@@ -207,6 +210,7 @@ public sealed partial class PredicateCompiler
         "sprk_memo",
         "sprk_todo",
         "sprk_workassignment",
+        "sprk_servicerequest",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>
@@ -247,6 +251,8 @@ public sealed partial class PredicateCompiler
         ("sprk_todo", "sprk_duedate"),
         ("sprk_workassignment", "sprk_responseduedate"),
         ("sprk_workassignment", "sprk_respondedon"),
+        // Task 017: the solution source (SpaarkeMaster/Entities/sprk_ServiceRequest) declares one Date Only column on the request.
+        ("sprk_servicerequest", "sprk_responseduedate"),
     }.ToFrozenSet();
 
     /// <summary>

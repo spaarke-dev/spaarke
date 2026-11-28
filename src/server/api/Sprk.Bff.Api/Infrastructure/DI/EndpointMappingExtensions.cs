@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Insights;
+using Sprk.Bff.Api.Api.Intake;
 using Sprk.Bff.Api.Api.Mcp;
 using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Api.Platform;
@@ -260,6 +261,8 @@ public static class EndpointMappingExtensions
         app.MapChildRecordEndpoints();
         // Ontology task 071 (D-111): a person records how a budget inquiry turned out (write as the caller, record-level filter).
         app.MapInquiryEndpoints();
+        // spaarke-intake-pipeline-r1 task 017: the intake approval's claim (approve/reject are Decide-lane plan actions).
+        app.MapIntakeApprovalEndpoints();
         app.MapScorecardCalculatorEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&

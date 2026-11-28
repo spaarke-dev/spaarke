@@ -147,6 +147,14 @@ public sealed class IntakeRunState
     /// <summary>Set by the approval endpoint (task 017) when the attorney approves; the run then continues at Return.</summary>
     public DateTimeOffset? ApprovedOn { get; set; }
 
+    /// <summary>Task 017 (ADR-007): the current SPE version id of each output document when it was approved (document id → version
+    /// id), written in the same write as <see cref="ApprovedOn"/>. Ids only.</summary>
+    public Dictionary<Guid, string>? ApprovedVersions { get; set; }
+
+    /// <summary>Task 017: set when the attorney rejected the run (the run then ends Cancelled, never Failed, and the request goes back
+    /// to In review).</summary>
+    public DateTimeOffset? RejectedOn { get; set; }
+
     /// <summary>Markers written BEFORE a create or a send (FR-07): marker name → deterministic key passed to the step.</summary>
     public Dictionary<string, string> Markers { get; set; } = new(StringComparer.Ordinal);
 
@@ -216,6 +224,36 @@ public sealed record IntakeRequestSnapshot
 
     /// <summary>The <c>versionnumber</c> read, for the conditional stage write.</summary>
     public string? RowVersion { get; init; }
+}
+
+/// <summary>
+/// The request row as the approval checks read it (task 017): the stage, the current run, the claimer (<c>sprk_assignedtointernal</c>, a
+/// contact), the owner and the row version the claim write is conditional on. Read app-only, after the caller's own record check.
+/// </summary>
+public sealed record IntakeApprovalRequestSnapshot
+{
+    public required Guid RequestId { get; init; }
+    public int? IntakeStage { get; init; }
+    public Guid? CurrentRunId { get; init; }
+    public Guid? ClaimedByContactId { get; init; }
+
+    /// <summary>The owning team, or null when the row is owned by a user (or the owner was not returned): no team, no approver.</summary>
+    public Guid? OwningTeamId { get; init; }
+
+    public string? RowVersion { get; init; }
+}
+
+/// <summary>How a conditional approval write ended (task 017).</summary>
+public enum IntakeApprovalWriteResult
+{
+    /// <summary>Written.</summary>
+    Written = 0,
+
+    /// <summary>The row changed since it was read (another claim, another decision): nothing was written.</summary>
+    Changed = 1,
+
+    /// <summary>The row is gone or not in a state this write applies to: nothing was written.</summary>
+    NotApplicable = 2,
 }
 
 /// <summary>

@@ -19,6 +19,7 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Intake;
 using Sprk.Bff.Api.Services.Intake.Harnesses;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Intake;
 
@@ -51,11 +52,29 @@ internal sealed class IntakeRunTestBed
     public RecordingDoor Door { get; } = new(IntakeChannels.FrontDoor);
     public List<JobContract> Enqueued { get; } = new();
 
+    /// <summary>The job queue boundary (task 017): every job submitted is recorded in <see cref="Enqueued"/>.</summary>
+    public Mock<JobSubmissionService> Jobs { get; } = new(MockBehavior.Loose,
+        Microsoft.Extensions.Options.Options.Create(new ServiceBusOptions { QueueName = "sdap-jobs" }),
+        NullLogger<JobSubmissionService>.Instance,
+        new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+
+    /// <summary>The Signal trigger enqueue (task 017): every trigger the run raised, in order.</summary>
+    public List<(SignalTriggerKind Kind, string Entity, Guid SubjectId, Guid SourceId)> Triggers { get; } = new();
+    public Mock<SignalEvaluationTrigger> Signals { get; }
+
     public int ClassifyCalls;
     public int TextReads;
 
     public IntakeRunTestBed(int requestType = 100000000, double confidence = 0.93, int? intakeStage = IntakeRequestStages.Submitted)
     {
+        Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .Callback((JobContract job, CancellationToken _) => { lock (Enqueued) { Enqueued.Add(job); } })
+            .Returns(Task.CompletedTask);
+        Signals = new Mock<SignalEvaluationTrigger>(MockBehavior.Loose, Jobs.Object, NullLogger<SignalEvaluationTrigger>.Instance);
+        Signals.Setup(s => s.EnqueueAsync(It.IsAny<SignalTriggerKind>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback((SignalTriggerKind kind, string entity, Guid subject, Guid source, string? _, CancellationToken _) => { lock (Triggers) { Triggers.Add((kind, entity, subject, source)); } })
+            .ReturnsAsync(true);
+
         var request = new Entity(IntakeRunStore.RequestEntity, RequestId)
         {
             [IntakeRunStore.RequestType] = new OptionSetValue(requestType),
@@ -125,6 +144,7 @@ internal sealed class IntakeRunTestBed
             TextReader.Object,
             [Door],
             Options,
+            Signals.Object,
             Time,
             Logs.CreateLogger<IntakeRunJobHandler>());
     }

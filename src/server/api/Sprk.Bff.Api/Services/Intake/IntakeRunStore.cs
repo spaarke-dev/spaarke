@@ -664,6 +664,146 @@ public class IntakeRunStore
         }
     }
 
+    // ── Approval (task 017) ──────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The request's claimer: <c>sprk_assignedtointernal</c> (a contact). The ONE name of the column for the approval checks, the claim
+    /// write and the executors (uac-r2, 2026-11-28): it is deliberately NOT registered as the request's ForPerson column, because the
+    /// create paths would stamp the creator's contact on it and a new request would arrive already claimed.
+    /// </summary>
+    internal const string RequestClaimedBy = "sprk_assignedtointernal";
+
+    private const string OwnerColumn = "ownerid";
+    private const string ContactEntity = "contact";
+
+    /// <summary>The output document's SPE location columns (the same columns the content reader reads).</summary>
+    internal const string DocumentDriveId = "sprk_graphdriveid";
+
+    /// <inheritdoc cref="DocumentDriveId"/>
+    internal const string DocumentItemId = "sprk_graphitemid";
+
+    private static readonly string[] ApprovalRequestColumns =
+        [RequestIntakeStage, RequestCurrentRun, RequestClaimedBy, OwnerColumn, RowVersionColumn];
+
+    /// <summary>The request as the approval checks need it (app-only; the caller's own record check runs first). Null when it does not exist.</summary>
+    public virtual async Task<IntakeApprovalRequestSnapshot?> ReadApprovalRequestAsync(Guid requestId, CancellationToken ct)
+    {
+        var row = await RetrieveOrNullAsync(RequestEntity, requestId, ApprovalRequestColumns, ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return null;
+        }
+
+        var owner = row.GetAttributeValue<EntityReference>(OwnerColumn);
+        var claimer = row.GetAttributeValue<EntityReference>(RequestClaimedBy);
+        return new IntakeApprovalRequestSnapshot
+        {
+            RequestId = requestId,
+            IntakeStage = row.GetAttributeValue<OptionSetValue>(RequestIntakeStage)?.Value,
+            CurrentRunId = row.GetAttributeValue<EntityReference>(RequestCurrentRun)?.Id,
+            ClaimedByContactId = claimer is { Id: var c } && c != Guid.Empty ? c : null,
+            OwningTeamId = owner is { LogicalName: "team", Id: var t } && t != Guid.Empty ? t : null,
+            RowVersion = row.RowVersion
+                ?? (row.Contains(RowVersionColumn) ? Convert.ToString(row[RowVersionColumn], CultureInfo.InvariantCulture) : null),
+        };
+    }
+
+    /// <summary>
+    /// The claim (uac-r2 (c), G5: checked as the user, written as the app): sets ONLY the claimer column to <paramref name="contactId"/>,
+    /// conditional on the row version read (<paramref name="rowVersion"/>), so of two simultaneous claims exactly one is written. An update
+    /// never creates a row, and a missing version is never written unconditionally.
+    /// </summary>
+    public virtual async Task<IntakeApprovalWriteResult> ClaimRequestAsync(Guid requestId, string? rowVersion, Guid contactId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(rowVersion) || contactId == Guid.Empty)
+        {
+            return IntakeApprovalWriteResult.NotApplicable;
+        }
+
+        try
+        {
+            await _entities.UpdateIfRowVersionMatchesAsync(RequestEntity, requestId, rowVersion,
+                new Dictionary<string, object> { [RequestClaimedBy] = new EntityReference(ContactEntity, contactId) }, ct).ConfigureAwait(false);
+            return IntakeApprovalWriteResult.Written;
+        }
+        catch (System.Data.DBConcurrencyException)
+        {
+            return IntakeApprovalWriteResult.Changed;
+        }
+        catch (Exception ex) when (RecordContainerResolver.IsRecordNotFoundInChain(ex))
+        {
+            return IntakeApprovalWriteResult.NotApplicable;
+        }
+    }
+
+    /// <summary>
+    /// The approval write (task 017): <see cref="IntakeRunState.ApprovedOn"/> and the approved versions, in ONE write conditional on
+    /// <paramref name="run"/>'s row version, and only while the run still waits for approval. A run changed since it was read is
+    /// <see cref="IntakeApprovalWriteResult.Changed"/> and nothing is written (the caller decides again on a fresh read).
+    /// </summary>
+    public virtual async Task<IntakeApprovalWriteResult> RecordApprovalAsync(
+        IntakeRunSnapshot run, IReadOnlyDictionary<Guid, string> versions, CancellationToken ct)
+    {
+        if (run.RowVersion is null || IsTerminalStatus(run.Status) || run.State.ApprovedOn is not null || run.State.RejectedOn is not null)
+        {
+            return IntakeApprovalWriteResult.NotApplicable;
+        }
+
+        var state = run.State;
+        state.ApprovedOn = _time.GetUtcNow();
+        state.ApprovedVersions = new Dictionary<Guid, string>(versions);
+        try
+        {
+            await _entities.UpdateIfRowVersionMatchesAsync(RunEntity, run.RunId, run.RowVersion,
+                new Dictionary<string, object> { [RunState] = Serialize(state) }, ct).ConfigureAwait(false);
+            return IntakeApprovalWriteResult.Written;
+        }
+        catch (System.Data.DBConcurrencyException)
+        {
+            return IntakeApprovalWriteResult.Changed;
+        }
+    }
+
+    /// <summary>
+    /// The rejection write (task 017): <see cref="IntakeRunState.RejectedOn"/> and the terminal status Cancelled (never Failed), in ONE
+    /// write conditional on <paramref name="run"/>'s row version, and only while the run still waits for approval.
+    /// </summary>
+    public virtual async Task<IntakeApprovalWriteResult> RecordRejectionAsync(IntakeRunSnapshot run, CancellationToken ct)
+    {
+        if (run.RowVersion is null || IsTerminalStatus(run.Status) || run.State.ApprovedOn is not null || run.State.RejectedOn is not null)
+        {
+            return IntakeApprovalWriteResult.NotApplicable;
+        }
+
+        var now = _time.GetUtcNow();
+        var state = run.State;
+        state.RejectedOn = now;
+        state.Claim = null;
+        try
+        {
+            await _entities.UpdateIfRowVersionMatchesAsync(RunEntity, run.RunId, run.RowVersion, new Dictionary<string, object>
+            {
+                [RunState] = Serialize(state),
+                [RunStatus] = new OptionSetValue((int)ProcessingJobStatus.Cancelled),
+                [RunCompleted] = now.UtcDateTime,
+            }, ct).ConfigureAwait(false);
+            return IntakeApprovalWriteResult.Written;
+        }
+        catch (System.Data.DBConcurrencyException)
+        {
+            return IntakeApprovalWriteResult.Changed;
+        }
+    }
+
+    /// <summary>An output document's SPE location (drive id, item id), or null when the row is gone or names none.</summary>
+    public virtual async Task<(string DriveId, string ItemId)?> ReadDocumentLocationAsync(Guid documentId, CancellationToken ct)
+    {
+        var row = await RetrieveOrNullAsync(DocumentEntity, documentId, [DocumentDriveId, DocumentItemId], ct).ConfigureAwait(false);
+        var drive = row?.GetAttributeValue<string>(DocumentDriveId);
+        var item = row?.GetAttributeValue<string>(DocumentItemId);
+        return string.IsNullOrWhiteSpace(drive) || string.IsNullOrWhiteSpace(item) ? null : (drive, item);
+    }
+
     private async Task<bool> CanBecomeCurrentAsync(Guid? currentRunId, CancellationToken ct)
     {
         if (currentRunId is not { } current)

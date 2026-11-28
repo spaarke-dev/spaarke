@@ -509,14 +509,16 @@ public sealed partial class SignalWriter
     /// ebilling-r1 task 026 (FR-15, D-31) adds <c>sprk_invoice</c> and <c>sprk_billingevent</c> (the Invoice Line): a billing
     /// finding is about an invoice or one of its lines. Their core record is the subject's OWN core lookup, derived by
     /// <see cref="CoreAncestorResolver"/> (a line is never resolved through its invoice, D-75), and exactly one is required
-    /// (<see cref="RequireSingleInvoiceFamilyCore"/>). <c>sprk_servicerequest</c> and <c>sprk_document</c> stay refused as a
-    /// SUBJECT: no rule reads them in R1. Each subject's core record comes from <see cref="CoreAncestorResolver"/>, never from a
-    /// lookup walk here.
+    /// (<see cref="RequireSingleInvoiceFamilyCore"/>). spaarke-intake-pipeline-r1 task 017 (owner decision 2026-11-28, ontology-r1
+    /// condition (a)1) adds <c>sprk_servicerequest</c>: the intake approval Work Item is a Decide-lane Signal about the request, which
+    /// is a core record and groups under itself like a matter. No due date is written for it (<see cref="DueDateColumnBySubject"/>
+    /// has no entry). <c>sprk_document</c> stays refused as a SUBJECT. Each subject's core record comes from
+    /// <see cref="CoreAncestorResolver"/>, never from a lookup walk here.
     /// </summary>
     public static readonly FrozenSet<string> VerifiedSubjects = new[]
     {
         "sprk_matter", "sprk_project", "sprk_communication", "sprk_event", "sprk_todo", "sprk_workassignment",
-        "sprk_invoice", "sprk_billingevent",
+        "sprk_invoice", "sprk_billingevent", "sprk_servicerequest",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>The subject column the Signal's <c>sprk_duedate</c> copies (task 037, D-27): an event's
