@@ -1,7 +1,7 @@
 # Owner upload checklist: Phase 0 test packages (task 020)
 
 > **Program:** specialist-legal-agents-r1, Phase 0. **Written by:** task 020, 2026-11-26.
-> **Status:** all eight packages **uploaded by the owner 2026-11-27** (admin centre shows each Available; the five agents show the dynamic-discovery banner on Data & tools; the three plugins list their skill). Users-tab scope check DONE 2026-11-27: the owner confirmed every package lists only the owner (ralph.schroeder) and demo (R7 OK). The load check (the "List every tool" prompt, the Cowork `/` list) is pending. A Claude session never clicks tenant or admin-center actions: every step below is the owner's.
+> **Status:** all eight packages **uploaded by the owner 2026-11-27** (admin centre shows each Available; the five agents show the dynamic-discovery banner on Data & tools; the three plugins list their skill). Users-tab scope check DONE 2026-11-27: the owner confirmed every package lists only the owner (ralph.schroeder) and demo (R7 OK). Load check as the owner PASSED for all eight on 2026-11-28; as `demo@` it is partly done (see "Load check results"). A Claude session never clicks tenant or admin-center actions: every step below is the owner's.
 > **Covers:** G1-NDA (6 packages), G5 (1) and G2 question 1 (1). Test READMEs: `../README.md` (G1), `../../g5/README.md`, `../../g2/README.md`.
 > **Zips are gitignored** and live only on this machine. To rebuild one, see the "Test packages" section of the test README.
 
@@ -84,6 +84,28 @@ These carry **no action**: they use the tenant connector "Spaarke MCP", which ea
 For each package: the time of the upload (to the minute, UTC), the screenshot of the Data & tools banner or the `/` list, and the answer to the "List every tool" prompt. The session records the install date in `phase0/README.md` and checks App Insights for the `tools/list` call. It will not mark anything installed until you confirm it.
 
 **G5 tools (closed 2026-11-27):** all three function tools are on dev since about 13:14Z on 2026-11-27 (spike `5cd40984b0`): `spike_review_nda` plus the routing stubs `spike_review_agreement` and `spike_review_legal_hold`. The G5 R4 row was sent the same day, so row 4 can be uploaded like the others. See `g5/README.md`, "Status of the function tools".
+
+## Load check results
+
+**As the owner (ralph.schroeder), 2026-11-28, dev BFF `b84fa5f061`: all 8 PASS.**
+
+| # | Package | Result |
+|---|---|---|
+| 1 | G1-a Chat | PASS: 6 Spaarke tools (`spaarke_show_decisions`, the 4 spike tools, `SpaarkeMCP_spike_return_file`); says it must not call `spike_review_nda` |
+| 2 | G1-b Chat | PASS: same 6 |
+| 3 | G1-c Chat | PASS: same 6 |
+| 4 | G5 area | First chat FAILED (no Spaarke tool; it described its functions from its instructions). Retry in a new chat PASSED: same 6. Treated as a first-use load miss; no change |
+| 5 | G2-Q1 | PASS: same 6. The marker skill `spaarke-test-g2-marker` was **not** named (only built-in Copilot skills); input to task 023 |
+| 6–8 | Cowork a, b, c | PASS: each plugin shows its one skill; each skill loaded and described itself correctly. The tools reached Cowork only after "Spaarke MCP" was switched on (it was off); then the tool list covered all six Spaarke functions |
+
+**As `demo@`, 2026-11-28: partly done.**
+
+- G1-a: the first "List every tool" chat named no Spaarke tool.
+- G1-b: the first list named only `spike_get_profile` (from its instructions). After `Call the Spaarke tool spaarke_show_decisions` (read-only; demo's decisions shown, no sign-in card), the list in the same chat covered all six tools: PASS.
+- G1-c: `spaarke_show_decisions` returned "Something went wrong", then on retry the card **"Please sign in to Spaarke MCP G1c"**. Not clicked (signing in grants access; the owner does it).
+- Still to do as demo: sign in per agent (G1-a, G1-c, G5, G2-Q1 likely each show the card once), then per agent one new chat with the decisions call followed by the "List every tool" prompt; Cowork with "Spaarke MCP" on for demo.
+
+**Gotchas for the runs (tasks 021–023):** each Chat agent needs its own OAuth sign-in per user (the card names "Spaarke MCP G1a", "G1c" and so on); a user's first "List every tool" answer may say nothing until the agent has called a Spaarke tool once in that chat; Cowork needs "Spaarke MCP" switched on.
 
 ## Removal (later, at task 031)
 
