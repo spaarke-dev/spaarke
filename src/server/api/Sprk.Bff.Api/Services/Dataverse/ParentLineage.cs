@@ -1180,9 +1180,10 @@ internal static class InheritedAccessPermission
     /// <c>sprk_invoice.sprk_vendororg</c> nor the submission's decides a Duplicate's detail.</para></item>
     /// <item>ebilling-r1 task 095c-4 review fix and task 095c-5 (uac-r2 2026-11-04). <c>sprk_invoice</c>: its firm hold <c>sprk_firmhold</c>
     /// (<c>InvoiceFirmHold.InvoiceHoldColumn</c>, field-secured) and its firm <c>sprk_vendororg</c>
-    /// (<c>InvoiceSubmissionPersister.InvoiceVendorOrg</c>). Neither decides access, but both decide whether the invoice can be approved,
-    /// returned, corrected and exported: cleared by a generic write, the hold would no longer keep a no-firm invoice from approval; a firm
-    /// set by one would be a firm no pipeline resolved. Their writers are typed: the persister writes both in the invoice's create (the
+    /// (<c>InvoiceSubmissionPersister.InvoiceVendorOrg</c>). Both decide access: the firm decides which firm's contacts see the invoice
+    /// (<c>ExternalInvoiceVisibility</c>), and the hold hides the invoice from its firm while it is set. Both also decide whether the
+    /// invoice can be approved, returned, corrected and exported: cleared by a generic write, the hold would no longer keep a no-firm
+    /// invoice from approval; a firm set by one would be a firm no pipeline resolved. Their writers are typed: the persister writes both in the invoice's create (the
     /// firm, or the hold when there is none), and Set firm (task 095d-1b, <c>InvoiceAssignFirmService</c>) sets the firm and replaces the hold with the rerun-pending marker (EB-D-185)
     /// in its one renumber transaction. No
     /// playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</item>
@@ -1507,7 +1508,7 @@ internal static class InheritedAccessPermission
         {
             // ebilling-r1 task 095c: the tracking scope decides no access (it is listed because its only writer is typed); say so.
             // Task 095c-4: the outcome reason holds the invoice (firm_missing, Blocked); it decides no access either.
-            // Task 095c-5: on an invoice, the firm hold and the firm hold it from approval and export; neither decides access.
+            // Task 095c-5: on an invoice, the firm decides which firm's contacts see it and the firm hold hides it from that firm; both hold it from approval and export.
             var isInvoice = string.Equals(trimmed, Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity, StringComparison.OrdinalIgnoreCase);
             // 095d-1a: the sequence and the previous sequence are the allocator's too, and decide no access.
             // 095d-1b: so is the firm invoice number (set by the allocator; an undone submission clears it).
@@ -1527,7 +1528,7 @@ internal static class InheritedAccessPermission
                     : isInvoice && IsInvoiceMoneyColumn(accessColumn)
                         ? "it decides no access; it is an invoice amount, and only typed writers derive it"
                     : isInvoice
-                        ? "it decides no access, but it decides whether the invoice can be approved and exported; only the submission pipeline writes it"
+                        ? "it decides which firm's contacts see the invoice, and it decides whether the invoice can be approved and exported; only the submission pipeline writes it"
                         : "it decides who may see what";
             return RecordOwnerResolution.Refused(AppOnlyAccessColumnWriteReasonCode,
                 $"{accessColumn} of a {trimmed.ToLowerInvariant()} is set by Spaarke ({decides}), so it was not written");
