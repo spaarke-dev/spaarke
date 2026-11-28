@@ -17,6 +17,7 @@ import {
   Input,
   Tooltip,
   Checkbox,
+  Link,
 } from '@fluentui/react-components';
 import {
   DocumentRegular,
@@ -572,12 +573,23 @@ function relatedRecordNumber(view: RelatedRecordView): string | null {
  * is a warning naming how many were saved (never "all saved"); nothing saved is an error. Exported for its unit tests.
  */
 export function describeAttachmentsOnlyOutcome(outcome: AttachmentsOnlyOutcome): {
-  intent: 'success' | 'warning' | 'error';
+  intent: 'success' | 'warning' | 'error' | 'info';
   title: string;
 } {
+  // Owner A1: an attachment already in Spaarke counts as neither saved nor failed; each is named on its own line.
   const saved = outcome.saved.length;
   const total = saved + outcome.failed.length;
+  const already = outcome.alreadyInSpaarke?.length ?? 0;
   const noun = (n: number) => (n === 1 ? 'attachment' : 'attachments');
+  if (total === 0 && already > 0) {
+    return {
+      intent: 'info',
+      title:
+        already === 1
+          ? 'The attachment is already in Spaarke. Nothing new was saved, and the email was not saved.'
+          : 'These attachments are already in Spaarke. Nothing new was saved, and the email was not saved.',
+    };
+  }
   if (outcome.failed.length === 0) {
     return { intent: 'success', title: `${saved} ${noun(saved)} saved to Spaarke. The email was not saved.` };
   }
@@ -1720,6 +1732,38 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               {f.name}: {f.message}
             </Text>
           ))}
+          {/* Owner A1: the existing document is named and linked only when the server let the caller see it. */}
+          {attachmentsOnlyOutcome.alreadyInSpaarke?.map(a => (
+            <Text
+              key={`already-${a.name}`}
+              size={200}
+              className={styles.savedBarDetail}
+              data-testid="attachments-only-already-in-spaarke"
+            >
+              {a.name}:{' '}
+              {a.existing ? (
+                <>
+                  Already in Spaarke as{' '}
+                  <Link
+                    inline
+                    onClick={() => {
+                      const existing = a.existing;
+                      if (existing) void handleOpenAlreadyInSpaarke(existing.id, existing.name);
+                    }}
+                  >
+                    {a.existing.name}
+                  </Link>
+                </>
+              ) : (
+                'Already in Spaarke'
+              )}
+            </Text>
+          ))}
+          {alreadyInSpaarkeOpenError && (
+            <Text size={200} className={styles.collisionError}>
+              {alreadyInSpaarkeOpenError}
+            </Text>
+          )}
         </MessageBarBody>
       </MessageBar>
     );
@@ -1938,6 +1982,54 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     setOpenFileBusy(false);
   }, [error]);
 
+  // Task 143 (owner A1): the open itself, shared by the collision prompt and an attachment already in Spaarke. Throws an
+  // Error whose message says why the file did not open; announces when it did.
+  const openDocumentById = useCallback(
+    async (documentId: string, displayName: string | null | undefined, mode: 'desktop' | 'browser') => {
+      if (!apiBaseUrl) {
+        throw new Error("Couldn't open the file: the pane isn't fully configured. Reload and try again.");
+      }
+      let res: Response;
+      try {
+        const token = await getAccessToken();
+        res = await authenticatedJsonFetch(
+          `${apiBaseUrl}/api/documents/${encodeURIComponent(cleanGuid(documentId))}/open-links`,
+          { headers: { 'Content-Type': 'application/json' } },
+          token,
+          { getRetryToken: getAccessToken }
+        );
+      } catch {
+        throw new Error("Couldn't reach Spaarke to open the file. Check your connection and try again.");
+      }
+      if (!res.ok) {
+        throw new Error((await describeFetchFailure(res)).message);
+      }
+      const links = (await res.json()) as { webUrl?: string | null; desktopUrl?: string | null };
+      if (mode === 'desktop') {
+        if (!links.desktopUrl) {
+          throw new Error('Spaarke did not return a desktop link for this file.');
+        }
+        const result = openDesktopUrl(links.desktopUrl);
+        if (!result.opened) {
+          throw new Error(result.reason ?? "Couldn't open the file in Word.");
+        }
+        announce(`Opening ${displayName ?? 'the existing file'} in Word.`, 'polite');
+        return;
+      }
+      if (!links.webUrl) {
+        throw new Error('Spaarke did not return a link for this file.');
+      }
+      // Task 120: the opener follows the host's actual OpenBrowserWindowApi support, not `canOpenRecord` — that
+      // prop is now true on Office on the web too (window.open), where openBrowserWindow does not exist.
+      const result = openInBrowserTab(links.webUrl);
+      if (!result.opened) {
+        throw new Error(result.reason ?? "Couldn't open the file.");
+      }
+      announce(`Opened ${displayName ?? 'the existing file'}.`, 'polite');
+    },
+    [apiBaseUrl, getAccessToken, announce]
+  );
+
   const handleOpenCollisionFile = useCallback(
     async (mode: 'desktop' | 'browser') => {
       const documentId = error?.collisionExistingDocumentId;
@@ -1945,46 +2037,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       setOpenFileBusy(true);
       setOpenFileError(null);
       try {
-        if (!apiBaseUrl) {
-          throw new Error("Couldn't open the file: the pane isn't fully configured. Reload and try again.");
-        }
-        let res: Response;
-        try {
-          const token = await getAccessToken();
-          res = await authenticatedJsonFetch(
-            `${apiBaseUrl}/api/documents/${encodeURIComponent(cleanGuid(documentId))}/open-links`,
-            { headers: { 'Content-Type': 'application/json' } },
-            token,
-            { getRetryToken: getAccessToken }
-          );
-        } catch {
-          throw new Error("Couldn't reach Spaarke to open the file. Check your connection and try again.");
-        }
-        if (!res.ok) {
-          throw new Error((await describeFetchFailure(res)).message);
-        }
-        const links = (await res.json()) as { webUrl?: string | null; desktopUrl?: string | null };
-        if (mode === 'desktop') {
-          if (!links.desktopUrl) {
-            throw new Error('Spaarke did not return a desktop link for this file.');
-          }
-          const result = openDesktopUrl(links.desktopUrl);
-          if (!result.opened) {
-            throw new Error(result.reason ?? "Couldn't open the file in Word.");
-          }
-          announce(`Opening ${error?.collisionExistingDocumentName ?? 'the existing file'} in Word.`, 'polite');
-          return;
-        }
-        if (!links.webUrl) {
-          throw new Error('Spaarke did not return a link for this file.');
-        }
-        // Task 120: the opener follows the host's actual OpenBrowserWindowApi support, not `canOpenRecord` — that
-        // prop is now true on Office on the web too (window.open), where openBrowserWindow does not exist.
-        const result = openInBrowserTab(links.webUrl);
-        if (!result.opened) {
-          throw new Error(result.reason ?? "Couldn't open the file.");
-        }
-        announce(`Opened ${error?.collisionExistingDocumentName ?? 'the existing file'}.`, 'polite');
+        await openDocumentById(documentId, error?.collisionExistingDocumentName, mode);
       } catch (err) {
         const message = err instanceof Error && err.message ? err.message : "Couldn't open the file.";
         setOpenFileError(message);
@@ -1993,7 +2046,27 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         setOpenFileBusy(false);
       }
     },
-    [error, apiBaseUrl, getAccessToken, announce]
+    [error, openDocumentById, announce]
+  );
+
+  // Task 143 (owner A1): "Already in Spaarke as {name}" opens that document in the browser. A failure is shown under the
+  // outcome; the outcome itself is unchanged.
+  const [alreadyInSpaarkeOpenError, setAlreadyInSpaarkeOpenError] = useState<string | null>(null);
+  useEffect(() => {
+    setAlreadyInSpaarkeOpenError(null);
+  }, [attachmentsOnlyOutcome]);
+  const handleOpenAlreadyInSpaarke = useCallback(
+    async (documentId: string, displayName: string) => {
+      setAlreadyInSpaarkeOpenError(null);
+      try {
+        await openDocumentById(documentId, displayName, 'browser');
+      } catch (err) {
+        const message = err instanceof Error && err.message ? err.message : "Couldn't open the file.";
+        setAlreadyInSpaarkeOpenError(message);
+        announce(message, 'assertive');
+      }
+    },
+    [openDocumentById, announce]
   );
 
   // Handle entity selection (Confirm a card / select a search result / Change).

@@ -243,6 +243,27 @@ export type SaveTarget =
 export interface AttachmentsOnlyOutcome {
   saved: string[];
   failed: Array<{ name: string; message: string }>;
+  /**
+   * Task 143 (owner A1): each attachment whose bytes are identical to a document already in Spaarke (the server answered
+   * `contentDuplicate: true`): nothing was created or changed, and it counts as neither saved nor failed. `existing` is that
+   * document's id and name, present only when the server let the caller see it (Read + the external narrowing); absent,
+   * the pane says just "Already in Spaarke". Optional: an outcome without it has none.
+   */
+  alreadyInSpaarke?: Array<{ name: string; existing?: { id: string; name: string } }>;
+}
+
+/**
+ * Task 143 (owner A1): the existing document a content-duplicate save answer names (`existingDocument`), or `undefined`
+ * when the answer withheld it or it is malformed. Exported for its unit tests.
+ */
+export function existingDocumentOf(responseData: unknown): { id: string; name: string } | undefined {
+  const existing = (responseData as { existingDocument?: unknown } | null | undefined)?.existingDocument as
+    | { id?: unknown; name?: unknown }
+    | null
+    | undefined;
+  return typeof existing?.id === 'string' && existing.id && typeof existing.name === 'string' && existing.name
+    ? { id: existing.id, name: existing.name }
+    : undefined;
 }
 
 /**
@@ -1769,6 +1790,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
       const saved: string[] = [];
       const failed: AttachmentsOnlyOutcome['failed'] = [];
+      const alreadyInSpaarke: NonNullable<AttachmentsOnlyOutcome['alreadyInSpaarke']> = [];
       // A ticked attachment the reader could not carry (too large, a cloud link) is reported with its own reason.
       for (const skip of captured.skipped) {
         failed.push({ name: skip.name, message: skip.message });
@@ -1867,7 +1889,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           } catch {
             responseData = undefined;
           }
-          if (response.ok) {
+          if (response.ok && (responseData as { contentDuplicate?: unknown } | undefined)?.contentDuplicate === true) {
+            // Owner A1: identical to a document already in Spaarke. Nothing was created or changed: neither saved nor failed.
+            const existing = existingDocumentOf(responseData);
+            alreadyInSpaarke.push({ name: attachment.fileName, ...(existing ? { existing } : {}) });
+          } else if (response.ok) {
             saved.push(attachment.fileName); // accepted, or (200 duplicate) already saved
           } else if (isProblemDetails(responseData)) {
             recordFailure(describeCollisionFailure(responseData).message);
@@ -1880,7 +1906,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         }
       }
 
-      setAttachmentsOnlyOutcome({ saved, failed });
+      setAttachmentsOnlyOutcome({ saved, failed, ...(alreadyInSpaarke.length > 0 ? { alreadyInSpaarke } : {}) });
       setFlowState('idle');
     },
     [apiBaseUrl, captureEmailContent, cleanup, getAccessToken, processingOptions, selectedAttachmentIds, selectedEntity]
