@@ -1509,7 +1509,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     {
                         Status = JobStatus.Completed,
                         Progress = 100,
-                        CurrentPhase = "DeduplicatedToExisting",
+                        CurrentPhase = ContentDuplicatePhase,
                         CompletedAt = DateTimeOffset.UtcNow,
                         // Task 039 (finding 3): names the canonical this save resolved to. No file id: the upload was
                         // either deleted or is some document's own file, and the canonical's file is not re-read here.
@@ -1798,6 +1798,14 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// the immutable duplicate path. The task pane completes on <c>result.artifact.id</c>; without it the job
     /// reported Completed with nothing to open and the pane stalled on its job card.
     /// </summary>
+    /// <summary>
+    /// The phase of a save's job whose content resolved to an EXISTING document through content de-dup (FR-C3): no document was
+    /// created, and <c>result.artifact</c> names that existing document. Task 143 (owner A1): the job-status read and stream name
+    /// it only to a caller who may see it (<c>OfficeEndpoints.WithholdContentDuplicateJobIdentityIfUnauthorizedAsync</c>). The
+    /// value is unchanged since FR-C3, so jobs recorded before the gate are gated too.
+    /// </summary>
+    public const string ContentDuplicatePhase = "DeduplicatedToExisting";
+
     private static JobResult DocumentResult(Guid documentId, string? speFileId, string? driveId, string? webUrl) => new()
     {
         Artifact = new CreatedArtifact
@@ -3565,6 +3573,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     public IAsyncEnumerable<byte[]> StreamJobStatusAsync(
         Guid jobId,
         string? lastEventId,
+        Func<JobStatusResponse, CancellationToken, Task<JobStatusResponse>> statusForCaller,
         CancellationToken cancellationToken = default)
-        => _jobs.StreamAsync(jobId, lastEventId, cancellationToken);
+        => _jobs.StreamAsync(jobId, lastEventId, statusForCaller, cancellationToken);
 }

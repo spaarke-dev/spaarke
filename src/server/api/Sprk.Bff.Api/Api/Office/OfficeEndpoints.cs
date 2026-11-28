@@ -688,6 +688,51 @@ public static class OfficeEndpoints
         return response with { ExistingDocument = null };
     }
 
+    /// <summary>The narrowing's log label for the status of a save's job that resolved to an existing document (no ids).</summary>
+    private const string ContentDuplicateJobNarrowingSurface = "office-job-content-duplicate";
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 143 (owner A1): the job-status read and stream obey the rule the save's answer obeys. A
+    /// job whose content resolved to an existing document through content de-dup (<see cref="OfficeService.ContentDuplicatePhase"/>)
+    /// names that document in <c>result.artifact</c> (id, file id, container, URL); it is kept only when the caller reading
+    /// the status may see the document (<see cref="CallerMaySeeDocumentAsync"/>: Read, then THE external document narrowing; a
+    /// fault, or no caller identity, withholds). Withheld, the artifact goes and the job's own status, phase and outcome stay,
+    /// so the pane still says the item is already in Spaarke. Every other job passes through untouched, with no access check.
+    /// </summary>
+    /// <remarks>
+    /// The existing document was found app-only by hash (<c>ContentDedupDetector</c>), so it may be one the caller cannot
+    /// read. These two job routes are the only code that put a job's artifact on the wire, so the decision is here (ADR-008).
+    /// </remarks>
+    internal static async Task<JobStatusResponse> WithholdContentDuplicateJobIdentityIfUnauthorizedAsync(
+        JobStatusResponse job,
+        string? userId,
+        HttpContext context,
+        AuthorizationService authorizationService,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(job.CurrentPhase, OfficeService.ContentDuplicatePhase, StringComparison.Ordinal)
+            || job.Result?.Artifact is not { } existing)
+        {
+            return job;
+        }
+
+        if (!string.IsNullOrEmpty(userId)
+            && await CallerMaySeeDocumentAsync(
+                existing.Id, userId, context, authorizationService, ContentDuplicateJobNarrowingSurface, logger,
+                cancellationToken))
+        {
+            return job;
+        }
+
+        logger.LogInformation(
+            "Status of content-duplicate job {JobId}: the caller holds no Read on the existing document (or the external "
+            + "document narrowing hides it), so the job's artifact is withheld.",
+            job.JobId);
+
+        return job with { Result = job.Result with { Artifact = null } };
+    }
+
     /// <summary>
     /// Whether the caller may be told which document <paramref name="documentId"/> is: they hold <see cref="AccessRights.Read"/>
     /// on it AND THE external document narrowing shows it to them (task 188 round 4c, F1). Fail closed: an access check that
@@ -909,6 +954,7 @@ public static class OfficeEndpoints
     private static async Task<IResult> GetJobStatusAsync(
         Guid jobId,
         IOfficeService officeService,
+        AuthorizationService authorizationService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -942,6 +988,10 @@ public static class OfficeEndpoints
                     ["jobId"] = jobId
                 });
         }
+
+        // Task 143 (owner A1): a content-duplicate job names the existing document only to a caller who may see it.
+        jobStatus = await WithholdContentDuplicateJobIdentityIfUnauthorizedAsync(
+            jobStatus, userId, context, authorizationService, logger, cancellationToken);
 
         return TypedResults.Ok(jobStatus);
     }
@@ -989,6 +1039,7 @@ public static class OfficeEndpoints
     private static async Task GetJobStatusStreamAsync(
         Guid jobId,
         IOfficeService officeService,
+        AuthorizationService authorizationService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -1096,7 +1147,13 @@ public static class OfficeEndpoints
         try
         {
             // Stream job status updates as SSE events
-            await foreach (var eventData in officeService.StreamJobStatusAsync(jobId, lastEventId, cancellationToken))
+            // Task 143 (owner A1): every status the stream reads is the one the status read would give this caller.
+            await foreach (var eventData in officeService.StreamJobStatusAsync(
+                               jobId,
+                               lastEventId,
+                               (status, ct) => WithholdContentDuplicateJobIdentityIfUnauthorizedAsync(
+                                   status, userId, context, authorizationService, logger, ct),
+                               cancellationToken))
             {
                 // Check if client is still connected before writing
                 if (cancellationToken.IsCancellationRequested)

@@ -444,7 +444,7 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
         // have been easy to misread as an authorization failure. An empty stream closes cleanly, which is
         // all this test needs: it asserts the response SHAPE (200 + text/event-stream), not the frames.
         factory.OfficeServiceMock
-            .Setup(s => s.StreamJobStatusAsync(jobId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.StreamJobStatusAsync(jobId, It.IsAny<string?>(), It.IsAny<Func<JobStatusResponse, CancellationToken, Task<JobStatusResponse>>>(), It.IsAny<CancellationToken>()))
             .Returns(EmptyEventStream());
 
         var client = factory.CreateClient();

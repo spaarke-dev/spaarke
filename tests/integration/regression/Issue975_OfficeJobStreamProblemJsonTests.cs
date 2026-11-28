@@ -32,8 +32,8 @@
 // handler would immediately re-expose the header bug on the live path.
 //
 // TECHNIQUE: GetJobStatusStreamAsync is private static with a short, fully-mockable parameter list
-// (Guid jobId, IOfficeService officeService, ILogger<Program> logger, HttpContext context,
-// CancellationToken cancellationToken). Reflection matches the same technique the sibling
+// (Guid jobId, IOfficeService officeService, AuthorizationService authorizationService (task 143),
+// ILogger<Program> logger, HttpContext context, CancellationToken cancellationToken). Reflection matches the same technique the sibling
 // Issue975_ChatAttachmentValidationProblemJsonTests.cs uses, originally established by
 // ChatEndpointsAttachmentsTests.cs. No new fixture (CLAUDE.md §11): IOfficeService is an existing
 // public interface, mocked the same way OfficeEndpointsContractTests.cs's own OfficeTestWebAppFactory
@@ -71,6 +71,9 @@ public class Issue975_OfficeJobStreamProblemJsonTests
         {
             jobId,
             officeService,
+            // Task 143: the AuthorizationService the content-duplicate gate uses. These tests stream an empty mock, so
+            // nothing calls it.
+            null,
             NullLogger<Program>.Instance,
             httpContext,
             CancellationToken.None
@@ -175,7 +178,7 @@ public class Issue975_OfficeJobStreamProblemJsonTests
                 CreatedAt = DateTimeOffset.UtcNow,
             });
         officeServiceMock
-            .Setup(s => s.StreamJobStatusAsync(jobId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.StreamJobStatusAsync(jobId, It.IsAny<string?>(), It.IsAny<Func<JobStatusResponse, CancellationToken, Task<JobStatusResponse>>>(), It.IsAny<CancellationToken>()))
             .Returns(EmptyStream());
 
         // Act
