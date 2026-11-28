@@ -30,8 +30,8 @@ namespace Sprk.Bff.Api.Tests.Seam.Intake;
 /// the NDA harness (task 015) will.
 /// </summary>
 /// <remarks>
-/// Maintain-class (ADR-038): the claim-check contract with an engine that parses untrusted documents. The late-completion-after-timeout
-/// test carries a seeding proof (see <see cref="LateCompletionAfterTimeout_ChangesNothingAndContinuesNothing"/>).
+/// Maintain-class (ADR-038): the claim-check contract with an engine that parses untrusted documents. The terminal-status guard of
+/// the completion handler carries a seeding proof (see <see cref="Completion_ForAFailedRunThatStillHasItsWaitSet_IsSettledAsANoChange"/>).
 /// </remarks>
 public sealed class IntakeEngineDispatchSeamTests
 {
@@ -144,8 +144,23 @@ public sealed class IntakeEngineDispatchSeamTests
         timeout.JobType.Should().Be("IntakeEngineTimeout");
         timeout.IdempotencyKey.Should().Be($"IntakeEngineTimeout:{runId:D}:segment:1");
         dueAt.Should().Be(bed.Run.Time.GetUtcNow() + TimeSpan.FromMinutes(30));
-        (dueAt - bed.Run.Time.GetUtcNow()).Should().BeGreaterThan(JobContract.RetryWindow, "a shorter timeout fails runs the engine job is still retrying");
-        new IntakeEngineOptions { TimeoutMinutes = 1 }.EffectiveTimeout().Should().Be(JobContract.RetryWindow + TimeSpan.FromMinutes(1), "a too-small setting is raised to the floor");
+        (dueAt - bed.Run.Time.GetUtcNow()).Should().BeGreaterThan(JobContract.RetryWindow, "a shorter timeout holds runs the engine job is still retrying");
+        (dueAt - bed.Run.Time.GetUtcNow()).Should().BeGreaterThanOrEqualTo(IntakeEngineOptions.MinimumTimeout);
+        new IntakeEngineOptions { TimeoutMinutes = 1 }.EffectiveTimeout().Should().Be(IntakeEngineOptions.MinimumTimeout, "a too-small setting is raised to the floor");
+    }
+
+    [Fact]
+    public void Timeout_FloorIsTwoReplicaTimeoutsPlusTheFirstBackoff_AndTheDefaultIsNotBelowIt()
+    {
+        // infrastructure/bicep/modules/intake-engine-job.bicep: replicaTimeoutSeconds 600. One execution that hangs to its hard stop,
+        // the first Service Bus back-off (1 minute) and a second full execution: 2 x 10 + 1 = 21 minutes. The old floor (the 15-minute
+        // retry window + 1) fell short of that by five minutes.
+        IntakeEngineOptions.EngineReplicaTimeout.Should().Be(TimeSpan.FromMinutes(10));
+        IntakeEngineOptions.MinimumTimeout.Should().Be(TimeSpan.FromMinutes(21));
+        new IntakeEngineOptions { TimeoutMinutes = 20 }.EffectiveTimeout().Should().Be(TimeSpan.FromMinutes(21), "20 minutes is below one hang plus one retry");
+        new IntakeEngineOptions { TimeoutMinutes = 45 }.EffectiveTimeout().Should().Be(TimeSpan.FromMinutes(45), "a larger setting is kept");
+        new IntakeEngineOptions().EffectiveTimeout().Should().BeGreaterThanOrEqualTo(IntakeEngineOptions.MinimumTimeout);
+        TimeSpan.FromMinutes(IntakeEngineOptions.DefaultTimeoutMinutes).Should().BeGreaterThanOrEqualTo(IntakeEngineOptions.MinimumTimeout);
     }
 
     // ---------------------------------------------------------------------------------------------------------------------------
@@ -308,6 +323,7 @@ public sealed class IntakeEngineDispatchSeamTests
         bed.Run.RequestStage().Should().Be(IntakeRequestStages.NeedsTriage, "a person sees it");
         bed.Run.Dataverse.Get(IntakeRunStore.RunEntity, runId).GetAttributeValue<string>(IntakeRunStore.RunErrorCode).Should().Be(IntakeEngineCodes.InputInvalid);
         bed.Continuations.Should().BeEmpty();
+        bed.Run.Run(runId).State.Held.Should().BeNull("a failed run is not also held");
     }
 
     // ---------------------------------------------------------------------------------------------------------------------------
@@ -441,26 +457,54 @@ public sealed class IntakeEngineDispatchSeamTests
     // ---------------------------------------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task Timeout_WithNoCompletionFailsTheRunWithTheEngineTimeoutReason()
+    public async Task Timeout_WithNoCompletionHoldsTheRunWithTheEngineTimeoutReasonAndLeavesTheRequestAlone()
     {
+        // Spec NFR-05 governs (not the POML's "Failed"): an engine timeout is HELD with admin attention, re-drivable.
         var bed = new EngineBed();
         var runId = await bed.StartAsync();
+        var requestStage = bed.Run.RequestStage();
 
         bed.Run.Time.Advance(TimeSpan.FromMinutes(31));
         var outcome = await bed.Timeout.ProcessAsync(bed.Timeouts.Single().Job, CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Completed);
-        bed.Run.RunStatus(runId).Should().Be((int)ProcessingJobStatus.Failed);
+        bed.Run.RunStatus(runId).Should().Be((int)ProcessingJobStatus.InProgress, "held, not failed: an administrator re-drives it");
         var row = bed.Run.Dataverse.Get(IntakeRunStore.RunEntity, runId);
-        row.GetAttributeValue<string>(IntakeRunStore.RunErrorCode).Should().Be(IntakeEngineCodes.Timeout);
+        row.GetAttributeValue<string>(IntakeRunStore.RunErrorCode).Should().Be("intake.engine_timeout");
         row.GetAttributeValue<string>(IntakeRunStore.RunErrorMessage).Should().Be("engine timeout");
-        bed.Run.Run(runId).State.Awaiting.Should().BeNull();
-        bed.Run.RequestStage().Should().Be(IntakeRequestStages.NeedsTriage);
+        var run = bed.Run.Run(runId);
+        run.State.Held.Should().NotBeNull();
+        run.State.Held!.Code.Should().Be(IntakeEngineCodes.Timeout);
+        run.State.Held.Stage.Should().Be(nameof(IntakeRunStage.Analyse));
+        run.State.Awaiting.Should().BeNull();
+        run.State.Steps.Should().BeEmpty();
+        bed.Run.Dataverse.Get(IntakeRunStore.RunEntity, runId).Contains(IntakeRunStore.RunCompleted).Should().BeFalse("not terminal");
+        bed.Run.RequestStage().Should().Be(requestStage, "the request stage is left as it was; only a Failed run moves it to Needs triage");
     }
 
-    [Fact(DisplayName = "Seeding proof: remove the state check of the completion handler and this fails (a late completion would resurrect a failed run)")]
+    [Fact]
+    public async Task Timeout_OfAFirstDispatchThatWasNeverRecorded_HoldsTheRun()
+    {
+        // The orchestrator marked segment awaiting and the send threw before the dispatch was recorded: the execution column is
+        // EMPTY, so the timeout of that first dispatch is the run's own and still applies.
+        var bed = new EngineBed();
+        bed.OnRequest = () => throw new InvalidOperationException("the queue is down");
+        var runId = await bed.Run.CreateRunAsync();
+        (await bed.Advance(runId)).Status.Should().Be(JobStatus.Failed);
+        bed.Run.Run(runId).EngineExecutionId.Should().BeNullOrEmpty();
+        bed.Run.Run(runId).State.Awaiting.Should().BeEquivalentTo(new { Step = "segment", Dispatched = false });
+
+        await bed.Timeout.ProcessAsync(bed.Timeouts.Single().Job, CancellationToken.None);
+
+        bed.Run.Run(runId).State.Held!.Code.Should().Be(IntakeEngineCodes.Timeout);
+        bed.Run.RunStatus(runId).Should().Be((int)ProcessingJobStatus.InProgress);
+    }
+
+    [Fact]
     public async Task LateCompletionAfterTimeout_ChangesNothingAndContinuesNothing()
     {
+        // The guard that stops a late completion from resurrecting a held run is "the run no longer awaits this dispatch" (the
+        // timeout cleared the wait). The terminal-status guard has its own seeding-proof test below.
         var bed = new EngineBed();
         var runId = await bed.StartAsync();
         await bed.Timeout.ProcessAsync(bed.Timeouts.Single().Job, CancellationToken.None);
@@ -470,9 +514,169 @@ public sealed class IntakeEngineDispatchSeamTests
 
         late.Status.Should().Be(JobStatus.Completed, "a late completion is settled as a no-op, not retried");
         bed.Run.Dataverse.Writes.Count.Should().Be(writes);
+        bed.Run.Run(runId).State.Held!.Code.Should().Be(IntakeEngineCodes.Timeout, "a held run stays held until an administrator re-drives it");
+        bed.Run.Run(runId).State.Steps.Should().BeEmpty();
+        bed.Continuations.Should().BeEmpty("the run is not continued");
+    }
+
+    [Fact(DisplayName = "Seeding proof: remove the terminal-status check of the completion handler and this fails (the completion would be retried, not settled)")]
+    public async Task Completion_ForAFailedRunThatStillHasItsWaitSet_IsSettledAsANoChange()
+    {
+        // A run that is Failed yet still carries Awaiting {segment, Dispatched} and the segment/1 execution id: the only thing that
+        // stops its completion is the handler's terminal-status check (the store refuses too, which would make the handler retry it).
+        var bed = new EngineBed();
+        var runId = await bed.StartAsync();
+        var row = bed.Run.Dataverse.Get(IntakeRunStore.RunEntity, runId);
+        row[IntakeRunStore.RunStatus] = new OptionSetValue((int)ProcessingJobStatus.Failed);
+        bed.Run.Dataverse.Seed(row);
+        bed.Run.Run(runId).State.Awaiting.Should().NotBeNull("the seeded run still waits");
+        var writes = bed.Run.Dataverse.Writes.Count;
+
+        var late = await bed.Completion.ProcessAsync(bed.CompletionJob(runId, Segment, 1), CancellationToken.None);
+
+        late.Status.Should().Be(JobStatus.Completed, "a finished run's completion is settled, never retried into a dead-letter");
+        bed.Run.Dataverse.Writes.Count.Should().Be(writes);
         bed.Run.RunStatus(runId).Should().Be((int)ProcessingJobStatus.Failed, "a failed run stays failed");
         bed.Run.Run(runId).State.Steps.Should().BeEmpty();
         bed.Continuations.Should().BeEmpty("the run is not continued");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------------
+    // Binding to the dispatch (review F1): the window between "redline marked awaiting" and "redline dispatch recorded"
+    // ---------------------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Completion_OfThePreviousDispatchWhileTheNextIsBeingSent_IsNotRecordedAsTheNextStep()
+    {
+        var bed = new EngineBed();
+        var runId = await bed.StartWithFaultedRedlineDispatchAsync();
+        var writes = bed.Run.Dataverse.Writes.Count;
+        var continuations = bed.Continuations.Count;
+
+        // A redelivered segment completion: the run still records segment/1 as its dispatch, but it awaits an undispatched redline.
+        var duplicate = await bed.Completion.ProcessAsync(bed.CompletionJob(runId, Segment, 1), CancellationToken.None);
+
+        duplicate.Status.Should().Be(JobStatus.Completed);
+        bed.Run.Dataverse.Writes.Count.Should().Be(writes, "the segment's completion changes nothing while the redline is being sent");
+        var run = bed.Run.Run(runId);
+        run.State.Steps.Keys.Should().Equal("segment");
+        run.State.Steps.Should().NotContainKey("redline", "the segment's result is never recorded as the redline step");
+        run.State.Awaiting.Should().BeEquivalentTo(new { Step = "redline", Dispatched = false });
+        bed.Continuations.Count.Should().Be(continuations);
+    }
+
+    [Fact]
+    public async Task Completion_OfARedlineWhoseDispatchIsNotRecordedYet_IsRetriedNotRecorded()
+    {
+        var bed = new EngineBed();
+        var runId = await bed.StartWithFaultedRedlineDispatchAsync();
+
+        var early = await bed.Completion.ProcessAsync(bed.CompletionJob(runId, Redline, 1, check: "passed"), CancellationToken.None);
+
+        early.Status.Should().Be(JobStatus.Failed, "ahead of the recorded dispatch: retried until the orchestrator records it");
+        bed.Run.Run(runId).State.Steps.Should().NotContainKey("redline");
+    }
+
+    [Fact]
+    public async Task Timeout_OfTheSegmentWhileTheRunAwaitsAnUndispatchedRedline_ChangesNothing()
+    {
+        var bed = new EngineBed();
+        var runId = await bed.StartWithFaultedRedlineDispatchAsync();
+        var writes = bed.Run.Dataverse.Writes.Count;
+
+        var outcome = await bed.Timeout.ProcessAsync(bed.Timeouts.First().Job, CancellationToken.None); // segment/1's
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        bed.Run.Dataverse.Writes.Count.Should().Be(writes, "a finished dispatch's timeout never stops the step now being sent");
+        bed.Run.RunStatus(runId).Should().Be((int)ProcessingJobStatus.InProgress);
+        bed.Run.Run(runId).State.Held.Should().BeNull();
+        bed.Run.Run(runId).State.Awaiting!.Step.Should().Be("redline");
+        bed.Run.RequestStage().Should().NotBe(IntakeRequestStages.NeedsTriage);
+    }
+
+    [Fact]
+    public async Task Timeout_OfTheSegmentAfterTheRunWasHeldExhaustedOnTheRedline_ChangesNothing()
+    {
+        var bed = new EngineBed();
+        var runId = await bed.StartWithFaultedRedlineDispatchAsync(finalDelivery: true);
+        var held = bed.Run.Run(runId).State.Held;
+        held.Should().NotBeNull();
+        held!.Code.Should().Be(IntakeRunCodes.Exhausted);
+        var writes = bed.Run.Dataverse.Writes.Count;
+
+        var outcome = await bed.Timeout.ProcessAsync(bed.Timeouts.First().Job, CancellationToken.None); // segment/1's
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        bed.Run.Dataverse.Writes.Count.Should().Be(writes, "a held run is the administrator's, not a stale timeout's");
+        bed.Run.RunStatus(runId).Should().Be((int)ProcessingJobStatus.InProgress);
+        bed.Run.Run(runId).State.Held!.Code.Should().Be(IntakeRunCodes.Exhausted);
+        bed.Run.Dataverse.Get(IntakeRunStore.RunEntity, runId).GetAttributeValue<string>(IntakeRunStore.RunErrorCode).Should().Be(IntakeRunCodes.Exhausted);
+    }
+
+    [Fact]
+    public async Task Timeout_OfTheRedlineWhileTheExecutionColumnStillNamesTheSegment_ChangesNothing()
+    {
+        // The run's execution column names segment/1: only a segment/1 timeout can match it, never the redline/1 one, even though
+        // the run awaits "redline" (an undispatched one).
+        var bed = new EngineBed();
+        var runId = await bed.StartWithFaultedRedlineDispatchAsync();
+        var writes = bed.Run.Dataverse.Writes.Count;
+
+        await bed.Timeout.ProcessAsync(bed.Timeouts.Last().Job, CancellationToken.None); // redline/1's
+
+        bed.Run.Dataverse.Writes.Count.Should().Be(writes, "the unrecorded case is allowed only when the execution column is empty");
+        bed.Run.Run(runId).State.Held.Should().BeNull();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------------
+    // Stop order (review F1): the fence first, the request next, the terminal status last
+    // ---------------------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Stop_AFailHoldsTheRunFirstThenMovesTheRequestThenWritesTheTerminalStatusLast()
+    {
+        var bed = new EngineBed();
+        var runId = await bed.StartAsync();
+        var before = bed.Run.Dataverse.Writes.Count;
+
+        await bed.Completion.ProcessAsync(bed.CompletionJob(runId, Segment, 1, outcome: "input_invalid"), CancellationToken.None);
+
+        var writes = bed.Run.Dataverse.Writes.Skip(before).ToList();
+        writes.Select(w => w.Entity).Should().Equal(IntakeRunStore.RunEntity, IntakeRunStore.RequestEntity, IntakeRunStore.RunEntity);
+        writes[0].Fields.Should().NotContainKey(IntakeRunStore.RunStatus, "the first run write is the fence, not the terminal status");
+        IntakeRunState.Parse((string?)writes[0].Fields[IntakeRunStore.RunState]).Held!.Code.Should().Be(IntakeEngineCodes.InputInvalid);
+        ((OptionSetValue)writes[1].Fields[IntakeRunStore.RequestIntakeStage]!).Value.Should().Be(IntakeRequestStages.NeedsTriage);
+        ((OptionSetValue)writes[2].Fields[IntakeRunStore.RunStatus]!).Value.Should().Be((int)ProcessingJobStatus.Failed, "the terminal status is the LAST write");
+        bed.Run.Run(runId).State.Held.Should().BeNull("a failed run is not also held");
+    }
+
+    [Fact]
+    public async Task Stop_ACompletionRecordedBetweenTheReadAndTheWrite_LeavesTheRequestStageUnchanged()
+    {
+        var bed = new EngineBed();
+        var runId = await bed.StartAsync();
+        var requestStage = bed.Run.RequestStage();
+        var reads = 0;
+        bed.Run.Dataverse.RunReadGate = async () =>
+        {
+            // Read 1 is the handler's; read 2 is the stop's. A concurrent delivery records the segment's result right after it.
+            if (Interlocked.Increment(ref reads) == 2)
+            {
+                var recorded = await bed.Run.Store.RecordExternalStepResultAsync(
+                    runId, Segment, new IntakeHarnessResultReference { Kind = IntakeEngineResultKinds.Segment, Reference = $"{runId:D}/out/segment/1/" },
+                    CancellationToken.None, expectedExecutionId: $"IntakeEngine:{runId:D}:segment:1");
+                recorded.Should().BeTrue();
+            }
+        };
+
+        var outcome = await bed.Completion.ProcessAsync(bed.CompletionJob(runId, Segment, 1, outcome: "input_invalid"), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        reads.Should().BeGreaterThanOrEqualTo(2);
+        bed.Run.RequestStage().Should().Be(requestStage, "a stop whose fence lost writes nothing to the request");
+        bed.Run.RunStatus(runId).Should().Be((int)ProcessingJobStatus.InProgress);
+        bed.Run.Run(runId).State.Steps.Should().ContainKey("segment");
+        bed.Run.Run(runId).State.Held.Should().BeNull();
     }
 
     [Fact]
@@ -801,7 +1005,28 @@ internal sealed class EngineBed
     }
 
     /// <summary>Delivers the run's IntakeRun job (the orchestrator).</summary>
-    public Task<JobOutcome> Advance(Guid runId) => CreateRunHandler().ProcessAsync(IntakeRunTestBed.Job(runId), CancellationToken.None);
+    public Task<JobOutcome> Advance(Guid runId, int deliveryCount = 1) =>
+        CreateRunHandler().ProcessAsync(IntakeRunTestBed.Job(runId, deliveryCount: deliveryCount), CancellationToken.None);
+
+    /// <summary>
+    /// The run after the redline dispatch faulted: segment is recorded and its continuation delivered, the orchestrator marked
+    /// <c>redline</c> awaiting and its request send threw, so the run awaits an UNDISPATCHED redline while its execution id still
+    /// names the segment (the window of review F1). <paramref name="finalDelivery"/> makes that delivery the last one: the run is held Exhausted.
+    /// </summary>
+    public async Task<Guid> StartWithFaultedRedlineDispatchAsync(bool finalDelivery = false)
+    {
+        var runId = await StartAsync();
+        await Completion.ProcessAsync(CompletionJob(runId, IntakeEngineOperations.Segment, 1), CancellationToken.None);
+        OnRequest = () => throw new InvalidOperationException("the queue is down");
+        var outcome = await Advance(runId, deliveryCount: finalDelivery ? JobContract.MaxDeliveryCount : 1);
+        outcome.Status.Should().Be(finalDelivery ? JobStatus.Poisoned : JobStatus.Failed);
+        OnRequest = null;
+
+        var run = Run.Run(runId);
+        run.State.Awaiting.Should().BeEquivalentTo(new { Step = "redline", Dispatched = false }, "marked awaiting before the send, never recorded as sent");
+        run.EngineExecutionId.Should().Be($"IntakeEngine:{runId:D}:segment:1", "the previous dispatch is still the recorded one");
+        return runId;
+    }
 
     public IntakeEngineDispatchRequest Request(Guid runId, string operation, int attempt) => new()
     {

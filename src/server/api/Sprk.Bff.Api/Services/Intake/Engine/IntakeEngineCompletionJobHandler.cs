@@ -15,8 +15,9 @@ namespace Sprk.Bff.Api.Services.Intake.Engine;
 /// <para><b>Untrusted input.</b> A completion comes from the container that parses untrusted documents. Only the operation, run id,
 /// dispatch attempt, outcome and check outcome are read (<see cref="IntakeEngineCompletion.TryParse"/>), each against a closed set; no
 /// path, text or id other than those is read, and the output paths stored on the run are DERIVED from the run id
-/// (<see cref="IntakeEngineDispatchId.OutPrefix"/>). The run must exist, be an intake run, be awaiting, and be awaiting exactly this
-/// dispatch (the run's <c>sprk_engineexecutionid</c> equals the request's key): anything else changes nothing and completes the message.</para>
+/// (<see cref="IntakeEngineDispatchId.OutPrefix"/>). The run must exist, be an intake run, be awaiting the step this operation names
+/// AS A DISPATCHED STEP, and be awaiting exactly this dispatch (the run's <c>sprk_engineexecutionid</c> equals the request's key; an
+/// engine step is named by its operation): anything else changes nothing and completes the message.</para>
 /// <para><b>Classification of a completion against the run's recorded dispatch</b> (by position: attempt, then operation order):
 /// equal is acted on; a LATER position than the recorded one means the orchestrator has not recorded the dispatch yet (it writes
 /// the execution id after the send), so the message is retried; an EARLIER one is superseded and is a no-op.</para>
@@ -24,7 +25,7 @@ namespace Sprk.Bff.Api.Services.Intake.Engine;
 /// the run still awaiting that dispatch). The continuation (<c>IntakeRun</c> job, key <c>intake-run-{runId}</c>) is sent after the
 /// record and a marker <c>engine-continued:{operation}:{attempt}</c> is written after the send: a redelivery that finds the result
 /// recorded but no marker (the earlier delivery died in between) sends the continuation again, one that finds the marker sends
-/// nothing. A late completion after the timeout finds a terminal run and changes nothing.</para>
+/// nothing. A late completion after the timeout finds a held run that no longer awaits the dispatch and changes nothing.</para>
 /// <para><b>Outcomes.</b> <c>completed</c> segment: result stored, continue. <c>completed</c> redline: check <c>passed</c> stores the
 /// result and continues; <c>failed</c> (FR-09c) or no valid check outcome holds the run (nothing is sent for approval).
 /// <c>plan_does_not_fit</c> and <c>contract_error</c> hold; <c>input_invalid</c> fails the run, because the draft can never be read.</para>
@@ -87,7 +88,7 @@ public sealed class IntakeEngineCompletionJobHandler : IJobHandler
 
         if (IntakeRunStore.IsTerminalStatus(run.Status))
         {
-            return NoChange("the run is finished"); // includes a late completion after the hard timeout failed the run
+            return NoChange("the run is finished"); // a run failed by an earlier completion (input_invalid), or completed
         }
 
         // 2. Which dispatch has the orchestrator recorded?
@@ -103,12 +104,14 @@ public sealed class IntakeEngineCompletionJobHandler : IJobHandler
             return Retry("the run has not recorded this dispatch yet");
         }
 
-        // 3. The run's wait.
+        // 3. The run's wait. A completion is accepted only for the step the run awaits as a DISPATCHED step: the orchestrator marks
+        // the next step awaiting (undispatched) BEFORE it sends, and records the dispatch after, so in that window the execution id
+        // still names the previous dispatch and a redelivered completion of it must not be taken for the new step's (review F1).
         var key = dispatch.Key;
-        if (run.State.Awaiting is not { } awaiting)
+        if (run.State.Awaiting is not { Dispatched: true } awaiting || awaiting.Step != dispatch.Operation)
         {
-            // Not waiting: either an earlier delivery of THIS completion recorded it (finish its continuation when that died before
-            // the send), or the wait ended some other way (held, failed): nothing.
+            // Not waiting for this dispatch: either an earlier delivery of THIS completion recorded it (finish its continuation when
+            // that died before the send), or the wait ended or moved on some other way (held, failed, the next step): nothing.
             var recordedHere = run.State.Steps.Values.Any(r => r.Reference == dispatch.OutPrefix);
             if (recordedHere && !run.State.Markers.ContainsKey(dispatch.ContinuationMarker))
             {
@@ -116,7 +119,7 @@ public sealed class IntakeEngineCompletionJobHandler : IJobHandler
                 return Done();
             }
 
-            return NoChange(recordedHere ? "already handled" : "the run is not awaiting the engine");
+            return NoChange(recordedHere ? "already handled" : "the run is not awaiting this dispatch");
         }
 
         // 4. What the engine said.
@@ -125,7 +128,7 @@ public sealed class IntakeEngineCompletionJobHandler : IJobHandler
         {
             case Disposition.Record:
                 var result = new IntakeHarnessResultReference { Kind = decision.ResultKind!, Reference = dispatch.OutPrefix };
-                if (!await _store.RecordExternalStepResultAsync(dispatch.RunId, awaiting.Step, result, ct, expectedExecutionId: key).ConfigureAwait(false))
+                if (!await _store.RecordExternalStepResultAsync(dispatch.RunId, dispatch.Operation, result, ct, expectedExecutionId: key).ConfigureAwait(false))
                 {
                     // Changed since the read (a timeout, a hold, another delivery): decide again on the stored state.
                     return Retry("the run changed while its completion was recorded");
@@ -141,7 +144,7 @@ public sealed class IntakeEngineCompletionJobHandler : IJobHandler
                 var stop = new IntakeExternalStop(
                     decision.Disposition == Disposition.Fail ? IntakeExternalStopKind.Fail : IntakeExternalStopKind.Hold,
                     IntakeEngineOperations.StageOf(dispatch.Operation), decision.Code!, decision.Message!);
-                var written = await _store.StopAwaitedStepAsync(dispatch.RunId, key, acceptUnrecordedExecution: false, stop, ct).ConfigureAwait(false);
+                var written = await _store.StopAwaitedStepAsync(dispatch.RunId, dispatch.Operation, key, acceptUnrecordedExecution: false, stop, ct).ConfigureAwait(false);
                 switch (written)
                 {
                     case IntakeExternalWriteResult.Written:

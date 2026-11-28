@@ -385,7 +385,16 @@ public class IntakeRunStore
     /// When set, the run's <see cref="IntakeRunSnapshot.EngineExecutionId"/> must equal it, checked on the same read the write is
     /// conditional on: a completion of an older dispatch attempt never records its result against a newer one (task 014).
     /// </param>
-    /// <returns>False (nothing written) when the run is gone, terminal, or not awaiting <paramref name="step"/>, the step already has a result, or the execution id differs.</returns>
+    /// <returns>
+    /// False (nothing written) when the run is gone, terminal, or not awaiting <paramref name="step"/> as a DISPATCHED step
+    /// (<see cref="IntakeAwaitingStep.Dispatched"/>), the step already has a result, or the execution id differs.
+    /// </returns>
+    /// <remarks>
+    /// The orchestrator writes <c>Awaiting = {step, Dispatched: false}</c> before it sends, and the dispatched flag and the execution
+    /// id in ONE write after it (review F1). Until then the execution id still names the previous dispatch, so a redelivered
+    /// completion of that previous dispatch must not be recorded against the step now being sent: only a run awaiting a dispatched
+    /// <paramref name="step"/> accepts a result, and the execution id then belongs to that dispatch.
+    /// </remarks>
     public virtual async Task<bool> RecordExternalStepResultAsync(
         Guid runId, string step, IntakeHarnessResultReference result, CancellationToken ct, string? expectedExecutionId = null)
     {
@@ -395,7 +404,7 @@ public class IntakeRunStore
         {
             var run = await ReadRunAsync(runId, ct).ConfigureAwait(false);
             if (run is null || run.RowVersion is null || IsTerminalStatus(run.Status)
-                || run.State.Awaiting?.Step != step || run.State.Steps.ContainsKey(step)
+                || run.State.Awaiting is not { Dispatched: true } awaiting || awaiting.Step != step || run.State.Steps.ContainsKey(step)
                 || (expectedExecutionId is not null && run.EngineExecutionId != expectedExecutionId))
             {
                 return false;
@@ -417,27 +426,40 @@ public class IntakeRunStore
 
     /// <summary>
     /// Stops the run's wait on an external step without a result (task 014): <see cref="IntakeExternalStopKind.Hold"/> (a failed
-    /// <c>check_outputs</c>, a plan that does not fit: status stays In Progress, admin-attention text, nothing continues) or
-    /// <see cref="IntakeExternalStopKind.Fail"/> (the hard timeout, an unreadable draft: terminal Failed with the code, the
-    /// request moved to Needs triage first so a person sees it, the terminal status written last).
+    /// <c>check_outputs</c>, a plan that does not fit, the hard timeout: status stays In Progress, admin-attention text, nothing
+    /// continues, an administrator re-drives it) or <see cref="IntakeExternalStopKind.Fail"/> (an unreadable draft: terminal Failed
+    /// with the code, the request moved to Needs triage so a person sees it).
     /// </summary>
     /// <remarks>
-    /// Applies only while the run is awaiting the dispatch named by <paramref name="executionId"/> (the engine request's key), so a
-    /// completion or timeout of an older attempt, or of a step the run has left, changes nothing. A run a live delivery holds is
-    /// <see cref="IntakeExternalWriteResult.Busy"/> (the caller retries), so this never writes under the orchestrator's claim. The
-    /// step stays unrecorded and the wait is cleared: a re-driven run dispatches the step again (under a new attempt).
+    /// <para><b>Bound to its dispatch (review F1).</b> Applies only while the run awaits <paramref name="step"/> as a DISPATCHED step
+    /// whose execution id is <paramref name="executionId"/> (the engine request's key), and is not already held. A completion or
+    /// timeout of an older attempt, of a step the run has left, of a step whose dispatch is not recorded yet (the orchestrator
+    /// marks it awaiting before the send and records the dispatch after), or of a run an administrator is looking at, changes
+    /// nothing. A run a live delivery holds is <see cref="IntakeExternalWriteResult.Busy"/> (the caller retries), so this never
+    /// writes under the orchestrator's claim. The step stays unrecorded and the wait is cleared: a re-driven run dispatches the
+    /// step again (under a new attempt).</para>
+    /// <para><b>Order.</b> The first write is conditional on the version read and is the fence: it clears the wait and puts the run
+    /// on hold, so a result recorded since the read makes it fail and the decision is taken again on the new row. Only after it
+    /// succeeded is a <see cref="IntakeExternalStopKind.Fail"/> carried on: the request moves to Needs triage, then the terminal
+    /// status is written LAST. A crash in between leaves the run held (visible to an administrator) and the request in triage,
+    /// never a request in triage whose run is still waiting.</para>
     /// </remarks>
-    /// <param name="acceptUnrecordedExecution">True for the timeout: a dispatch whose execution id was never recorded still times out.</param>
+    /// <param name="step">The awaited step the dispatch belongs to (an engine step is named by its operation).</param>
+    /// <param name="acceptUnrecordedExecution">
+    /// True for the timeout: a dispatch whose execution id was never recorded still times out, but only while the run's execution
+    /// column is EMPTY; a column naming another dispatch is that dispatch's wait, not this one's.
+    /// </param>
     public virtual async Task<IntakeExternalWriteResult> StopAwaitedStepAsync(
-        Guid runId, string executionId, bool acceptUnrecordedExecution, IntakeExternalStop stop, CancellationToken ct)
+        Guid runId, string step, string executionId, bool acceptUnrecordedExecution, IntakeExternalStop stop, CancellationToken ct)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(step);
         ArgumentException.ThrowIfNullOrWhiteSpace(executionId);
         ArgumentNullException.ThrowIfNull(stop);
         for (var attempt = 1; ; attempt++)
         {
             var run = await ReadRunAsync(runId, ct).ConfigureAwait(false);
-            if (run is null || run.RowVersion is null || IsTerminalStatus(run.Status) || run.State.Awaiting is null
-                || !(run.EngineExecutionId == executionId || (acceptUnrecordedExecution && string.IsNullOrEmpty(run.EngineExecutionId))))
+            if (run is null || run.RowVersion is null || IsTerminalStatus(run.Status) || run.State.Held is not null
+                || !AwaitsDispatch(run, step, executionId, acceptUnrecordedExecution))
             {
                 return IntakeExternalWriteResult.NotApplicable;
             }
@@ -448,39 +470,86 @@ public class IntakeRunStore
                 return IntakeExternalWriteResult.Busy;
             }
 
+            run.State.Awaiting = null;
+            run.State.Claim = null;
+            run.State.Held = new IntakeRunHold(stop.Stage.ToString(), stop.Code, now);
             var fields = new Dictionary<string, object>
             {
                 [RunCurrentStage] = stop.Stage.ToString(),
                 [RunErrorCode] = stop.Code,
                 [RunErrorMessage] = stop.Message,
+                [RunState] = Serialize(run.State),
             };
-            run.State.Awaiting = null;
-            run.State.Claim = null;
-            if (stop.Kind == IntakeExternalStopKind.Hold)
-            {
-                run.State.Held = new IntakeRunHold(stop.Stage.ToString(), stop.Code, now);
-            }
-            else
-            {
-                run.State.Held = null;
-                fields[RunStatus] = new OptionSetValue((int)ProcessingJobStatus.Failed);
-                fields[RunCompleted] = now.UtcDateTime;
-                if (run.RequestId is { } requestId)
-                {
-                    // Before the terminal write: a crash between the two leaves the run awaiting, and the redelivered message repeats both.
-                    await WriteRequestStageAsync(requestId, runId, IntakeRequestStages.NeedsTriage, makeCurrentRun: false, ct).ConfigureAwait(false);
-                }
-            }
-
-            fields[RunState] = Serialize(run.State);
             try
             {
                 await _entities.UpdateIfRowVersionMatchesAsync(RunEntity, runId, run.RowVersion, fields, ct).ConfigureAwait(false);
-                return IntakeExternalWriteResult.Written;
             }
             catch (System.Data.DBConcurrencyException) when (attempt < MaxConcurrencyRetries)
             {
-                // Changed since the read (a completion recorded, a claim taken): decide again on the new row.
+                // Changed since the read (a completion recorded, a claim taken): decide again on the new row. Nothing else was written.
+                continue;
+            }
+
+            if (stop.Kind == IntakeExternalStopKind.Fail)
+            {
+                await FailHeldRunAsync(run, stop, ct).ConfigureAwait(false);
+            }
+
+            return IntakeExternalWriteResult.Written;
+        }
+    }
+
+    /// <summary>
+    /// The run awaits <paramref name="step"/> as a dispatched step whose execution id is <paramref name="executionId"/>; or, when
+    /// <paramref name="acceptUnrecordedExecution"/>, awaits <paramref name="step"/> with no execution id recorded at all.
+    /// </summary>
+    private static bool AwaitsDispatch(IntakeRunSnapshot run, string step, string executionId, bool acceptUnrecordedExecution)
+    {
+        if (run.State.Awaiting is not { } awaiting || awaiting.Step != step || run.State.Steps.ContainsKey(step))
+        {
+            return false;
+        }
+
+        return (awaiting.Dispatched && run.EngineExecutionId == executionId)
+            || (acceptUnrecordedExecution && string.IsNullOrEmpty(run.EngineExecutionId));
+    }
+
+    /// <summary>
+    /// The second half of a <see cref="IntakeExternalStopKind.Fail"/>, after the fence write held the run: the request moves to Needs
+    /// triage, then the run's terminal status is written last. Skipped (the hold stands) when the held run was touched since.
+    /// </summary>
+    private async Task FailHeldRunAsync(IntakeRunSnapshot fenced, IntakeExternalStop stop, CancellationToken ct)
+    {
+        if (fenced.RequestId is { } requestId)
+        {
+            await WriteRequestStageAsync(requestId, fenced.RunId, IntakeRequestStages.NeedsTriage, makeCurrentRun: false, ct).ConfigureAwait(false);
+        }
+
+        for (var attempt = 1; ; attempt++)
+        {
+            var held = await ReadRunAsync(fenced.RunId, ct).ConfigureAwait(false);
+            if (held is null || held.RowVersion is null || IsTerminalStatus(held.Status) || held.State.Claim is not null
+                || held.State.Awaiting is not null || held.State.Held?.Code != stop.Code)
+            {
+                // A re-drive claimed the run (or a result was recorded) since the fence: the hold stands, the run is not failed over it.
+                _logger.LogInformation("Intake run {RunId}: held for {Code}, then changed before it could be failed; the hold stands", fenced.RunId, stop.Code);
+                return;
+            }
+
+            held.State.Held = null;
+            var terminal = new Dictionary<string, object>
+            {
+                [RunStatus] = new OptionSetValue((int)ProcessingJobStatus.Failed),
+                [RunCompleted] = _time.GetUtcNow().UtcDateTime,
+                [RunState] = Serialize(held.State),
+            };
+            try
+            {
+                await _entities.UpdateIfRowVersionMatchesAsync(RunEntity, fenced.RunId, held.RowVersion, terminal, ct).ConfigureAwait(false);
+                return;
+            }
+            catch (System.Data.DBConcurrencyException) when (attempt < MaxConcurrencyRetries)
+            {
             }
         }
     }

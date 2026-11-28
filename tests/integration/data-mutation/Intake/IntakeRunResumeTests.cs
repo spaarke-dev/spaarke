@@ -151,17 +151,25 @@ public sealed class IntakeRunResumeTests
         row[IntakeRunStore.RunState] = state.Serialize();
         bed.Dataverse.Seed(row);
 
-        // The engine's completion lands after the redelivery claimed the run, while it re-reads to mark the step awaiting.
+        // The engine's completion lands after the redelivery claimed the run, while it re-reads to mark the step awaiting. The store
+        // itself refuses a result for a step that is awaiting but not dispatched (task 014 review F1), so the record is applied the way
+        // a completion of the earlier, recorded dispatch would have left the row.
         var reads = 0;
         var recorded = false;
-        bed.Dataverse.RunReadGate = async () =>
+        bed.Dataverse.RunReadGate = () =>
         {
             if (Interlocked.Increment(ref reads) == 2 && !recorded)
             {
                 recorded = true;
-                (await bed.Store.RecordExternalStepResultAsync(runId, "segment", RecordingHarness.Reference("segment", runId), CancellationToken.None))
-                    .Should().BeTrue();
+                var current = bed.Dataverse.Get(IntakeRunStore.RunEntity, runId);
+                var stored = IntakeRunState.Parse(current.GetAttributeValue<string>(IntakeRunStore.RunState));
+                stored.Steps["segment"] = RecordingHarness.Reference("segment", runId);
+                stored.Awaiting = null;
+                bed.Dataverse.Object.UpdateAsync(IntakeRunStore.RunEntity, runId,
+                    new Dictionary<string, object> { [IntakeRunStore.RunState] = stored.Serialize() }, CancellationToken.None).GetAwaiter().GetResult();
             }
+
+            return Task.CompletedTask;
         };
 
         var outcome = await bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId, deliveryCount: 2), CancellationToken.None);
@@ -171,6 +179,33 @@ public sealed class IntakeRunResumeTests
         bed.Harness.StepCalls["segment"].Should().Be(1, "a step whose result is stored is never dispatched again");
         bed.Harness.StepCalls["edit-plan"].Should().Be(1);
         bed.Run(runId).State.Awaiting!.Step.Should().Be("redline");
+    }
+
+    [Fact]
+    public async Task RecordExternalStepResultAsync_ForAStepAwaitedButNotYetDispatched_IsRefusedUntilItsDispatchIsRecorded()
+    {
+        // Task 014 review F1: the orchestrator marks a step awaiting before it sends and records the dispatch after; in between, the run's
+        // execution id still names the previous dispatch, so a result for it must not be stored as this step's.
+        var bed = new IntakeRunTestBed { Harness = new RecordingHarness("nda", externalEngineSteps: true) };
+        var runId = await bed.CreateRunAsync();
+        await bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId), CancellationToken.None); // segment dispatched, exec-segment recorded
+        var row = bed.Dataverse.Get(IntakeRunStore.RunEntity, runId);
+        var state = IntakeRunState.Parse(row.GetAttributeValue<string>(IntakeRunStore.RunState));
+        state.Awaiting = state.Awaiting! with { Dispatched = false };
+        row[IntakeRunStore.RunState] = state.Serialize();
+        bed.Dataverse.Seed(row);
+
+        (await bed.Store.RecordExternalStepResultAsync(runId, "segment", RecordingHarness.Reference("segment", runId), CancellationToken.None, expectedExecutionId: "exec-segment"))
+            .Should().BeFalse("the step is awaiting but its dispatch is not recorded");
+        bed.Run(runId).State.Steps.Should().BeEmpty();
+        bed.Run(runId).State.Awaiting.Should().NotBeNull();
+
+        state.Awaiting = state.Awaiting! with { Dispatched = true };
+        row = bed.Dataverse.Get(IntakeRunStore.RunEntity, runId);
+        row[IntakeRunStore.RunState] = state.Serialize();
+        bed.Dataverse.Seed(row);
+        (await bed.Store.RecordExternalStepResultAsync(runId, "segment", RecordingHarness.Reference("segment", runId), CancellationToken.None, expectedExecutionId: "exec-segment"))
+            .Should().BeTrue("once the dispatch is recorded the same result is accepted");
     }
 
     private static Func<IntakeRunState, bool> Condition(string crashPoint)

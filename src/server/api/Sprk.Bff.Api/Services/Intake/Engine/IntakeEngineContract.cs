@@ -84,7 +84,7 @@ public static class IntakeEngineCodes
     /// <summary>The engine could not read the draft (not a usable .docx): the run can never succeed, so it Fails.</summary>
     public const string InputInvalid = "intake.engine_input_invalid";
 
-    /// <summary>No completion arrived within the hard timeout (NFR-05): the run Fails with this code, "engine timeout".</summary>
+    /// <summary>No completion arrived within the hard timeout (NFR-05): the run is held with this code, "engine timeout".</summary>
     public const string Timeout = "intake.engine_timeout";
 }
 

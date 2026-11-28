@@ -8,14 +8,16 @@ namespace Sprk.Bff.Api.Services.Intake.Engine;
 /// <summary>
 /// The hard timeout of an engine dispatch (spaarke-intake-pipeline-r1 task 014, FR-09, NFR-05; ADR-052: a scheduled Service Bus
 /// message handled by an <see cref="IJobHandler"/>, no timer service). The dispatcher schedules one per request, before it sends the
-/// request; when it fires and the run is STILL awaiting that exact dispatch, the run is Failed with <see cref="IntakeEngineCodes.Timeout"/>
-/// ("engine timeout") and its request moves to Needs triage.
+/// request; when it fires and the run is STILL awaiting that exact dispatch, the run is HELD with <see cref="IntakeEngineCodes.Timeout"/>
+/// ("engine timeout") and admin-attention text, and its request stage is left as it was (spec NFR-05: held, not Failed; an
+/// administrator re-drives the run, which dispatches the step again under a new attempt).
 /// </summary>
 /// <remarks>
 /// <para><b>Only a waiting run times out.</b> A completion that was handled first cleared the wait, so the timeout of a dispatch that
 /// finished, was superseded by a later attempt or operation, or belongs to a run that is already terminal or held changes nothing:
-/// <see cref="IntakeRunStore.StopAwaitedStepAsync"/> applies only while the run awaits the dispatch named by the message. The reverse
-/// race (a completion arriving after the timeout) finds a terminal run and is a no-op in the completion handler.</para>
+/// <see cref="IntakeRunStore.StopAwaitedStepAsync"/> applies only while the run awaits the dispatch named by the message and is not
+/// already held. The reverse race (a completion arriving after the timeout) finds a run that no longer awaits the dispatch and is a
+/// no-op in the completion handler.</para>
 /// <para>Registered as an <see cref="IJobHandler"/> on the BFF jobs queue (<c>sdap-jobs</c>): the timeout is the BFF's own message.
 /// A run a live delivery holds is retried by the normal back-off; the message never writes under another delivery's claim.</para>
 /// <para>ADR-015: ids and closed codes only; the stored message is "engine timeout".</para>
@@ -77,13 +79,13 @@ public sealed class IntakeEngineTimeoutJobHandler : IJobHandler
         }
 
         var stop = new IntakeExternalStop(
-            IntakeExternalStopKind.Fail, IntakeEngineOperations.StageOf(dispatch.Operation), IntakeEngineCodes.Timeout, TimeoutMessage);
-        var result = await _store.StopAwaitedStepAsync(dispatch.RunId, dispatch.Key, acceptUnrecordedExecution: true, stop, ct).ConfigureAwait(false);
+            IntakeExternalStopKind.Hold, IntakeEngineOperations.StageOf(dispatch.Operation), IntakeEngineCodes.Timeout, TimeoutMessage);
+        var result = await _store.StopAwaitedStepAsync(dispatch.RunId, dispatch.Operation, dispatch.Key, acceptUnrecordedExecution: true, stop, ct).ConfigureAwait(false);
         switch (result)
         {
             case IntakeExternalWriteResult.Written:
                 _logger.LogWarning(
-                    "Intake run {RunId}: no completion for {Operation} attempt {DispatchAttempt} within the hard timeout; the run is Failed ({Code})",
+                    "Intake run {RunId}: no completion for {Operation} attempt {DispatchAttempt} within the hard timeout; the run is held for an administrator ({Code})",
                     dispatch.RunId, dispatch.Operation, dispatch.DispatchAttempt, IntakeEngineCodes.Timeout);
                 return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
 

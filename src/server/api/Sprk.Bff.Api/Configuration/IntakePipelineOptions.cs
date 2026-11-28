@@ -89,20 +89,33 @@ public sealed class IntakeEngineOptions
     public string StagingContainer { get; set; } = "intake-staging";
 
     /// <summary>
-    /// The hard timeout in minutes: how long a dispatched step may wait for its completion before the run is failed ("engine
-    /// timeout", NFR-05). Never below <see cref="MinimumTimeout"/> (the engine job's own retry window plus a minute: a shorter
-    /// timeout fails runs the job is still retrying). Not positive: <see cref="DefaultTimeoutMinutes"/>.
+    /// The hard timeout in minutes: how long a dispatched step may wait for its completion before the run is held for an
+    /// administrator ("engine timeout", NFR-05). Never below <see cref="MinimumTimeout"/> (two engine executions plus the first
+    /// back-off: a shorter timeout holds runs the job is still working on). Not positive: <see cref="DefaultTimeoutMinutes"/>.
     /// </summary>
     public int TimeoutMinutes { get; set; } = DefaultTimeoutMinutes;
 
     /// <summary>
     /// 30: a normal pass takes about two minutes; this leaves room for one engine-job timeout (10 minutes), the first back-off
-    /// (1 minute) and a second full run.
+    /// (1 minute) and a second full run (the <see cref="MinimumTimeout"/> of 21 minutes) with nine minutes to spare.
     /// </summary>
     public const int DefaultTimeoutMinutes = 30;
 
-    /// <summary>The floor of <see cref="TimeoutMinutes"/>: <c>JobContract.RetryWindow</c> (the engine job's 1+2+4+8 minute back-off) plus one minute.</summary>
-    public static TimeSpan MinimumTimeout => Sprk.Bff.Api.Services.Jobs.JobContract.RetryWindow + TimeSpan.FromMinutes(1);
+    /// <summary>
+    /// The engine job's hard stop per execution: <c>replicaTimeoutSeconds</c> (600) in <c>infrastructure/bicep/modules/intake-engine-job.bicep</c>
+    /// (spec NFR-05, 10 minutes). Keep it equal to that value: a change there is a change here.
+    /// </summary>
+    public static readonly TimeSpan EngineReplicaTimeout = TimeSpan.FromSeconds(600);
+
+    /// <summary>
+    /// The floor of <see cref="TimeoutMinutes"/>: the longest a dispatch can legitimately take before its completion arrives, which is
+    /// one execution that hangs to the replica timeout (<see cref="EngineReplicaTimeout"/>), the first Service Bus back-off
+    /// (<c>JobContract.RetryDelay(1)</c>, 1 minute: the job's <c>replicaRetryLimit</c> is 0 and redelivery is the retry), and a
+    /// second full execution, i.e. 2 x 10 + 1 = 21 minutes. Any shorter timeout holds a run whose engine is still working or about
+    /// to be redelivered. (It is not the whole redelivery window: the engine job's redeliveries are its own, and an engine that
+    /// fails every delivery ends in its dead-letter queue, which the timeout then reports.)
+    /// </summary>
+    public static TimeSpan MinimumTimeout => (2 * EngineReplicaTimeout) + Sprk.Bff.Api.Services.Jobs.JobContract.RetryDelay(1);
 
     /// <summary>The timeout in force: configured, bounded below by <see cref="MinimumTimeout"/>.</summary>
     public TimeSpan EffectiveTimeout()
