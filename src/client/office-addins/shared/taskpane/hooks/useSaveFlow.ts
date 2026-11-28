@@ -13,7 +13,7 @@ import { createSseConnection, type SseConnection, type SseEvent } from '../servi
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { toDocxFileName } from '../utils/documentFileName';
 import { EmailContentCaptureContext } from './emailContentCaptureContext';
-import type { EmailContentCapture } from '../services/emailContentCapture';
+import { EmailCaptureError, type EmailContentCapture } from '../services/emailContentCapture';
 import {
   readEmailFilingProblem,
   type EmailFilingOutcome,
@@ -1816,20 +1816,36 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       abortControllerRef.current = new AbortController();
       const signal = abortControllerRef.current.signal;
 
-      let captured: EmailContentCapture;
-      try {
-        captured = await captureEmailContent(ticked, new Set(ticked.map(a => a.id)));
-      } catch (err) {
-        failAll(createErrorFromException(err, 'This email could not be read, so nothing was saved.').message);
-        return;
-      }
-
       const saved: string[] = [];
       const failed: AttachmentsOnlyOutcome['failed'] = [];
       const alreadyInSpaarke: NonNullable<AttachmentsOnlyOutcome['alreadyInSpaarke']> = [];
-      // A ticked attachment the reader could not carry (too large, a cloud link) is reported with its own reason.
-      for (const skip of captured.skipped) {
-        failed.push({ name: skip.name, message: skip.message });
+
+      // Each attachment is read on its OWN request budget (body + that one file), because each is sent in its own request:
+      // one shared read would carry an email save's combined limit, so two files that each fit would leave the second
+      // reported as too large. A ticked attachment the reader could not carry (too large, a cloud link) or could not read
+      // is reported with its own reason and never stops the others; the body failing to read or fit stops them all.
+      let body: string | undefined;
+      const capturedAttachments: EmailContentCapture['attachments'] = [];
+      for (const attachment of ticked) {
+        let one: EmailContentCapture;
+        try {
+          one = await captureEmailContent([attachment], new Set([attachment.id]));
+        } catch (err) {
+          if (err instanceof EmailCaptureError && err.failure?.kind === 'attachment-unreadable') {
+            failed.push({
+              name: attachment.name,
+              message: `Outlook could not read "${attachment.name}", so it was not saved. Try again.`,
+            });
+            continue;
+          }
+          failAll(createErrorFromException(err, 'This email could not be read, so nothing was saved.').message);
+          return;
+        }
+        body ??= one.body;
+        for (const skip of one.skipped) {
+          failed.push({ name: skip.name, message: skip.message });
+        }
+        capturedAttachments.push(...one.attachments);
       }
 
       const recipients =
@@ -1847,9 +1863,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         senderName: context.senderDisplayName,
         recipients,
         sentDate: context.sentDate?.toISOString(),
-        body: captured.body,
+        body: body ?? '',
         isBodyHtml: true,
-        attachments: captured.attachments.map(({ contentBase64: _bytes, ...reference }) => reference),
+        attachments: capturedAttachments.map(({ contentBase64: _bytes, ...reference }) => reference),
         ...(context.internetMessageId ? { internetMessageId: context.internetMessageId } : {}),
         ...(context.itemId ? { exchangeItemId: context.itemId } : {}),
       };
@@ -1861,7 +1877,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           }
         : undefined;
 
-      for (const attachment of captured.attachments) {
+      for (const attachment of capturedAttachments) {
         if (signal.aborted) return;
         const nameKey = attachment.fileName.toLowerCase();
         const failedAttempts = attachmentOnlyFailuresRef.current.get(nameKey) ?? 0;

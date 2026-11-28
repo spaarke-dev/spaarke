@@ -16,7 +16,12 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { SaveFlow, describeAttachmentsOnlyOutcome } from '../SaveFlow';
 import { EmailContentCaptureContext, type CaptureEmailContent } from '../../hooks/emailContentCaptureContext';
-import type { EmailContentCapture } from '../../services/emailContentCapture';
+import {
+  captureEmailContent as realCaptureEmailContent,
+  EmailCaptureError,
+  type EmailContentCapture,
+  type EmailContentReader,
+} from '../../services/emailContentCapture';
 import type { AttachmentInfo } from '@shared/adapters/types';
 
 jest.mock('../DocumentProfileSection', () => ({ DocumentProfileSection: () => null }));
@@ -77,22 +82,21 @@ const pdf = (name: string): AttachmentInfo => ({
   isInline: false,
 });
 
-const capture = jest.fn<Promise<EmailContentCapture>, Parameters<CaptureEmailContent>>(
-  async (attachments, selected) => ({
-    body: '<p>Please see attached.</p>',
-    isBodyHtml: true,
-    attachments: attachments.map(a => ({
-      attachmentId: a.id,
-      fileName: a.name,
-      size: a.size,
-      contentType: a.contentType,
-      contentBase64: `BYTES-${a.name}`,
-      isInline: false,
-    })),
-    selectedAttachmentFileNames: attachments.filter(a => selected.has(a.id)).map(a => a.name),
-    skipped: [],
-  })
-);
+const fakeCapture: CaptureEmailContent = async (attachments, selected) => ({
+  body: '<p>Please see attached.</p>',
+  isBodyHtml: true,
+  attachments: attachments.map(a => ({
+    attachmentId: a.id,
+    fileName: a.name,
+    size: a.size,
+    contentType: a.contentType,
+    contentBase64: `BYTES-${a.name}`,
+    isInline: false,
+  })),
+  selectedAttachmentFileNames: attachments.filter(a => selected.has(a.id)).map(a => a.name),
+  skipped: [],
+});
+const capture = jest.fn<Promise<EmailContentCapture>, Parameters<CaptureEmailContent>>(fakeCapture);
 
 const response = (status: number, body: unknown) => ({
   ok: status < 400,
@@ -163,6 +167,7 @@ const stateOf = (name: string) =>
 
 beforeEach(() => {
   jest.clearAllMocks();
+  capture.mockImplementation(fakeCapture);
   sessionStorage.clear();
   mockFetch.mockReset();
   mockFetch.mockImplementation(async (url: string) =>
@@ -309,6 +314,46 @@ describe('SaveFlow — "Save the email" (task 143)', () => {
     expect(outcome).not.toHaveTextContent(`${A}:`);
     expect(screen.queryByText(/2 attachments saved to Spaarke/)).toBeNull();
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('each attachment gets its own request budget: two files that each fit but not together are both saved', async () => {
+    // The real reader over a budget that holds the body and ONE 20,000-byte file (base64 ~26,668), never two.
+    const reader: EmailContentReader = {
+      getBody: async () => '<p>Please see attached.</p>',
+      getAttachmentContent: async () => ({ content: 'A'.repeat(26_668), format: 'base64' }),
+    };
+    capture.mockImplementation((attachments, selected) =>
+      realCaptureEmailContent(reader, attachments, selected, 40_000)
+    );
+    render(<OutlookPane attachments={[pdf(A), pdf(B)]} />);
+    fireEvent.click(saveEmailBox());
+    tick(A);
+    tick(B);
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(screen.getByTestId('attachments-only-outcome')).toBeInTheDocument());
+    expect(saveCalls().map(c => bodyOf(c).attachment.fileName)).toEqual([A, B]);
+    expect(screen.getByText('2 attachments saved to Spaarke. The email was not saved.')).toBeInTheDocument();
+  });
+
+  it('negative: an attachment Outlook cannot read fails alone; the others are still saved', async () => {
+    capture.mockImplementation(async (attachments, selected) => {
+      if (attachments.some(a => a.name === A)) {
+        throw new EmailCaptureError('unreadable', { kind: 'attachment-unreadable', fileName: A });
+      }
+      return fakeCapture(attachments, selected);
+    });
+    render(<OutlookPane attachments={[pdf(A), pdf(B)]} />);
+    fireEvent.click(saveEmailBox());
+    tick(A);
+    tick(B);
+    fireEvent.click(saveButton());
+
+    await waitFor(() =>
+      expect(screen.getByText('1 of 2 attachments saved. These were not saved:')).toBeInTheDocument()
+    );
+    expect(saveCalls().map(c => bodyOf(c).attachment.fileName)).toEqual([B]);
+    expect(screen.getByTestId('attachments-only-outcome')).toHaveTextContent(`${A}:`);
   });
 
   it('a retry after a failed attempt is a new key, never the failed attempt key', async () => {
