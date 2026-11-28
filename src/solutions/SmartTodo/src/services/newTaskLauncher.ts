@@ -1,5 +1,5 @@
 /**
- * newTaskLauncher — "+ New Task" OOB create-form wiring (spec FR-10, task 030;
+ * newTaskLauncher — "New To Do" OOB create-form wiring (spec FR-10, task 030;
  * host-record auto-associate added by UAT defer-issue D-8, 2026-08-17).
  *
  * Extracted from `SmartTodoApp.tsx` into its own service module (mirrors the
@@ -17,7 +17,7 @@
  *
  * ── Regarding pre-association (D-8) ──────────────────────────────────────────
  * When the Smart To Do surface is embedded in a record context (e.g. a Matter
- * form) and the user clicks "+ New Task", the new To Do MUST open with that
+ * form) and the user clicks "New To Do", the new To Do MUST open with that
  * host record pre-associated as its regarding, so the RegardingResolver control
  * on the To Do form completes the 5 denormalized resolver fields on load.
  *
@@ -145,7 +145,7 @@ function isSupportedRegardingTarget(entityType: string | undefined): boolean {
 /**
  * Resolve the regarding context the Code Page was LAUNCHED with, preferring
  * the `openTodos` branch's `regardingFilter` (an ACTIVE Kanban filter — the
- * more likely scenario when the user is mid-session and clicks "+ New Task")
+ * more likely scenario when the user is mid-session and clicks "New To Do")
  * over the `createTodo` branch's `initialRegarding` (present only on the very
  * first render, before `LaunchCreateTodoWizardHost` consumes it for the
  * Outlook/parent-ribbon wizard flow this module does NOT touch).

@@ -5,7 +5,7 @@
  * Pass 1 rendered this as its own bordered/padded bar UNDER the top bar.
  * Pass 2 moves it inline INTO `Header.tsx`'s toolbar `rightGroup`, so the
  * bordered-bar chrome (background, bottom border, bar padding) is dropped —
- * the box now just sits as a flex sibling of the Filter / + New Task / ⋮
+ * the box now just sits as a flex sibling of the Filter / New To Do / ⋮
  * cluster. The "Search" caption `label` style is also removed (the label
  * itself was dropped from `SearchFilter.tsx`).
  *
@@ -42,7 +42,7 @@ export const useSearchFilterStyles = makeStyles({
   },
 
   /** The search input's inline width when expanded — sized to sit comfortably
-   * beside the Filter / + New Task / ⋮ cluster without crowding it. */
+   * beside the Filter / New To Do / ⋮ cluster without crowding it. */
   searchBox: {
     width: '240px',
     maxWidth: '240px',

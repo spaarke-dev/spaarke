@@ -9,10 +9,10 @@
  *   - `titleGroup`      : Microsoft To Do icon + "Smart To Do" text
  *   - `spacer`          : flex-grow gap that pushes the right cluster to the edge
  *   - `rightGroup`      : selection-aware actions (when count > 0) + Filter, OR
- *                         Filter / + New Task / ⋮ overflow (default cluster)
+ *                         Filter / New To Do / ⋮ overflow (default cluster)
  *   - `filterButton`    : outlined Filter pill (disclosure trigger for the
  *                         filter pane — task 021 owns pane content)
- *   - `newTaskButton`   : primary "+ New Task" button
+ *   - `newTaskButton`   : primary "New To Do" button
  *   - `overflowTrigger` : icon-only "⋮" Menu trigger (Settings / Layout / Refresh)
  *
  * @see ADR-021 Fluent UI v9 design system
@@ -85,7 +85,7 @@ export const useHeaderStyles = makeStyles({
 
   /**
    * Right cluster — either the selection-aware toolbar + Filter (when count
-   * > 0) or the default Filter / + New Task / ⋮ overflow cluster.
+   * > 0) or the default Filter / New To Do / ⋮ overflow cluster.
    * `flexShrink: 0` so buttons stay visible on narrow viewports.
    */
   rightGroup: {
@@ -105,7 +105,7 @@ export const useHeaderStyles = makeStyles({
     flexShrink: 0,
   },
 
-  /** "+ New Task" primary button — flexShrink: 0 for the same reason as `filterButton`. */
+  /** "New To Do" primary button — flexShrink: 0 for the same reason as `filterButton`. */
   newTaskButton: {
     flexShrink: 0,
   },

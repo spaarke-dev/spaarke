@@ -20,7 +20,7 @@
  * 2026-08-17 moved the inline search into Header — see below):
  *   SmartTodoLayout (data: hooks/useSmartTodoBridge — #2907 / #2972)
  *     ├── Header (title + [inline expanding SearchFilter] + Filter pill +
- *     │           + New Task / ⋮ overflow — Settings, Layout, Refresh — or
+ *     │           New To Do / ⋮ overflow — Settings, Layout, Refresh — or
  *     │           selection-aware actions when a selection is active)
  *     └── SmartToDo from @spaarke/smart-todo-components (compact cards, with
  *           `hideHeader` so its KanbanHeader is suppressed — chrome lives in
@@ -167,7 +167,7 @@ function SmartTodoLayout(): React.ReactElement {
   );
 
   // ── smart-todo-r5 UAT 2026-08-17 (item #1) — default "Assigned To" to the
-  //    current user's contact when "+ New Task" opens the OOB create form.
+  //    current user's contact when "New To Do" opens the OOB create form.
   //    `sprk_todo.sprk_assignedto` targets the OOB `contact` table (resolved
   //    from systemuser via `contact.sprk_systemuser`), so we resolve the
   //    current user's contact once at mount and thread it into the launcher's
@@ -237,11 +237,11 @@ function SmartTodoLayout(): React.ReactElement {
   // default (no structured filter params) — see queryHelpers.ts.
 
   // ── Launch context — read once on mount (task 100 / W-2, extended R4-034,
-  //     hoisted here by task 030 so both the "+ New Task" handler below AND
+  //     hoisted here by task 030 so both the "New To Do" handler below AND
   //     the openTodo effect further down can read it). ───────────────────────
   const launchContext = useLaunchContext();
 
-  // ── task 030 (FR-10, 2026-08-16) — "+ New Task" opens the sprk_todo OOB
+  // ── task 030 (FR-10, 2026-08-16) — "New To Do" opens the sprk_todo OOB
   //     main form in CREATE mode as a modal ────────────────────────────────
   //
   // Replaces task 020's documented no-op stub. Reuses
@@ -459,7 +459,7 @@ function SmartTodoLayout(): React.ReactElement {
   // window-event route to the board, removed with the fork in #2907) and its Header-side
   // "+ New" wizard button (`onOpenWizard`) were removed along with the rest
   // of the QuickAdd group. The Header's new primary add path is the
-  // "+ New Task" button (`handleNewTask`, wired to the OOB create form by
+  // "New To Do" button (`handleNewTask`, wired to the OOB create form by
   // task 030 / FR-10 — see declaration above). The richer `CreateTodoWizard`
   // path remains reachable via Outlook ribbon + parent-form ribbon launches
   // (`LaunchCreateTodoWizardHost`, below) — those launch triggers are
@@ -478,7 +478,7 @@ function SmartTodoLayout(): React.ReactElement {
             ──────────────────────────────────────────────────────────────────
             Replaces the R4-104 single-row toolbar (3-field QuickAdd + broken
             inline-SearchBox "Filter") with the mockup's minimal chrome:
-            Filter pill / + New Task / ⋮ overflow (Settings, Layout, Refresh).
+            Filter pill / New To Do / ⋮ overflow (Settings, Layout, Refresh).
             The inner `<KanbanHeader>` stays suppressed via
             `<SmartToDo hideHeader />`. All prior Settings/Layout/Refresh
             BEHAVIOR is preserved verbatim — only their trigger UI moved into
@@ -634,7 +634,7 @@ function LaunchCreateTodoWizardHost(): React.ReactElement | null {
 
   // smart-todo-r5 UAT 2026-08-17 (item #1) — default "Assigned To" to the
   // current user's contact here too (Outlook / parent-ribbon wizard launch),
-  // matching the CreateTodoWizard Code Page + the OOB "+ New Task" form.
+  // matching the CreateTodoWizard Code Page + the OOB "New To Do" form.
   const { contactId: currentContactId, contactName: currentContactName } =
     useCurrentContactId({ webApi: getWebApi(), userId: getUserId() });
 

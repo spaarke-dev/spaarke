@@ -27,7 +27,7 @@ inherent to the side-pane pattern, not a fixable bug.
 App (FluentProvider + theme detection)
   SmartTodoApp
     SmartTodoLayout (data: hooks/useSmartTodoBridge)
-      Header (@spaarke/smart-todo-components — search / Filter / + New Task / overflow, selection-aware toolbar)
+      Header (@spaarke/smart-todo-components — search / Filter / New To Do / overflow, selection-aware toolbar)
       SmartToDo (@spaarke/smart-todo-components — Kanban: Today/Tomorrow/Future, compact cards, hideHeader)
     LaunchCreateTodoWizardHost (Outlook / parent-ribbon createTodo launch)
 ```

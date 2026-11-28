@@ -6,16 +6,16 @@
  * Covers the closed acceptance set from
  * `projects/smart-todo-r5/tasks/020-codepage-top-bar-redesign.poml`:
  *   - Default (no selection) cluster renders exactly [SearchFilter] · Filter
- *     · + New Task · ⋮ overflow, in that order, and NOTHING else inline (no
+ *     · New To Do · ⋮ overflow, in that order, and NOTHING else inline (no
  *     QuickAdd, no legacy toggle-into-inline-SearchBox pattern).
  *   - Filter pill toggles `isFilterPaneOpen` via `onToggleFilterPane`.
- *   - "+ New Task" invokes `onNewTask` when provided; is hidden when omitted
+ *   - "New To Do" invokes `onNewTask` when provided; is hidden when omitted
  *     (matches the existing optional-prop convention).
  *   - The ⋮ overflow menu contains exactly 3 items — Settings, Layout,
  *     Refresh — in that order, each invoking its pre-existing handler
  *     unchanged.
  *   - Layout menu item flips orientation horizontal ↔ vertical.
- *   - Selection-aware branch (selectedCount > 0) suppresses + New Task and
+ *   - Selection-aware branch (selectedCount > 0) suppresses New To Do and
  *     the overflow menu, keeping only the Filter pill alongside
  *     `<SelectionAwareToolbar>` (pre-existing precedent — QuickAdd/+Wizard
  *     were likewise suppressed during selection).
@@ -207,9 +207,9 @@ describe('Header — mockup layout parity (FR-05)', () => {
     // Title cluster.
     expect(h.container.textContent).toContain('Smart To Do');
 
-    // Right cluster: Filter, + New Task, ⋮ — nothing else inline.
+    // Right cluster: Filter, New To Do, ⋮ — nothing else inline.
     const filterButton = findButtonByText(h.container, /^Filter$/);
-    const newTaskButton = findButtonByText(h.container, /new task/i);
+    const newTaskButton = findButtonByText(h.container, /new to do/i);
     const overflowTrigger = findButtonByAriaLabel(h.container, /more options/i);
 
     expect(filterButton).toBeInTheDocument();
@@ -222,7 +222,7 @@ describe('Header — mockup layout parity (FR-05)', () => {
     // (the default here) — asserted separately below.
     expect(h.container.querySelector('[data-testid="search-filter"]')).toHaveAttribute('aria-hidden', 'true');
 
-    // DOM order matches mockup order: Filter → + New Task → ⋮.
+    // DOM order matches mockup order: Filter → New To Do → ⋮.
     const allButtons = Array.from(h.container.querySelectorAll('button'));
     expect(allButtons.indexOf(filterButton)).toBeLessThan(allButtons.indexOf(newTaskButton));
     expect(allButtons.indexOf(newTaskButton)).toBeLessThan(allButtons.indexOf(overflowTrigger));
@@ -244,14 +244,14 @@ describe('Header — mockup layout parity (FR-05)', () => {
   it('click_NewTaskButton_InvokesOnNewTaskStub', () => {
     const h = (activeHarness = renderHeader());
 
-    fireClick(findButtonByText(h.container, /new task/i));
+    fireClick(findButtonByText(h.container, /new to do/i));
 
     expect(h.onNewTask).toHaveBeenCalledTimes(1);
   });
 
   it('render_OnNewTaskOmitted_HidesNewTaskButtonWithoutThrowing', () => {
     const h = (activeHarness = renderHeader({ onNewTask: undefined }));
-    expect(queryButtonByText(h.container, /new task/i)).toBeNull();
+    expect(queryButtonByText(h.container, /new to do/i)).toBeNull();
   });
 });
 
@@ -404,7 +404,7 @@ describe('Header — selection-aware branch (selectedCount > 0)', () => {
     const h = (activeHarness = renderHeader({ selectedCount: 2 }));
 
     expect(queryButtonByText(h.container, /^Filter$/)).not.toBeNull();
-    expect(queryButtonByText(h.container, /new task/i)).toBeNull();
+    expect(queryButtonByText(h.container, /new to do/i)).toBeNull();
     expect(queryButtonByAriaLabel(h.container, /more options/i)).toBeNull();
   });
 });
