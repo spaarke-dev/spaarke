@@ -176,6 +176,22 @@ public class RuleBodyDescriberLabelTests
         result.Description.Clauses.Single().Formal.Should().Contain("sprk_reviewoutcome <> 100000003");
     }
 
+    /// <summary>Intake pipeline task 017 (review nit): the intake approval rule reads "intake stage is Awaiting approval". The option
+    /// labels come from the shared metadata read, as for every choice column; the labels here are the ones the provisioning script creates.</summary>
+    [Fact]
+    public async Task TheIntakeApprovalRule_ReadsTheStageByItsOptionLabel()
+    {
+        var rig = new MetadataRig().WarmWith("sprk_servicerequest", "sprk_intakestage",
+            (100000002, "In review"), (100000003, "Awaiting approval"), (100000004, "Returned"));
+
+        var result = await Describer(rig.Scopes).DescribeAsync(
+            """{"type":"Existence","subject":"sprk_servicerequest","when":{"sprk_intakestage":100000003},"all":[]}""", CancellationToken.None);
+
+        var line = result.Description!.Clauses.Should().ContainSingle().Subject;
+        line.Text.Should().Be("Each service request where intake stage is Awaiting approval.");
+        line.Formal.Should().Be("sprk_servicerequest where sprk_intakestage = 100000003");
+    }
+
     [Fact]
     public async Task AValueWithNoOptionLabel_IsShownAsItsNumber_NotInvented()
     {
@@ -320,6 +336,17 @@ public class RuleBodyDescriberLabelTests
             var dto = new EntityMetadataDto(entity, entity + "id", "sprk_name",
                 [new AttributeDto(column, "Status", null, false, false, new OptionSetDto(OptionsInSolution(entity, column)
                     .Select(o => new OptionDto(o.Value, o.Label, null)).ToList()))]);
+            _cache.Inner.SetString(MetadataCacheKeyPrefix + entity,
+                JsonSerializer.Serialize(dto, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+            return this;
+        }
+
+        /// <summary>Seeds a table's cached copy with explicit option labels, for a column the solution source does not define (a column the
+        /// intake provisioning script creates, <c>scripts/Add-ServiceRequestIntakeColumns.ps1</c>).</summary>
+        public MetadataRig WarmWith(string entity, string column, params (int Value, string Label)[] options)
+        {
+            var dto = new EntityMetadataDto(entity, entity + "id", "sprk_name",
+                [new AttributeDto(column, column, null, false, false, new OptionSetDto(options.Select(o => new OptionDto(o.Value, o.Label, null)).ToList()))]);
             _cache.Inner.SetString(MetadataCacheKeyPrefix + entity,
                 JsonSerializer.Serialize(dto, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
             return this;

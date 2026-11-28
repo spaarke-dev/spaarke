@@ -113,6 +113,24 @@ public class RuleBodyDescriberTests
         result.Description!.Clauses.Should().NotContain(c => c.ClauseId == "when");
     }
 
+    /// <summary>Intake pipeline task 017 (review nit): the intake approval rule's stage test names the column "intake stage", never the
+    /// raw <c>sprk_intakestage</c>; the formal line keeps the logical name. (With no metadata the value is the number; its option label
+    /// is pinned in RuleBodyDescriberLabelTests.)</summary>
+    [Fact]
+    public async Task TheIntakeApprovalRule_NamesTheStageColumnByItsLabel_NotItsLogicalName()
+    {
+        var (describer, _) = WithAllRows();
+
+        var result = await describer.DescribeAsync(
+            """{"type":"Existence","subject":"sprk_servicerequest","when":{"sprk_intakestage":100000003},"all":[]}""", CancellationToken.None);
+
+        result.IsRefused.Should().BeFalse(result.Refusal);
+        var line = result.Description!.Clauses.Should().ContainSingle().Subject;
+        line.Text.Should().Be("Each service request where intake stage is 100000003.");
+        line.Text.Should().NotContain("sprk_intakestage");
+        line.Formal.Should().Be("sprk_servicerequest where sprk_intakestage = 100000003");
+    }
+
     [Fact]
     public async Task EveryNameIsReadInOneBatchPerReferenceTable_NotOnePerValue()
     {

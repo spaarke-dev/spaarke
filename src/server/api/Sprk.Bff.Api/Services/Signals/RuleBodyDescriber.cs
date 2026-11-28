@@ -175,6 +175,10 @@ public sealed class RuleBodyDescriber
         ["sprk_budgetutilizationpercent"] = "budget utilization (percent of budget spent)",
         ["sprk_totalbudget"] = "total budget",
         ["sprk_totalspendtodate"] = "total spend to date",
+        // spaarke-intake-pipeline-r1 task 017 (review): the intake approval policy's stage test. The column is not admin-authorable, so it
+        // is not in ColumnDisplayNames (that table is pinned to the authorable allow-list); the value reads by its option label
+        // ("Awaiting approval") through the shared metadata read, as any choice column does.
+        ["sprk_intakestage"] = "intake stage",
     };
 
     /// <summary>(table, column) → (option value → label), for the choice values one body tests (task 210).</summary>
