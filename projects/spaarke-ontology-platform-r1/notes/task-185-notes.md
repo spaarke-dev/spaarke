@@ -206,3 +206,9 @@ ebilling-r1 took all four items and files them under its own project.
 2. **Console card + in-app launch:** their next item, with a record lookup when there is no context.
 3. **No linked firm:** they are putting the options to the owner. They will at least show the empty state at the Firm step instead of failing at submit.
 4. **White header: platform limit.** Every form-launched wizard (To Do, Event, Report Card, Invoice) opens through `sprk_secure_child_ribbon.js` openPage with the navigateTo dialog options, and that header is platform chrome a web resource cannot style. In the Console the in-app launch (item 2) avoids it.
+- **Update, 2026-11-28 (ebilling-r1):**
+  - **Fixed in ebilling PR #3339** (waits for the owner's merge go; not on dev yet):
+    - item 1, the record lock: ISS-057 #3334;
+    - item 2, the Console Quick Start "Create Invoice" in-app with a "Choose a record" lookup: DEF-071 #3335. The same PR trims the reconciliation "Create a record" chooser to Matter, Project and Assign Work.
+  - **Item 3, no linked firm:** DEF-072 #3336, waiting on the owner's choice.
+  - **Item 4:** recorded above as a platform limit.
