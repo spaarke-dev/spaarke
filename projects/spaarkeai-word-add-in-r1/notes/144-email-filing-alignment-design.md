@@ -127,6 +127,36 @@ A safety net catches a missed write or a race: the mirror also runs from `Secure
 4. Add-in: status for C-only, Change Related to, the split-save notice, attachment follow and no duplicate (this project).
 5. Backfill dry run → owner-run Apply.
 
+## 5a. Independent "what is missing" review (Fable, 2026-11-27) — findings and design changes
+
+Read-only review against master 60933c82be. Each finding changes the design as stated; §3 is superseded where they conflict.
+
+| # | Class | Finding | Design change |
+|---|---|---|---|
+| R1 | RISK, access | `DocumentUrlIdentityResolution.cs` ~:508-523 trusts a document's own slot as readable and Read-checks only the derived (communication) record. A mirrored slot would show a matter to an email participant who cannot read it | Mirrored slots are derived: every reader that treats "own slot ⇒ record readable" must Read-check them (identity route first; inventory the others) |
+| R2 | MISSING | The Office save when the caller cannot change C (`ReconciledEmailFiling` `NotPermitted`), when C's record is one the caller cannot read or append to, or when C is only Suggested and the user picks another record | Define each outcome; never file to a record the caller has no AppendTo on; a human pick beats an engine guess (Suggested) |
+| R3 | WRONG | §3.2 cannot represent C's filing: budget, report card, analysis, account have no document lookup; organization has two candidates; "the mirror owns all 16" would clear `sprk_relatedagreement` / `sprk_relatedtodo`. The outbound archive already uses `DocumentAssociationMap` (`StageArchiveRecordLink`), and D-218 (uac-r2 Option A) deliberately links outbound archives only | One mapping function shared with `StageArchiveRecordLink`; the mirror owns only columns it can derive; supersede D-218 explicitly |
+| R4 | RISK | Ordering vs the after-refile step: `RecordContainerResolver.DocumentPointer` consults every link; two secure answers are undecided, so a secure-to-secure move leaves the file held, not "one pass". `sprk_matter` outranks the communication as the document's ownership parent (`SecureChildLineage.cs` ~:166-171), so a missed document stays owned by the old record | Write the document lookups BEFORE the after-refile step, inside the re-file's lock; a mirror failure is an unfinished re-file |
+| R5 | MISSING | More writers of C's filing: generic `PATCH /api/v1/child-records/{table}/{id}`, the chat update tool, the playbook update node, `DataverseUpdateHandler`, the field-mapping push, the thread join; party-only re-files are `NotARefile`; `ParentsUnchanged`. Generic writers can also set or clear `sprk_relatedcommunication` / `sprk_parentdocument`. Direct Dataverse edits are never seen | Trigger on "C's regarding columns or a document's link columns were written", not on re-file; the safety net also scans recently modified email documents |
+| R6 | QUESTION | C's effective filing includes its thread (a re-file re-anchors the thread; siblings' access follows it, their lookups do not) | Decide whether E-1 mirrors C's lookups or its effective filing; fix the "Thread replies" edge row |
+| R7 | MISSING | A document lookup write is a document re-file today (re-stamps to-dos/analyses under it, re-derives the owner, refreshes inherited Access Permission I-16) | Route each mirror write through the document re-file core |
+| R8 | RISK | Readers change: the index parent is the most specific record (project before matter); the external portal lists by record lookup, so inbound mail starts appearing there (with Q1, engine guesses too) | External-access owner's explicit OK; do not mirror Suggested until confirmed |
+| R9 | RISK | Backfill changes derived containers (sequence with uac-r2's migration verify and the strict flip); unfiling moves files; the Restricted bar reads only by `sprk_relatedcommunication` (cap 250), so parent-only children fall outside | Backfill plan with uac-r2 gates; stamp `sprk_relatedcommunication` on every child |
+| R10 | RISK | Concurrent re-files (X→Y, X→Z) can land a stale mirror last | Write conditional on C's version; re-read C after the document writes |
+| R11 | WRONG/QUESTION | `MessageAttachmentMaterializer` is chat, not email; private messages are never fileable; Q5 has no discriminator (use `sprk_sourcetype`); a C-only status answer needs its own Read check on C and the record | Scope E-1 by communication type; discriminate with `sprk_sourcetype`; Read-check C and the record on the C-only answer |
+
+**The reviewer's verdict on "Communication is the authority":** right for inbound and Reconciliation, not without a stated rule for R2 (a human pick against an unfiled or guessed C) and R6 (thread).
+
+### Option B — derive instead of copy (raised by R1, R4, R7, R10)
+
+Most of R1, R4, R7 and R10 exist because the design stores the same fact twice. The alternative is to store it once: an email document carries NO record lookup of its own (Office saves stop writing one onto email documents), and every reader resolves an email document's record through its communication — as the identity route already does (task 132) and as access already does (`SecureChildLineage`).
+
+- **Pro:** alignment holds by construction — nothing to keep in sync, no ordering, no partial failure, no concurrency, no backfill of lookups (only the Office-saved email documents' own lookups to clear or ignore).
+- **Con:** every reader that filters on a document's own lookup must also follow the communication: record Documents grids/views (FetchXML link-entity through `sprk_relatedcommunication` with an OR), the external portal's lists, Find/search (the index parent, already re-derived at index time from the communication for inbound), the AI context assembly, and D-218's outbound link (which would be dropped).
+- **Open:** whether every Documents surface can express "own lookup OR via communication" (Dataverse views can, with an outer link-entity; custom grids and the external portal need code).
+
+Which option to take is for uac-r2 and field-mapping-r1 to weigh in on, then the owner.
+
 ## 6. Owner questions
 
 - **Q1 — Suggested.** Does an engine-suggested (unconfirmed) filing also file the documents? Recommendation: yes, so the record's documents and communications always agree; confirming changes only the status.
