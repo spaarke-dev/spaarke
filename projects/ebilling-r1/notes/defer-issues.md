@@ -1958,7 +1958,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Delivered by task 195 (master #3274 at c55b9812d8; Console and page live on dev 2026-11-27). Close once owner checklist AA passes |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-25 |
 | **Source** | Owner review of the Invoice Review page on dev, 2026-11-25 (point 1 of 4; points 2-4 fixed on branch `task/ebilling-ir-review`) |
@@ -2820,7 +2820,7 @@ A line-decision call holds the invoice's processing lock for a fixed 2 minutes a
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on work 8913c642f4 (SprkModal moves lost focus after a nav move; InvoiceReviewModal workaround removed). Closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-26 |
 | **Source** | Task 195 adversarial review (2026-11-26), finding 4 |
