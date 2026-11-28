@@ -52,7 +52,7 @@ settles it.
 
 | Surface | Our instructions (skills) | Our server tools (MCP) | Our scripts | Edit the open file | Make new files | Our UI (MCP Apps) |
 |---|---|---|---|---|---|---|
-| **Word for Windows** | Yes, plugin skills: O, no Microsoft page | Yes: D (federated), O (plugin connector) | Python no (O). Office.js in the skill text runs (O, WP-5) | Copilot's own editing, tracked changes and comments: D. Our Office.js: O | No | ? (UX-1) |
+| **Word for Windows** | Yes, plugin skills: O, no Microsoft page | Yes: D (federated), O (plugin connector) | Python no (O). Office.js in the skill text runs (O, WP-5); Copilot fills a data line and our code applies an edit list, 17 KB of code carried (O, WP-6). Two runners: Office.js and an HTML-document runner (O, WP-6) | Copilot's own editing, tracked changes and comments: D. Our Office.js: O | No | ? (UX-1) |
 | Word for Mac | ? (WX-1) | D | ? (WX-2) | Copilot's own editing: D | No | ? |
 | Word for the web | Lists our plugin, didn't run it (O, confounded; WX-3) | D | ? | Copilot edits: D; tracked changes not named | No | ? |
 | **Excel** (all clients) | Personal skills GA (D). Plugin skills: Insider preview (P) | D | Office.js `.js` skill scripts: P (Insider). Copilot also runs its own Python: D | Copilot's own editing: D. Our Office.js: P | No | ? |
@@ -92,7 +92,9 @@ needs a spending policy and is billed in Copilot Credits. Skills in Copilot Chat
    - Copilot's own editing in Word makes tracked changes and comments (GA on Windows and Mac).
    - Our skill tells it what to change, from the playbook and the MCP tool's findings.
    - Where precision matters, our fixed Office.js can apply an edit list:
-     - in Word desktop, observed in WP-5 but undocumented;
+     - in Word desktop, observed in WP-5 and WP-6 (Copilot fills the list, our code applies it, hash-exact) but
+       undocumented. Word also has an HTML-document runner, where Copilot wrapped our code in a stand-in: the skill
+       must insist on Office.js (WP-7 tests whether it can);
      - in Excel, documented but preview only.
    - Every Office.js path needs a fallback that works without it.
 5. **One package, many components, tested per host.**
@@ -109,7 +111,8 @@ needs a spending policy and is billed in Copilot Credits. Skills in Copilot Chat
 |---|---|---|
 | Cowork-only full edition (Python) | Keep, and **add Copilot Chat Premium as a second host** for the same skills | Chat skills are GA, cost no Cowork credits and ship python-docx. Needs CC-1, CC-2 and CC-6: lxml is not in the published list, and where outputs land is unknown |
 | Skills placed as OneDrive folders | Move to a **plugin** with per-host skills | OneDrive skills reach Chat only if shared. Admin-deployed plugins reach both |
-| Word edition: not built | Design it as an instructions-only skill + MCP findings + Copilot's own tracked changes, with Office.js as an optional precise applier | WP-5. Microsoft's direction for Excel says the same |
+| Word edition: not built | Design it as an instructions-only skill + MCP findings + Copilot's own tracked changes, with Office.js as an optional precise applier. **Proposal drafted: `../../word-edition-design.md`** (2026-11-28) | WP-5, WP-6. Microsoft's direction for Excel says the same |
+| Admin deployment assumed to take the same package | **Use a different app id for the admin route** than for Cowork test uploads | The admin center refuses an id already uploaded through Cowork, even after removal (2026-11-27). Python skills via the admin center untested (AD-1) |
 | Redline skill fallback is unguarded | **Forbid editing the source file in place** in every review skill | If our script fails, Cowork's built-in editor could change the customer's original file, possibly without tracked changes (CC-14) |
 | Plugin connector sign-in: Cowork's dynamic-registration shortcut | Use `OAuthPluginVault` for any plugin meant for both Chat and Cowork | The shortcut works only in Cowork, and Entra has no dynamic registration endpoint |
 | MCP tools without annotations | Set `readOnlyHint` / `destructiveHint` on every tool | Unannotated tools are treated as destructive and prompt every time |
@@ -170,6 +173,7 @@ needs a spending policy and is billed in Copilot Credits. Skills in Copilot Chat
 | Risk | Likelihood | Mitigation |
 |---|---|---|
 | Word stops running skill-supplied Office.js, or tightens its filter | Medium. It's undocumented, and Excel's documented route looks different | Office.js only as an applier. Fallback: Copilot's own tracked changes from the same edit list, or the Cowork edition. Re-run WP-5 on Word updates (WX-10) |
+| Copilot runs our Word code on its HTML runner behind a stand-in API, so tracked changes and comments silently don't happen | Observed in WP-6 for simple code | A runner check at the top of the code (stops without Office.js) and an Office.js-only rule in the skill; WP-7 tests both |
 | Each host behaves differently and changes monthly | High. Microsoft says so | Per-host skills, a probe per host, and a dated test log |
 | Our skill falls back to in-place editing of the client's original | Medium (inferred) | Explicit "never edit the source in place" rule in every review skill, plus CC-14 |
 | IB and EU customers can't use the package | Certain today for IB; model-limited for EU | Say so in sales material. Make the server-side (MCP) path, which needs no skills, the baseline |
@@ -184,7 +188,7 @@ Spaarke MCP off unless the test is about it (spike tools on the dev connector).
 
 | # | Test | Settles | Note |
 |---|---|---|---|
-| 1 | **WP-6** = WX-5 (data block filled by Copilot, code fixed) + WX-6 (does a thrown error reach Copilot?) + WX-4 (5/20/60 KB code) | Whether a Word edition can apply a real edit list | 01 |
+| 1 | ~~**WP-6**~~ **passed 2026-11-27** (edit list applied hash-exact; 17 KB carried; errors returned from the HTML runner). Now **WP-7** (errors from the Office.js runner; Office.js-only rule), then WP-8 to WP-10 and AD-1 in `../../word-edition-design.md` §5 | Whether a Word edition can apply a real edit list | 01, `../../poc-e2e/tier-test-script.md` |
 | 2 | **CC-1 + CC-2 + CC-6**: our plugin in Copilot Chat Premium; the sandbox's real packages (lxml); where outputs land | Whether Chat is a second, credit-free host for the full edition | 02 |
 | 3 | **CC-14**: can Cowork's built-in editor make tracked changes and comments, and does it edit in place unasked? | The in-place fallback risk; a second Cowork editing path | 02 |
 | 4 | **XR-1**: one plugin across Word, Excel and PowerPoint on Windows, Mac and web (includes WX-1, WX-3, PP-4) | Real reach of "one package" | 03, 01 |
@@ -200,8 +204,8 @@ Spaarke MCP off unless the test is about it (spike tools on the dev connector).
 ## 6. Owner decisions this raises
 
 1. Is **Copilot Chat Premium** a target host for the accelerator's full edition, alongside Cowork? (Test 2 first.)
-2. Draft the **Word edition** design now (instructions + MCP + Copilot's tracked changes, Office.js optional), or
-   after WP-6?
+2. ~~Draft the **Word edition** design now, or after WP-6?~~ WP-6 passed; the proposal is drafted in
+   `../../word-edition-design.md`. The decision is now whether to adopt it (its §7).
 3. Register the Spaarke MCP server as a **federated connector**? This is a decision for the MCP projects (test 6
    first).
 4. **Store and certification:** pursue, given the client-secret conflict and the declarative-agent wrapper question?

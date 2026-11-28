@@ -30,8 +30,9 @@
 **Gap 1 file probe (#3257)** — `notes/poc-e2e/spe-file-probe/README.md`. Part A (Cowork script egress) can run now. Part B waits on owner's per-SHA deploy go for `spike_return_file` (`9e8f0ca8e0`, mcp-r2 / uac-r2).
 
 ## Open owner questions
-1. WP-6 upload route result (above), then WP-6 runs.
-2. Surfaces synthesis §6 decisions.
+1. WP-7 upload route + runs (above).
+2. **Word edition proposal** `notes/word-edition-design.md` (2026-11-28): adopt (withdraw protocol rule 4.2 for Word)? Then WP-8–WP-10 + AD-1 (admin center with a Python skill on a new id), app-id scheme (Cowork id kept, admin id derived). design.md §2.4.7/§2.4.8, protocol and synthesis now carry the WP facts, decisions marked "under review".
+3. Surfaces synthesis §6 decisions (decision 2 now = adopt the proposal).
 3. Gap 2 (#3257): matter email via `spaarke_compose_email` — not started.
 4. User guide draft `notes/user-guide-draft.md` — owner review + 6 open items; then wire into `package_docs.py` via its own PR to master.
 5. Older: design.md body to four tiers; team/IT tier scripts; gaps #35, #27/#29; backlog X9, X12–X14.

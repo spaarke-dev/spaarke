@@ -58,6 +58,9 @@ Two Spaarke plugins per practice, each with a disjoint set of skills:
 This is the "skills-only plugin plus code-only plugin" idea in a form the platform supports. A plugin can't carry bare code: code ships inside a skill folder. So the code plugin holds *engine skills* whose only job is to run scripts.
 
 **Rule for K: assume it loads everywhere.**
+- **Update 2026-11-28:** T-P7 is answered for Word for Windows. It loads instruction-only plugin skills (WP-2) and
+  runs fixed Office.js carried in them (WP-5, WP-6). The "revisit after T-P7" point below is now due:
+  `word-edition-design.md` proposes a Word review skill, for owner decision. Earlier text:
 - We have not tested a correctly built, instruction-only plugin in Word (T-P7). Harvey's presence in Word is circumstantial evidence that Word may load it.
 - So K must be safe in Word. It holds **no skill that Microsoft Legal already provides in any app**. Above all, it holds no "review this agreement against a playbook" procedure, because in Word that is Microsoft Legal plus our Word playbook.
 - With that rule, K causes no overlap whatever T-P7 shows:
