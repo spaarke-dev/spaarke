@@ -56,7 +56,7 @@ ADR tensions approved for this project (root CLAUDE.md §6.5), all Path C (spec 
   - owns `Api/Mcp/**`, McpModule, the catalogue and `PlaybookRunRecordStore`;
   - the spike branch is cut from master after its merged work;
   - its CAPABILITY-INDEX rows 34+ collide with #3213 and are folded on merge.
-- **spaarke-legal-ai-accelerator-r1**: NDA positions, evals and the T-P2 prompt set (read only; never edit its worktree). G6 results go to it.
+- **spaarke-legal-ai-accelerator-r1** (session `acclerator-r1`, `local_64a7776f-8f89-4df6-81b8-9bd990288b0d`): NDA positions, evals and the T-P2 prompt set (read only; never edit its worktree). G6 results go to it. **Findings exchange (owner, 2026-11-28):** before preparing or running any test, check the accelerator's recorded findings (its branch notes, read via `git show`, and its messages) for Chat, Cowork, Word, connector or NDA-review behaviour, and apply them; send it each of our results that touches its area. No Word redline is built here: contract markup is Microsoft-first, and a Spaarke Word review skill, if any, is the accelerator's (told 2026-11-28).
 - **unified-access-control-r2**: owns the dev BFF deploy slot. Spike deploys go through its session, with the owner's go per SHA.
 - **spaarke-intake-pipeline-r1** (#3128): the NDA submit-and-return harness. Not Phase 0 work.
 
@@ -75,6 +75,11 @@ ADR tensions approved for this project (root CLAUDE.md §6.5), all Path C (spec 
 - 2026-11-25: "The playbook engine is frozen" does not mean "playbooks are unused" (FAILURE-MODES G-26). Fix: read `docs/architecture/playbook-architecture.md` first.
 - 2026-11-25: `nda-review` was generalised and renamed to `agreement-review` (`infra/dataverse/actions/agreement-review.action.json`). Fix: use `agreement-review`.
 - 2026-11-25: The linear Action path ignores Binding tier overrides (#1934). Fix: set the model tier on the Action explicitly.
+- 2026-11-27: every dev BFF deploy from master removes the spike tools. Fix: merge master into the spike branch, confirm `git patch-id` equals the reviewed spike, send uac-r2 the tip for the owner's per-SHA go.
+- 2026-11-28: each declarative agent's MCP action needs its own per-user sign-in (card "Sign in to Spaarke MCP G1c"), even when the tenant connector is connected. Fix: each tester signs in once per agent before a run.
+- 2026-11-28: a first "List every tool" answer in an agent can name no Spaarke tool until the agent has called one in that chat. Fix: call `spaarke_show_decisions` (read-only) first, or retry in a new chat.
+- 2026-11-28: Cowork skills-only plugins reach no Spaarke tool unless the "Spaarke MCP" source is switched on (the accelerator's NDA tests run with it off). Fix: check the switch before every Cowork run.
+- 2026-11-27/28 (coordination, accelerator): the admin center refuses an app id ever uploaded through Cowork, Customize, Plugins, and refuses a version starting "0.". Fix: fresh app ids, version 1.0.0 or higher, admin-center route only.
 
 ## 7. Key documents
 
