@@ -1,6 +1,6 @@
 # Current Task State - spaarke-legal-ai-accelerator-r1 (tiered package: individual base/advanced)
 
-> **Last Updated**: 2026-11-27 (by context-handoff; Claude Desktop session `acclerator-r1`)
+> **Last Updated**: 2026-11-27 (WP-6 upload settled; Claude Desktop session `acclerator-r1`)
 > **Branch**: `work/spaarke-legal-ai-accelerator-r1` · **Worktree**: `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1` · **PR**: #2528 (draft, unmerged)
 > Earlier checkpoints verbatim: `notes/handoff-history/2026-11.md` (the pre-rewrite file of 2026-11-27 is appended there). Narrative: `git log`.
 > This worktree's memory (`~/.claude/projects/c--code-files-spaarke-wt-spaarke-legal-ai-accelerator-r1/memory/`) is NOT auto-loaded; read it at start.
@@ -9,15 +9,13 @@
 
 | Field | Value |
 |---|---|
-| **Active** | WP-6 (Word desktop: edit list, error channel, code size) with Word probe plugin. Blocked on **uploading the probe**: the admin center (Tools › Upload) refused v0.5, v0.6 and v0.7 with "We couldn't validate this manifest file" |
-| **Next action** | Send the owner `Spaarke Word probe plugin v0.7 no script.zip` (built, commit `4c8a6455f1`, in `C:\code_files\spaarke-wt-accelerator-word-js-probe\src\accelerators\build\out\word-probe\`). Ask: (1) admin center upload of the no-script zip — accepted means the admin center refuses skills that ship scripts (big for org deployment of our Python skills); (2) if refused, the admin center with `v0.7 no script new id.zip` (`--fresh-id`, commit `aed92ae61e`; the refused uploads reused the Cowork uploads' app id — coordination's point; a landing = a NEW P1 row); (3) if still refused, upload the full v0.7 via **Cowork › Customize › Plugins › Upload** (the route v0.4 used), then run WP-6 6a–6e (`tier-test-script.md`). Tell copilot-platform-coordination before upload (row P1) |
+| **Active** | WP-6 (Word desktop: edit list, error channel, code size). Probe uploaded 2026-11-27: admin center accepted `v0.7 no script new id.zip` (app id `9248c601-e4c2-5d92-89f0-833ebaed526f`, coordination row P1b, told). **Owner runs WP-6 6a–6e** (`tier-test-script.md`) |
+| **Next action** | Record the owner's WP-6 results in `results.md` (after "Correction 2"). Then the owner removes the probe → tell coordination (P1b) |
 | **Uncommitted** | None (except the owner's untracked `notes/copilot v claude nda comparison/` — never commit it) |
 
-### Admin-upload diagnosis so far (2026-11-27)
-- v0.4 (0.4.0, 3 skills incl. Python) went in via **Cowork's** upload. v0.5–v0.7 went via the **admin center** and all failed.
-- Not the cause (v0.6, v0.7 still refused): SKILL.md size (all under 20,000 chars in v0.6+); manifest version 0.x (v0.7 = 1.7.0; `atk validate --package-file` passes all 59 rules).
-- Admin-deployed `spaarke-decisions` (installed fine; `src/solutions/CopilotPlugins/spaarke/appPackage/manifest.json`): version 1.0.0, ONE instructions-only skill, folder `skills/x` (no `./`), privacy/terms URLs `/privacy` `/terms`. Our probe: Python skill, `./skills/x`, 8 skills, privacy=terms=website. The no-script zip changes only the Python skill. Next candidates if that fails: `./` prefix, skill count, URLs.
-- If admin center refuses script skills, our accelerator plugins (Python, versions 0.1.x) can't be admin-deployed as built → record in `results.md` + `notes/copilot-app-components.md`, tell coordination + mcp-r1.
+### Admin-upload finding (2026-11-27, settled)
+- The admin center refuses an app id already uploaded through Cowork › Customize › Plugins, even after removal ("We couldn't validate this manifest file", no detail). New id = accepted. Size and 0.x version were not the cause. Recorded in `results.md` (WP-6 setup, Correction 2) and `copilot-app-components.md`.
+- Open: does the admin center accept skills that ship Python, on a fresh id? (accepted zip had none). Accelerator packages use a fixed uuid5 id per package (`build_accelerator.py`), so an id scheme for Cowork-tested vs admin-deployed packages is needed before org deployment.
 
 ## Active lanes
 

@@ -354,14 +354,16 @@ and tell me, so copilot-platform-coordination can update its inventory. **Result
 
 **Why.** WP-5 showed Word desktop runs our fixed JavaScript. A real Word edition needs three more things: Copilot
 fills in a list of edits while our code stays fixed; our code can report a problem back to Copilot; and the code
-can be as long as a real redline applier. Needs **probe plugin v0.7** (`Spaarke Word probe plugin v0.7.zip`; the admin-center upload refused v0.5 and v0.6, most likely because their manifest version started with 0),
-which adds five skills: `spaarke-word-probe-edits`, `spaarke-word-probe-error` and
+can be as long as a real redline applier. Needs **probe plugin v0.7 with a new app id**
+(`Spaarke Word probe plugin v0.7 no script new id.zip`, app id `9248c601-…`). The admin center refused every
+package that reused the app id from the Cowork uploads (`results.md`, WP-6 setup). This one has no Python skill;
+WP-6 doesn't use it. It adds five skills: `spaarke-word-probe-edits`, `spaarke-word-probe-error` and
 `spaarke-word-probe-size-5k` / `-10k` / `-17k`. Their code is already in the form Word's runner used in WP-5 run 3,
 so Copilot shouldn't need to change any line.
 
 **Setup (once):**
-1. Cowork › Customize › Plugins: remove **Spaarke Word Probe** (v0.4), then **Upload** v0.7 (Only you; or in the admin center, Tools › Upload, scoped to just you). If the admin center refuses it, try Cowork › Customize › Plugins › Upload (the route v0.4 used) and tell me which route worked. Wait until
-   it shows.
+1. Admin center, Tools › Upload, scoped to just you: the new-id zip above (done 2026-11-27, accepted). Wait until
+   it shows in Word's Copilot pane.
 2. Word desktop: **new blank document**. Copilot pane: **Spaarke MCP off**; **Spaarke Word Probe** on. If the new
    skills don't show in **+**, close and reopen Word.
 3. Use a **new Copilot chat for each run**, and pick the skill's chip from **+** first.

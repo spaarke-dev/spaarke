@@ -857,3 +857,27 @@ doesn't. v0.7 ships manifest version 1.7.0 and passes all 59 validator rules. **
 accelerator plugins (versions 0.1.x) can't be admin-deployed until their manifest version starts at 1. That matters
 for the org-wide route. The 20,000-character SKILL.md gate stays as a precaution (documented for Chat and
 declarative agents).
+
+**Correction 2 (owner, 2026-11-27): the cause is the reused app id.** v0.7 (1.7.0) was refused too. Two diagnostic
+builds of v0.7 followed, both through the admin center, scoped to the owner:
+- `v0.7 no script.zip` (Python skill dropped, same app id `b09514ee-…`): **refused**, same message.
+- `v0.7 no script new id.zip` (`--fresh-id`, app id `9248c601-e4c2-5d92-89f0-833ebaed526f`): **accepted**.
+
+Every refused upload (v0.5–v0.7) reused the app id that Cowork's own upload had used for v0.1–v0.4. That plugin had
+been removed in Cowork before each try. **Finding: the admin center refuses a package whose app id was already
+uploaded through Cowork › Customize › Plugins, even after that plugin is removed; a new app id is needed.** The
+owner had met this before, with another package. The error says nothing about the id ("We couldn't validate this
+manifest file").
+
+What this does and doesn't settle:
+- Size and the 0.x version were never the cause of these refusals; both rode along with the reused id. Whether the
+  admin center also enforces either rule on a fresh id is untested. Our gates keep both (SKILL.md ≤ 20,000
+  characters; manifest version from 1.x).
+- Whether the admin center accepts a skill that ships Python scripts is **untested**: the accepted zip has no
+  Python skill. That's open for the org route of our accelerator plugins.
+- **Our accelerator plugins carry a fixed id per package** (`build_accelerator.py`:
+  `uuid5(NAMESPACE_URL, "https://spaarke.com/accelerators/<pkg>")`). Any package already uploaded through Cowork
+  can't then go through the admin center with the same id. Before an org deployment, decide the id scheme (for
+  example, one id for Cowork tests and another for admin deployment).
+
+WP-6 runs on the accepted zip (`v0.7 no script new id`); none of 6a–6e needs the Python skill.

@@ -20,6 +20,12 @@ and §10 without renumbering. Instructions alone did not hold the redline rules;
 | Table and redline in one pass | Yes: plan table, one approval card, then all files | Only as far as the model follows its instructions |
 | Cost | Cowork credits per step | Within the Copilot licence |
 
+**Installing a plugin: one app id per route (2026-11-27, WP-6 setup).** The admin center (Tools › Upload) refuses a
+plugin whose app id was already uploaded through Cowork › Customize › Plugins, even after it's removed there. The
+only message is "We couldn't validate this manifest file". A new app id fixes it. Our accelerator builds give each
+package a fixed id, so a package tested through Cowork needs a different id for admin deployment. Still untested:
+whether the admin center accepts skills that ship Python scripts. Detail: `poc-e2e/results.md`, WP-6 setup.
+
 ## Where each piece goes
 
 | Piece | Goes in | Used by | Status |
